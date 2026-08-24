@@ -626,18 +626,15 @@ def factor_fiducial_waveform(
         f = domain.get_sample_frequencies_astype(data)
 
     # Expand across possible batch dimension.
-    if type(chirp_mass) == np.float64 or type(chirp_mass) == float:
-        # Use np.outer.squeeze instead of chirp_mass * f, as the latter has a
-        # different precision, and we don't want the behaviour of this function to
-        # depend on whether chirp_mass is an array or float.
+    if isinstance(chirp_mass, (int, float, np.floating)):
+        # np.outer promotes consistently whether chirp_mass is a scalar or an
+        # array, so the phase precision does not depend on the input form.
         mc_f = np.outer(chirp_mass, f).squeeze()
-        if f[0] == 0.0:
-            mc_f[0] = 1.0
-    elif type(chirp_mass) == np.ndarray:
+    elif isinstance(chirp_mass, np.ndarray):
         mc_f = np.outer(chirp_mass, f)
         if mass_ratio is not None:
             mass_ratio = mass_ratio[:, None]
-    elif type(chirp_mass) == torch.Tensor:
+    elif isinstance(chirp_mass, torch.Tensor):
         # torch.outer promotes to the wider dtype (a 0-d tensor would not: the
         # dimensioned float32 `f` would win), so the phase stays float64.
         mc_f = torch.outer(chirp_mass.reshape(-1), f)

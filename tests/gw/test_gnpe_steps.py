@@ -117,8 +117,8 @@ def context():
 
 def _factors():
     model = _MockGNPEModel()
-    flow = GNPEFlowFactor.from_model(model, aliases={"ra": "ra@t_ref"})
-    return flow, GNPEKernelFactor.from_model(model)
+    flow = GNPEFlowFactor(model, aliases={"ra": "ra@t_ref"})
+    return flow, GNPEKernelFactor(model)
 
 
 def _proxies(kernel, context, n):

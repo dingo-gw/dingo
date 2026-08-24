@@ -21,18 +21,9 @@ import pandas as pd
 from bilby.gw.prior import BBHPriorDict
 
 from dingo.core.inference.composer import ChainComposer
-from dingo.core.inference.steps import (
-    FlowFactor,
-    SampleTableFactor,
-)
+from dingo.core.inference.steps import SampleTableFactor
 from dingo.gw.inference.context import GWSamplerContext
-from dingo.gw.inference.sampler import (
-    _delta_prior_steps,
-    _ra_adjustments,
-    _proxy_offset_steps,
-    _ra_aliases,
-    _ra_to_event_steps,
-)
+from dingo.gw.inference.sampler import single_network_steps
 
 
 def chirp_mass_scan_grid(model_metadata: dict, overlap_factor: int = 2) -> np.ndarray:
@@ -140,16 +131,8 @@ def chirp_mass_scan(
     grid = chirp_mass_scan_grid(metadata, overlap_factor)
 
     context = GWSamplerContext.from_model(model, event_data, event_metadata)
-    flow = FlowFactor.from_model(
-        model, aliases=_ra_aliases(inference_parameters + context_parameters)
-    )
-    ra_to_training, ra_to_event = _ra_adjustments(context_parameters)
-    tail_steps = (
-        _proxy_offset_steps(inference_parameters, context_parameters)
-        + ra_to_event
-        + _ra_to_event_steps(inference_parameters)
-        + _delta_prior_steps(context.prior, inference_parameters)
-    )
+    # The same chain as `from_model` builds, rooted here in the grid table.
+    tail_steps = single_network_steps(model, context.prior)
     # Sweep the grid in blocks: a fixed table roots the chain and the flow draws
     # `num_samples` per table row, so the block size bounds both the transient
     # base-domain memory of the row-wise data preparation and the network batch.
@@ -164,9 +147,7 @@ def chirp_mass_scan(
         table.update(
             {k: np.full(len(block), v, dtype=np.float32) for k, v in pins.items()}
         )
-        composer = ChainComposer(
-            [SampleTableFactor(table)] + ra_to_training + [flow] + tail_steps
-        )
+        composer = ChainComposer([SampleTableFactor(table)] + tail_steps)
         out, _ = composer.sample_and_log_prob(num_samples, context)
         frames.append(pd.DataFrame({k: v.cpu().numpy() for k, v in out.items()}))
     theta = pd.concat(frames, ignore_index=True)
@@ -176,6 +157,10 @@ def chirp_mass_scan(
     prior_keys = [k for k in context.prior if k in theta.columns]
     log_prior = context.prior.ln_prob(theta[prior_keys], axis=0)
     theta = theta.iloc[np.flatnonzero(np.isfinite(log_prior))]
+    if len(theta) == 0:
+        raise ValueError(
+            "No scan draws fall within the prior; cannot select a trigger value."
+        )
 
     # Exact likelihood on the event data -- on the base domain for multibanded
     # models -- marginalized over the (unsampled) phase.
@@ -188,7 +173,7 @@ def chirp_mass_scan(
         phase_marginalization_kwargs={"approximation_22_mode": True}
     )
     likelihood.return_aux_snr = True
-    theta_likelihood = theta[[c for c in theta.columns if c != "chirp_mass_proxy"]]
+    theta_likelihood = theta[prior_keys]
     log_likelihood, snr = likelihood.log_likelihood_multi(
         theta_likelihood, num_processes=num_processes
     ).T

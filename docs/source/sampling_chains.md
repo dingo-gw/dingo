@@ -312,7 +312,7 @@ from dingo.gw.inference.context import GWSamplerContext
 from dingo.gw.inference.steps import RAToEventFrame
 
 context = GWSamplerContext.from_model(model, event_data, event_metadata)
-flow = FlowFactor.from_model(model, aliases={"ra": "ra@t_ref"})
+flow = FlowFactor(model, aliases={"ra": "ra@t_ref"})
 composer = ChainComposer([flow, RAToEventFrame()])
 
 samples = composer.sample(10_000, context, batch_size=5_000)

@@ -124,7 +124,7 @@ class _FakeDataContext:
 @pytest.fixture()
 def sampler():
     """A ``ComposedSampler`` over a single unconditional ``FlowFactor`` (context-free)."""
-    factor = FlowFactor.from_model(_build_unconditional_model())
+    factor = FlowFactor(_build_unconditional_model())
     return ComposedSampler(ChainComposer([factor]), context=None)
 
 
@@ -158,16 +158,14 @@ def test_flow_factor_log_prob_round_trip_matches_sampling_log_prob():
     flow, including the change-of-variables correction (-sum(log(std))). The fake model
     used in ``test_factors`` is deterministic and cannot reach this path.
     """
-    factor = FlowFactor.from_model(_build_unconditional_model())
+    factor = FlowFactor(_build_unconditional_model())
     torch.manual_seed(0)
     samples, log_prob = factor.sample_and_log_prob(20, context=None)
     recomputed = factor.log_prob(samples, context=None)
     # The network runs in float32, and sampling vs. log_prob use the flow's forward
     # vs. inverse transforms, which round-trip only to the float32 floor (observed
     # ~1e-6); atol=1e-5 leaves ~10x margin.
-    np.testing.assert_allclose(
-        recomputed.numpy(), log_prob.numpy(), atol=1e-5
-    )
+    np.testing.assert_allclose(recomputed.numpy(), log_prob.numpy(), atol=1e-5)
 
 
 def test_conditional_samples_depend_on_context():
@@ -178,7 +176,7 @@ def test_conditional_samples_depend_on_context():
     variation. This is the ``FlowFactor`` branch that draws from the shared data
     context (an untrained flow + embedding network suffices).
     """
-    factor = FlowFactor.from_model(_build_conditional_model())
+    factor = FlowFactor(_build_conditional_model())
     context_a = _FakeDataContext(torch.randn(*DATA_SHAPE))
     context_b = _FakeDataContext(torch.randn(*DATA_SHAPE))
 
@@ -208,7 +206,7 @@ def test_conditional_log_prob_round_trip_matches_sampling_log_prob():
     squeezed back out); ``log_prob`` instead expands the data across the sample rows
     (``data.expand(num_samples, ...)``) -- the only CI coverage of that expand path.
     """
-    factor = FlowFactor.from_model(_build_conditional_model())
+    factor = FlowFactor(_build_conditional_model())
     context = _FakeDataContext(torch.randn(*DATA_SHAPE))
     torch.manual_seed(0)
     samples, log_prob = factor.sample_and_log_prob(20, context)

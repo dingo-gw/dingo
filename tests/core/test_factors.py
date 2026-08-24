@@ -158,6 +158,10 @@ class _NoDensityStep:
     draws = True
     consumes = ()
 
+    @property
+    def produces(self):
+        return self.parameters
+
     def __init__(self, name, conditioning=()):
         self.parameters = [name]
         self.conditioning = list(conditioning)
@@ -763,7 +767,7 @@ def test_unconditional_flow_factor():
     # A density-recovery NDE takes no input: the factor never touches the context
     # (context=None), reads the model's own standardization and parameters, and
     # serves as a chain root (e.g. the single-step GNPE proxy source).
-    factor = FlowFactor.from_model(_FakeUncondModel())
+    factor = FlowFactor(_FakeUncondModel())
     assert factor.unconditional
     assert factor.parameters == ["H1_time_proxy"]
     assert factor.conditioning == []

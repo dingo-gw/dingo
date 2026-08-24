@@ -28,13 +28,6 @@ from dingo.core.inference.steps import (
 )
 
 
-def _cat_dict(
-    batches: list[dict[str, torch.Tensor]],
-) -> dict[str, torch.Tensor]:
-    """Concatenate a list of `name -> tensor` dicts along dim 0 (re-joining batches)."""
-    return {k: torch.cat([b[k] for b in batches]) for k in batches[0]}
-
-
 def chunk_and_concat(
     total: int,
     batch_size: Optional[int],
@@ -70,12 +63,15 @@ def chunk_and_concat(
         block, lp = run_once(min(bs, total - start))
         sample_parts.append(block)
         lp_parts.append(lp)
-    samples = _cat_dict(sample_parts)
+    # Re-join the per-chunk column dicts along the row dimension.
+    samples = {
+        k: torch.cat([part[k] for part in sample_parts]) for k in sample_parts[0]
+    }
     log_prob = None if lp_parts[0] is None else torch.cat(lp_parts)
     return samples, log_prob
 
 
-def _interleave_rows(samples, total, n):
+def _repeat_rows(samples, total, n):
     """Repeat each row of the carried columns `n` times (the copies of a row are
     adjacent), keeping the running log probability aligned."""
     samples = {k: v.repeat_interleave(n, 0) for k, v in samples.items()}
@@ -168,7 +164,7 @@ class ChainComposer:
             # emit side-channel columns (`produces`). Only a Reparametrization may
             # overwrite existing columns (its own inputs): it is invertible, so
             # `log_prob` can restore them.
-            emitted = set(getattr(step, "produces", step.parameters))
+            emitted = set(step.produces)
             replaceable = (
                 set(step.conditioning) if isinstance(step, Reparametrization) else set()
             )
@@ -256,29 +252,31 @@ class ChainComposer:
         """
         samples: dict[str, torch.Tensor] = {}
         total: torch.Tensor | float | None = 0.0
-        pending: Optional[int] = num_samples  # lands on the first step that draws
+        # The requested count lands on the first step that draws.
+        num_samples_pending: Optional[int] = num_samples
         for stage in self.stages:
             step = stage.step
             if not step.draws:
-                k = 1
-            elif pending is not None:
-                k, pending = pending * stage.fan_out, None
+                per_row = 1
+            elif num_samples_pending is not None:
+                per_row = num_samples_pending * stage.fan_out
+                num_samples_pending = None
             else:
-                k = stage.fan_out
+                per_row = stage.fan_out
             rows = _n_rows(samples) if samples else 1
             given = {c: samples[c] for c in step.conditioning}
             block, lp = step.sample_and_log_prob(
-                k if step.conditioning else rows * k, context, given
+                per_row if step.conditioning else rows * per_row, context, given
             )
-            if samples and k > 1:
-                samples, total = _interleave_rows(samples, total, k)
+            if samples and per_row > 1:
+                samples, total = _repeat_rows(samples, total, per_row)
             samples.update(block)
             for c in step.consumes:
                 samples.pop(c, None)
             total = None if lp is None or total is None else total + lp
-        if pending is not None and pending > 1:
+        if num_samples_pending is not None and num_samples_pending > 1:
             # No step draws (a chain of pins only): repeat the rows instead.
-            samples, total = _interleave_rows(samples, total, pending)
+            samples, total = _repeat_rows(samples, total, num_samples_pending)
         return samples, total
 
     def log_prob(
@@ -382,6 +380,11 @@ class GibbsBlock:
     draws = True
     consumes: tuple[str, ...] = ()
 
+    @property
+    def produces(self) -> list[str]:
+        """The emitted columns (the swept parameter blocks)."""
+        return self.parameters
+
     def __init__(self, init_factor: Factor, factors: list[Factor], num_iterations: int):
         """
         Parameters
@@ -425,7 +428,17 @@ class GibbsBlock:
             The swept parameter blocks, one row per walker.
         log_prob : None
         """
-        return self._run_once(num_samples, context), None
+        # Seed the state (the walkers are the rows), then sweep the factors: each
+        # conditions on the current state and overwrites its own block, one sample
+        # per walker.
+        seed, _ = self.init_factor.sample_and_log_prob(num_samples, context)
+        state = dict(seed)
+        for _ in range(self.num_iterations):
+            for factor in self.factors:
+                given = {k: state[k] for k in factor.conditioning}
+                block, _ = factor.sample_and_log_prob(1, context, given)
+                state.update(block)
+        return {p: state[p] for p in self.parameters}, None
 
     def describe(self) -> dict:
         """Describe the Gibbs structure, with nested descriptors for the init factor
@@ -436,20 +449,6 @@ class GibbsBlock:
             "init": self.init_factor.describe(),
             "factors": [factor.describe() for factor in self.factors],
         }
-
-    def _run_once(
-        self, num_samples: int, context: SamplerContext
-    ) -> dict[str, torch.Tensor]:
-        # Seed the chain (e.g. an init network's detector times); the walkers are the rows.
-        seed, _ = self.init_factor.sample_and_log_prob(num_samples, context)
-        state = dict(seed)
-        for _ in range(self.num_iterations):
-            for factor in self.factors:
-                given = {k: state[k] for k in factor.conditioning}
-                # One sample per walker (Gibbs is 1:1); walkers are the conditioning rows.
-                block, _ = factor.sample_and_log_prob(1, context, given)
-                state.update(block)
-        return {p: state[p] for p in self.parameters}
 
 
 class ComposedSampler:

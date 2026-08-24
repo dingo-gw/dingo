@@ -549,34 +549,28 @@ class GWSamplerContext:
                 "which this context does not carry."
             )
 
-        # Marginalizing over a parameter needs the (uniform) prior the network
-        # marginalized over; use it to parameterize the requested marginalization.
-        # Bounds already provided by the caller win: the importance-sampling layer
-        # validates against its evolved prior (prior updates, time/phase
-        # split-offs), which this sample-free context cannot see, and passes
-        # explicit bounds. The fill below covers standalone (chain) use from the
-        # network's static prior.
+        # The marginalization bounds are the caller's responsibility: the
+        # importance-sampling layer validates them against its evolved prior
+        # (prior updates, time/phase split-offs), which this sample-free context
+        # cannot see.
         if time_marginalization_kwargs is not None and not (
             "t_lower" in time_marginalization_kwargs
             and "t_upper" in time_marginalization_kwargs
         ):
-            time_prior = self._marginalized_prior("geocent_time")
-            if time_prior is None:
-                raise NotImplementedError(
-                    "Time marginalization is not compatible with a non-marginalized "
-                    "network."
-                )
-            if type(time_prior) != Uniform:
-                raise NotImplementedError(
-                    "Only uniform time prior is supported for time marginalization."
-                )
-            time_marginalization_kwargs = {
-                **time_marginalization_kwargs,
-                "t_lower": time_prior.minimum,
-                "t_upper": time_prior.maximum,
-            }
+            raise ValueError(
+                "time_marginalization_kwargs requires explicit t_lower / t_upper "
+                "bounds."
+            )
         if phase_marginalization_kwargs is not None:
-            phase_prior = self._marginalized_prior("phase")
+            # Requires a phase-marginalized network (phase not inferred) with the
+            # standard uniform phase prior.
+            data_settings = self.model_metadata["train_settings"]["data"]
+            if "phase" in data_settings["inference_parameters"]:
+                raise ValueError(
+                    "Phase marginalization requires a phase-marginalized network, "
+                    "but this network infers phase."
+                )
+            phase_prior = self.prior.get("phase")
             if not (
                 isinstance(phase_prior, Uniform)
                 and (phase_prior._minimum, phase_prior._maximum) == (0, 2 * np.pi)
@@ -632,14 +626,3 @@ class GWSamplerContext:
         if self.event_metadata is None:
             return default
         return self.event_metadata.get(key, default)
-
-    def _marginalized_prior(self, name: str):
-        """The prior over `name` if the network marginalized it (i.e. `name` is not an
-        inference parameter), else `None` -- used to parameterize likelihood
-        marginalization over time / phase."""
-        if (
-            name
-            in self.model_metadata["train_settings"]["data"]["inference_parameters"]
-        ):
-            return None
-        return self.prior.get(name)

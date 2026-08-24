@@ -9,7 +9,6 @@ import numpy as np
 import pandas as pd
 import torch
 from astropy.time import Time
-from bilby.core.prior import PriorDict
 from bilby.gw.detector import InterferometerList
 from torchvision.transforms import Compose
 from dingo.core.density import (
@@ -187,13 +186,9 @@ def _build_gnpe_transforms(model: BasePosteriorModel):
     Returns
     -------
     transform_pre, transform_post : Compose
-    gnpe_parameters : list[str]
-        The GNPE input parameters (detector times).
-    inference_parameters : list[str]
-    kernel : PriorDict
-        The proxy perturbation kernel.
     gnpe_transform : GNPECoalescenceTimes
-        The blur transform itself, shared so the kernel factor can call `sample_proxies`.
+        The blur transform; it carries the kernel and the detector-time parameter
+        names (`input_parameter_names`).
     """
     meta = model.base_metadata
     data_settings = meta["train_settings"]["data"]
@@ -225,14 +220,6 @@ def _build_gnpe_transforms(model: BasePosteriorModel):
         ),
         RenameKey("waveform", "data"),
     ]
-    gnpe_parameters: list[str] = []
-    kernel = PriorDict()
-    for transform in transform_pre:
-        if isinstance(transform, GNPEBase):
-            gnpe_parameters += transform.input_parameter_names
-            for k, v in transform.kernel.items():
-                kernel[k] = v
-
     inference_parameters = data_settings["inference_parameters"]
     transform_post = [
         SelectStandardizeRepackageParameters(
@@ -247,14 +234,7 @@ def _build_gnpe_transforms(model: BasePosteriorModel):
         ),
         GetDetectorTimes(ifo_list, data_settings["ref_time"]),
     ]
-    return (
-        Compose(transform_pre),
-        Compose(transform_post),
-        gnpe_parameters,
-        inference_parameters,
-        kernel,
-        gnpe_transform,
-    )
+    return Compose(transform_pre), Compose(transform_post), gnpe_transform
 
 
 class GNPEKernelFactor(Factor):
@@ -269,26 +249,20 @@ class GNPEKernelFactor(Factor):
     proxies and the detector times. One proxy per detector-time row.
     """
 
-    def __init__(self, gnpe_transform: GNPEBase, gnpe_parameters: list[str]):
+    def __init__(self, model: BasePosteriorModel):
         """
         Parameters
         ----------
-        gnpe_transform : GNPEBase
-            The blur transform supplying the kernel and `sample_proxies`.
-        gnpe_parameters : list[str]
-            The detector-time parameters perturbed into proxies.
+        model : BasePosteriorModel
+            The GNPE main network; its metadata defines the kernel and the
+            detector-time parameters.
         """
+        _, _, gnpe_transform = _build_gnpe_transforms(model)
         self.gnpe = gnpe_transform
-        self.gnpe_parameters = gnpe_parameters
-        self.parameters = [p + "_proxy" for p in gnpe_parameters]
-        self.conditioning = list(gnpe_parameters)
+        self.gnpe_parameters = list(gnpe_transform.input_parameter_names)
+        self.parameters = [p + "_proxy" for p in self.gnpe_parameters]
+        self.conditioning = list(self.gnpe_parameters)
         self.kernel = gnpe_transform.kernel
-
-    @classmethod
-    def from_model(cls, model: BasePosteriorModel) -> "GNPEKernelFactor":
-        """Build from the main model's metadata (the kernel / blur transform)."""
-        _, _, gnpe_parameters, _, _, gnpe_transform = _build_gnpe_transforms(model)
-        return cls(gnpe_transform, gnpe_parameters)
 
     def sample_and_log_prob(self, num_samples, context, given=None):
         """Blur the conditioning detector times into proxies; `num_samples` must be 1
@@ -335,43 +309,33 @@ class GNPEFlowFactor(Factor):
     """
 
     def __init__(
-        self,
-        model: BasePosteriorModel,
-        transform_pre: Compose,
-        transform_post: Compose,
-        gnpe_parameters: list[str],
-        parameters: list[str],
-        aliases: Optional[dict[str, str]] = None,
+        self, model: BasePosteriorModel, aliases: Optional[dict[str, str]] = None
     ):
         """
         Parameters
         ----------
         model : BasePosteriorModel
-            The GNPE main network.
-        transform_pre : Compose
-            Per-iteration pre-network transforms (proxy bookkeeping, time shift,
-            standardization).
-        transform_post : Compose
-            Post-network transforms (de-standardize, recompute detector times).
-        gnpe_parameters : list[str]
-            The detector-time parameters.
-        parameters : list[str]
-            The network's trained inference parameters.
+            The GNPE main network; the per-iteration transforms are built from its
+            metadata.
         aliases : dict[str, str], optional
             Trained-name to exposed-name map (e.g. `{"ra": "ra@t_ref"}`).
         """
         self.model = model
-        self.transform_pre = transform_pre
-        self.transform_post = transform_post
-        self.gnpe_parameters = gnpe_parameters
-        self.proxy_parameters = [p + "_proxy" for p in gnpe_parameters]
+        self.transform_pre, self.transform_post, gnpe_transform = (
+            _build_gnpe_transforms(model)
+        )
+        self.gnpe_parameters = list(gnpe_transform.input_parameter_names)
+        self.proxy_parameters = [p + "_proxy" for p in self.gnpe_parameters]
         self.aliases = aliases or {}
-        self._net_parameters = parameters
-        self.parameters = [self.aliases.get(p, p) for p in parameters]
+        self._net_parameters = model.base_metadata["train_settings"]["data"][
+            "inference_parameters"
+        ]
+        self.parameters = [self.aliases.get(p, p) for p in self._net_parameters]
         self.conditioning = list(self.proxy_parameters)
-        # For log_prob: the sampling path de-standardizes (and corrects the log-prob)
-        # inside transform_post, but evaluating at a point needs the forward map too.
-        # The model's own standardization (network-bound, like FlowFactor's).
+        # For log_prob: the sampling path de-standardizes (and corrects the
+        # log-prob) inside transform_post, but evaluating at a point needs the
+        # forward map too. The model's own standardization (network-bound, like
+        # FlowFactor's).
         std = model.metadata["train_settings"]["data"]["standardization"]
         self.standardization = Standardization(std["mean"], std["std"])
 
@@ -379,30 +343,6 @@ class GNPEFlowFactor(Factor):
     def produces(self) -> list[str]:
         """Emitted columns: the inference block plus the recomputed detector times."""
         return self.parameters + self.gnpe_parameters
-
-    @classmethod
-    def from_model(
-        cls, model: BasePosteriorModel, aliases: Optional[dict[str, str]] = None
-    ) -> "GNPEFlowFactor":
-        """Build the GNPE per-iteration transforms from the main model's metadata.
-
-        Parameters
-        ----------
-        model : BasePosteriorModel
-            The GNPE main model.
-        aliases : dict[str, str], optional
-            Trained-name to canonical-name map (e.g. `{"ra": "ra@t_ref"}`).
-
-        Returns
-        -------
-        GNPEFlowFactor
-        """
-        pre, post, gnpe_parameters, inference_parameters, _, _ = _build_gnpe_transforms(
-            model
-        )
-        return cls(
-            model, pre, post, gnpe_parameters, inference_parameters, aliases=aliases
-        )
 
     def sample_and_log_prob(self, num_samples, context, given=None):
         """Draw `num_samples` parameter sets per proxy row (the draws for a row are

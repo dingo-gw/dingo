@@ -181,22 +181,11 @@ class Result(CoreResult):
             return None
         from dingo.gw.inference.context import GWSamplerContext
 
-        try:
-            # base_metadata resolves the unconditional ("base") indirection, so
-            # density-recovery results reconstruct from the analysis metadata.
-            context = GWSamplerContext.from_model_metadata(
-                self.base_metadata, self.context, self.event_metadata
-            )
-        except (KeyError, TypeError) as e:
-            # Settings are not a full model metadata (e.g. minimal test payloads);
-            # the result is then transport-only. Make the degradation visible
-            # rather than silent.
-            print(
-                f"Could not reconstruct a sampler context from the result settings "
-                f"({type(e).__name__}: {e}); prior, domain, and likelihood are "
-                f"unavailable."
-            )
-            return None
+        # base_metadata resolves the unconditional ("base") indirection, so
+        # density-recovery results reconstruct from the analysis metadata.
+        context = GWSamplerContext.from_model_metadata(
+            self.base_metadata, self.context, self.event_metadata
+        )
         # Importance-sampling settings updates change the data representation, which
         # lives on a derived context (same event, different representation).
         metadata = self.importance_sampling_metadata or {}
@@ -482,53 +471,6 @@ class Result(CoreResult):
         # Rebuild the prior (which will include calibration priors from prior_update)
         self._build_prior()
 
-    def _sample_synthetic_phase_chain(
-        self, theta, within_prior, approximation_22_mode, num_processes
-    ):
-        """Synthetic phase as a chain over the sampler context: the root emits the
-        within-prior proposal samples with their stored log-prob, and
-        `SyntheticPhaseFactor` draws `phase` -- the composer's ordinary log-prob fold
-        returns the joint proposal density `log q(theta) + log q(phase | theta, d)`,
-        which becomes the samples' log_prob. The factor builds the phase-full
-        likelihood from the sampler context, whose (possibly derived) representation
-        encodes the importance-sampling view (base domain, rebuilt domain, frequency
-        updates). Out-of-prior rows get `phase = 0` and `log_prob = nan` (they
-        receive zero weight in importance sampling regardless)."""
-        from dingo.core.inference.composer import ChainComposer
-        from dingo.core.inference.steps import SampleTableFactor
-        from dingo.gw.inference.steps import SyntheticPhaseFactor
-
-        theta_within = theta.iloc[np.flatnonzero(within_prior)]
-        table = SampleTableFactor(
-            {k: theta_within[k].to_numpy() for k in theta_within.columns},
-            log_prob=self.samples["log_prob"].to_numpy()[within_prior],
-        )
-        factor = SyntheticPhaseFactor(
-            conditioning=list(theta_within.columns),
-            n_grid=self.synthetic_phase_kwargs["n_grid"],
-            approximation_22_mode=approximation_22_mode,
-            uniform_weight=self.synthetic_phase_kwargs.get("uniform_weight", 0.01),
-            num_processes=num_processes,
-        )
-        chain = ChainComposer([table, factor])
-        # One phase draw per proposal sample (the table root is emitted once).
-        out, log_prob = chain.sample_and_log_prob(1, self.sampler_context)
-
-        phase_array = np.full(len(theta), 0.0)
-        phase_array[within_prior] = out["phase"].cpu().numpy()
-        log_prob_array = np.full(len(theta), np.nan)
-        log_prob_array[within_prior] = log_prob.cpu().numpy()
-        self.samples["phase"] = phase_array
-        self.samples["log_prob"] = log_prob_array
-
-        # Insert the phase prior in the prior, since now the phase is present.
-        self.prior["phase"] = self.phase_prior
-        self.phase_prior = None
-        # Any previously built likelihood does not describe the now-phase-full
-        # samples; importance sampling rebuilds with its own marginalization
-        # settings.
-        self.likelihood = None
-
     def sample_synthetic_phase(self, synthetic_phase_kwargs):
         """
         Sample a synthetic phase for the waveform. This is a post-processing step
@@ -612,9 +554,44 @@ class Result(CoreResult):
         print(f"Estimating synthetic phase for {num_valid_samples} samples.")
         t0 = time.time()
 
-        self._sample_synthetic_phase_chain(
-            theta, within_prior, approximation_22_mode, num_processes
+        # Synthetic phase as a chain over the sampler context: the root emits the
+        # within-prior proposal samples with their stored log-prob, and
+        # SyntheticPhaseFactor draws `phase`; the composer's ordinary log-prob
+        # fold returns the joint proposal density.
+        from dingo.core.inference.composer import ChainComposer
+        from dingo.core.inference.steps import SampleTableFactor
+        from dingo.gw.inference.steps import SyntheticPhaseFactor
+
+        theta_within = theta.iloc[np.flatnonzero(within_prior)]
+        table = SampleTableFactor(
+            {k: theta_within[k].to_numpy() for k in theta_within.columns},
+            log_prob=self.samples["log_prob"].to_numpy()[within_prior],
         )
+        factor = SyntheticPhaseFactor(
+            conditioning=list(theta_within.columns),
+            n_grid=self.synthetic_phase_kwargs["n_grid"],
+            approximation_22_mode=approximation_22_mode,
+            uniform_weight=self.synthetic_phase_kwargs.get("uniform_weight", 0.01),
+            num_processes=num_processes,
+        )
+        chain = ChainComposer([table, factor])
+        # One phase draw per proposal sample (the table root is emitted once).
+        out, log_prob = chain.sample_and_log_prob(1, self.sampler_context)
+
+        phase_array = np.full(len(theta), 0.0)
+        phase_array[within_prior] = out["phase"].cpu().numpy()
+        log_prob_array = np.full(len(theta), np.nan)
+        log_prob_array[within_prior] = log_prob.cpu().numpy()
+        self.samples["phase"] = phase_array
+        self.samples["log_prob"] = log_prob_array
+
+        # Insert the phase prior in the prior, since now the phase is present.
+        self.prior["phase"] = self.phase_prior
+        self.phase_prior = None
+        # Any previously built likelihood does not describe the now-phase-full
+        # samples; importance sampling rebuilds with its own marginalization
+        # settings.
+        self.likelihood = None
         print(f"Done. This took {time.time() - t0:.2f} s.")
 
     def get_samples_bilby_phase(self, num_processes=1):

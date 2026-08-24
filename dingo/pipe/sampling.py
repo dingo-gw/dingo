@@ -275,7 +275,7 @@ class SamplingInput(Input):
         result = self.dingo_sampler.to_result()
         nde_settings = settings["nde_settings"]
         nde_settings["training"]["device"] = str(self._main_model.device)
-        proxy_parameters = GNPEKernelFactor.from_model(self._main_model).parameters
+        proxy_parameters = GNPEKernelFactor(self._main_model).parameters
         unconditional_model = result.train_unconditional_flow(
             proxy_parameters,
             nde_settings,
@@ -283,7 +283,7 @@ class SamplingInput(Input):
         )
         self.dingo_sampler = GWComposedSampler.from_singlestep_gnpe(
             self._main_model,
-            FlowFactor.from_model(unconditional_model),
+            FlowFactor(unconditional_model),
             self.context,
             event_metadata=self.event_metadata,
         )

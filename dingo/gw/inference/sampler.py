@@ -47,16 +47,6 @@ def _ra_to_event_steps(inference_parameters: list[str]) -> list:
     return [RAToEventFrame()] if "ra" in inference_parameters else []
 
 
-def _ra_adjustments(context_parameters: list[str]) -> tuple[list, list]:
-    """The RA frame pair for a pinned sky position: rotate the pinned event-frame
-    `ra` into the training frame before the network, and back into the event
-    frame after it. A parameter that is frame-corrected on the output side is
-    inversely corrected on the input side."""
-    if "ra" not in context_parameters:
-        return [], []
-    return [RAToTrainingFrame()], [RAToEventFrame()]
-
-
 def _delta_prior_steps(prior, inference_parameters: list[str]) -> list:
     """Delta-prior parameters the chain does not produce, as a single `DeltaFactor` step
     (or none). These are pinned constants (e.g. an aligned-spin component fixed to 0).
@@ -75,6 +65,45 @@ def _delta_prior_steps(prior, inference_parameters: list[str]) -> list:
         if isinstance(p, DeltaFunction) and k not in inference_parameters
     }
     return [DeltaFactor(fixed)] if fixed else []
+
+
+def single_network_steps(model, prior) -> list:
+    """The steps of a single-network chain, without its root.
+
+    That is: the flow (with the right-ascension frame adjustments for a pinned or
+    inferred sky position), the proxy-offset reconstructions, the rotation to the
+    event frame, and the delta-prior fillers. `from_model` prepends a `DeltaFactor`
+    of the pins when the model has context parameters; the chirp-mass scan prepends
+    a `SampleTableFactor` with one row per proxy grid point.
+
+    Parameters
+    ----------
+    model : BasePosteriorModel
+        The (conditional) model.
+    prior : PriorDict
+        The static prior (`GWSamplerContext.prior`), for the delta-prior fillers.
+
+    Returns
+    -------
+    list of chain steps
+    """
+    data_settings = model.base_metadata["train_settings"]["data"]
+    inference_parameters = data_settings["inference_parameters"]
+    context_parameters = data_settings.get("context_parameters") or []
+    flow = FlowFactor(
+        model, aliases=_ra_aliases(inference_parameters + context_parameters)
+    )
+    # A pinned event-frame sky position is rotated into the training frame before
+    # the network, and back into the event frame after it.
+    ra_pinned = "ra" in context_parameters
+    return (
+        ([RAToTrainingFrame()] if ra_pinned else [])
+        + [flow]
+        + _proxy_offset_steps(inference_parameters, context_parameters)
+        + ([RAToEventFrame()] if ra_pinned else [])
+        + _ra_to_event_steps(inference_parameters)
+        + _delta_prior_steps(prior, inference_parameters)
+    )
 
 
 def _assert_consistent_gnpe_data_prep(init_model, main_model):
@@ -210,11 +239,7 @@ class GWComposedSampler(ComposedSampler):
         """
         context = GWSamplerContext.from_model(model, event_data, event_metadata)
         data_settings = model.base_metadata["train_settings"]["data"]
-        inference_parameters = data_settings["inference_parameters"]
         context_parameters = data_settings.get("context_parameters") or []
-        factor = FlowFactor.from_model(
-            model, aliases=_ra_aliases(inference_parameters + context_parameters)
-        )
         if data_settings.get("gnpe_time_shifts"):
             raise ValueError(
                 "This is a time-GNPE main model (its data are time-shifted by the "
@@ -227,14 +252,9 @@ class GWComposedSampler(ComposedSampler):
                 f"fixed_context_parameters with exactly these keys, got "
                 f"{sorted(fixed_context_parameters or {})}."
             )
-        ra_to_training, ra_to_event = _ra_adjustments(context_parameters)
-        steps = ra_to_training + [factor]
+        steps = single_network_steps(model, context.prior)
         if context_parameters:
             steps = [DeltaFactor(fixed_context_parameters)] + steps
-        steps += _proxy_offset_steps(inference_parameters, context_parameters)
-        steps += ra_to_event
-        steps += _ra_to_event_steps(inference_parameters)
-        steps += _delta_prior_steps(context.prior, inference_parameters)
         return cls(ChainComposer(steps), context)
 
     @classmethod
@@ -281,9 +301,9 @@ class GWComposedSampler(ComposedSampler):
         inference_parameters = main_model.base_metadata["train_settings"]["data"][
             "inference_parameters"
         ]
-        init_factor = FlowFactor.from_model(init_model)
-        kernel_factor = GNPEKernelFactor.from_model(main_model)
-        flow_factor = GNPEFlowFactor.from_model(
+        init_factor = FlowFactor(init_model)
+        kernel_factor = GNPEKernelFactor(main_model)
+        flow_factor = GNPEFlowFactor(
             main_model, aliases=_ra_aliases(inference_parameters)
         )
         gibbs = GibbsBlock(init_factor, [kernel_factor, flow_factor], num_iterations)
@@ -331,10 +351,10 @@ class GWComposedSampler(ComposedSampler):
         inference_parameters = main_model.base_metadata["train_settings"]["data"][
             "inference_parameters"
         ]
-        flow_factor = GNPEFlowFactor.from_model(
+        flow_factor = GNPEFlowFactor(
             main_model, aliases=_ra_aliases(inference_parameters)
         )
-        kernel_factor = GNPEKernelFactor.from_model(main_model)
+        kernel_factor = GNPEKernelFactor(main_model)
         steps = (
             [proxy_source, flow_factor, GNPEKernelCorrection(kernel_factor)]
             + _ra_to_event_steps(inference_parameters)

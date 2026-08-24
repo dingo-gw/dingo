@@ -158,6 +158,12 @@ class Factor(ABC):
     draws = True
     consumes: tuple[str, ...] = ()
 
+    @property
+    def produces(self) -> list[str]:
+        """The emitted columns: `parameters`, unless the step also emits side
+        channels (overridden then)."""
+        return self.parameters
+
     @abstractmethod
     def sample_and_log_prob(
         self,
@@ -243,76 +249,38 @@ class FlowFactor(Factor):
     """
 
     def __init__(
-        self,
-        model: BasePosteriorModel,
-        parameters: list[str],
-        conditioning: Optional[list[str]] = None,
-        context_parameters: Optional[list[str]] = None,
-        aliases: Optional[dict[str, str]] = None,
+        self, model: BasePosteriorModel, aliases: Optional[dict[str, str]] = None
     ):
         """
         Parameters
         ----------
         model : BasePosteriorModel
-            The posterior model (NPE flow, FMPE, ...) wrapped by this factor.
-        parameters : list[str]
-            The network's trained parameter names (standardization is keyed by these).
-        conditioning : list[str], optional
-            Earlier-block parameters this factor conditions on.
-        context_parameters : list[str], optional
-            Network conditioning inputs (GNPE proxies); empty for plain NPE.
+            The posterior model (NPE flow, FMPE, ...) wrapped by this factor. The
+            parameter names and any `context_parameters` are read from its
+            training metadata (for an unconditional NDE these are its own, e.g.
+            the GNPE proxies it was trained on).
         aliases : dict[str, str], optional
-            Map from a trained parameter name to the name exposed in the chain (for
-            example `{"ra": "ra@t_ref"}`), so that a later reparametrization can
-            convert reference frames by name without retraining.
+            Map from a trained parameter name to the name exposed in the chain
+            (for example `{"ra": "ra@t_ref"}`), so that a later reparametrization
+            can convert reference frames by name without retraining.
         """
         self.model = model
+        data_settings = model.metadata["train_settings"]["data"]
         # The network's trained parameter names; standardization is keyed by these.
         # The factor exposes them under their aliases (e.g. ra -> ra@t_ref).
-        self._net_parameters = parameters
+        self._net_parameters = data_settings["inference_parameters"]
         self.aliases = aliases or {}
-        self.parameters = [self.aliases.get(p, p) for p in parameters]
-        self.conditioning = conditioning or []
-        # Network conditioning inputs (GNPE proxies). Empty for plain NPE.
-        self.context_parameters = context_parameters or []
-        data_settings = model.metadata["train_settings"]["data"]
+        self.parameters = [self.aliases.get(p, p) for p in self._net_parameters]
+        # Network conditioning inputs (GNPE proxies, prior-conditioning pins);
+        # empty for plain NPE. The chain may carry a frame-corrected alias of a
+        # trained conditioning name (e.g. `ra@t_ref` for a pinned event-frame `ra`).
+        self.context_parameters = list(data_settings.get("context_parameters") or [])
+        self.conditioning = [self.aliases.get(n, n) for n in self.context_parameters]
         self.unconditional = data_settings.get("unconditional", False)
-        # The model's *own* standardization: an unconditional (density-recovery) NDE
-        # carries its own, distinct from the base model's under metadata["base"].
+        # The model's *own* standardization: an unconditional (density-recovery)
+        # NDE carries its own, distinct from the base model's under metadata["base"].
         std = data_settings["standardization"]
         self.standardization = Standardization(std["mean"], std["std"])
-
-    @classmethod
-    def from_model(
-        cls, model: BasePosteriorModel, aliases: Optional[dict[str, str]] = None
-    ) -> "FlowFactor":
-        """Build a factor from a model, reading the parameter names and the context
-        parameters from its training metadata. (For an unconditional NDE these are its
-        own, for example the GNPE proxies it was trained on.)
-
-        Parameters
-        ----------
-        model : BasePosteriorModel
-            The posterior model to wrap.
-        aliases : dict[str, str], optional
-            Map from a trained parameter name to the name exposed in the chain (for
-            example `{"ra": "ra@t_ref"}`).
-
-        Returns
-        -------
-        FlowFactor
-        """
-        data_settings = model.metadata["train_settings"]["data"]
-        context_parameters = data_settings.get("context_parameters") or []
-        return cls(
-            model=model,
-            parameters=data_settings["inference_parameters"],
-            # The chain may carry a frame-corrected alias of a trained conditioning
-            # name (e.g. `ra@t_ref` for a pinned event-frame `ra`).
-            conditioning=[(aliases or {}).get(n, n) for n in context_parameters],
-            context_parameters=list(context_parameters),
-            aliases=aliases,
-        )
 
     def sample_and_log_prob(self, num_samples, context, given=None):
         """Draw samples from the model.
@@ -581,6 +549,11 @@ class Reparametrization(ABC):
     conditioning: list[str]
     draws = False
 
+    @property
+    def produces(self) -> list[str]:
+        """The emitted columns (the transformed `parameters`)."""
+        return self.parameters
+
     @abstractmethod
     def forward(
         self, given: dict[str, torch.Tensor], context: "SamplerContext"
@@ -758,6 +731,11 @@ class TargetCorrection(ABC):
     draws = False
     consumes: list[str]
 
+    @property
+    def produces(self) -> list[str]:
+        """The emitted columns (the correction's annotation column)."""
+        return self.parameters
+
     @abstractmethod
     def correction(
         self, given: dict[str, torch.Tensor], context: "SamplerContext"
@@ -832,6 +810,7 @@ class Step(Protocol):
     conditioning: list[str]
     draws: bool
     consumes: Union[list[str], tuple[str, ...]]
+    produces: list[str]
 
     def sample_and_log_prob(
         self,
