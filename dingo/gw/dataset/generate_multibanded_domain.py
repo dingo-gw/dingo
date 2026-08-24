@@ -9,11 +9,17 @@ waveform difference threshold until the desired mismatch level is reached.
 
 CLI usage::
 
-    python -m dingo.gw.dataset.generate_multibanded_domain \\
+    dingo_generate_multibanded_domain \\
         --settings_file path/to/settings_wfd_ufd.yaml \\
         --num_samples 1000 \\
         --target_median_mismatch 0.001 \\
         --token_size 16   # for the Dingo-T1 transformer; omit for standard NPE
+
+which is equivalent to::
+
+    python -m dingo.gw.dataset.generate_multibanded_domain \\
+        --settings_file path/to/settings_wfd_ufd.yaml \\
+        ...
 """
 
 import argparse
@@ -166,7 +172,9 @@ def compute_max_decimation_factor(
     increasing decimation factors. For each, it finds the lowest frequency above which
     the 95th-percentile waveform difference falls below ``threshold``, then assigns that
     decimation factor to all bins above that frequency. If the transition frequency for a
-    higher decimation factor is not strictly above the previous one, the search stops.
+    higher decimation factor is not strictly above the previous one, the search stops. The
+    search also stops if the difference never falls below ``threshold``, in which case that
+    decimation factor is not applied anywhere.
 
     Parameters
     ----------
@@ -197,7 +205,16 @@ def compute_max_decimation_factor(
         frequencies_per_decimation_factor,
         diffs_per_decimation_factor,
     ):
-        f_max = f[np.argmax(diff < threshold)]
+        below_threshold = np.where(diff < threshold)[0]
+        if len(below_threshold) == 0:
+            # The difference never drops below the threshold, so this decimation factor
+            # (and any larger one) is not permitted anywhere in the domain.
+            print(
+                f"Not possible to go to higher decimation factors than "
+                f"{max_dec_factor.max()} anywhere in the domain"
+            )
+            break
+        f_max = f[below_threshold[0]]
         if f_max_threshold:
             if f_max_threshold[-1] >= f_max:
                 print(
@@ -571,6 +588,7 @@ def generate_multibanded_domain_settings(
     initial_threshold: float = 5e-3,
     max_iterations: int = 20,
     token_size: Optional[int] = None,
+    difference_over_full_window: bool = False,
 ) -> str:
     """Generate a MultibandedFrequencyDomain settings file targeting a given median mismatch.
 
@@ -619,6 +637,12 @@ def generate_multibanded_domain_settings(
         constrained to contain a whole number of tokens, as required by the Dingo-T1
         transformer tokenizer; use ``16`` to reproduce T1. When ``None`` (default), bands
         are not token-aligned, matching the standard ResNet-embedding NPE pipeline.
+    difference_over_full_window : bool
+        Comparison mode used when computing the whitened waveform differences, see
+        :func:`compute_waveform_difference_per_decimation_factor`. If True, each decimated
+        bin is compared against all original bins in its decimation window (most
+        conservative); if False (default), it is compared against the window center at
+        2x resolution.
 
     Returns
     -------
@@ -671,6 +695,7 @@ def generate_multibanded_domain_settings(
         waveforms=data_whitened["h_cross"],
         ufd=ufd,
         waveforms_2x=data_whitened_2x["h_cross"],
+        difference_over_full_window=difference_over_full_window,
     )
 
     # --- Two-phase threshold search ---
@@ -873,6 +898,13 @@ def parse_args():
         help="Transformer token size (multibanded bins per token). Set to 16 for "
         "Dingo-T1 token-aligned banding; omit for standard NPE.",
     )
+    parser.add_argument(
+        "--difference_over_full_window",
+        action="store_true",
+        help="Compare each decimated bin against all original bins in its decimation "
+        "window instead of against the window center at 2x resolution. More "
+        "conservative, and typically leads to less aggressive decimation.",
+    )
     return parser.parse_args()
 
 
@@ -885,6 +917,7 @@ def main() -> None:
         target_median_mismatch=args.target_median_mismatch,
         num_processes=args.num_processes,
         token_size=args.token_size,
+        difference_over_full_window=args.difference_over_full_window,
     )
 
 
