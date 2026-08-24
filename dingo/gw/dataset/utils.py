@@ -23,7 +23,8 @@ def merge_datasets(dataset_list: List[WaveformDataset]) -> WaveformDataset:
 
     Returns
     -------
-    WaveformDataset containing the merged data.
+    merged : WaveformDataset
+        WaveformDataset containing the merged data.
     """
 
     print(f"Merging {len(dataset_list)} datasets into one.")

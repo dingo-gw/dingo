@@ -44,8 +44,10 @@ def generate_parameters_and_polarizations(
 
     Returns
     -------
-    pandas DataFrame of parameters
-    dictionary of numpy arrays corresponding to waveform polarizations
+    parameters : pd.DataFrame
+        The sampled waveform parameters.
+    polarizations : dict of np.ndarray
+        The corresponding waveform polarizations.
     """
     print("Generating dataset of size " + str(num_samples))
     parameters = pd.DataFrame(prior.sample(num_samples))
@@ -97,9 +99,13 @@ def train_svd_basis(dataset: WaveformDataset, size: int, n_train: int):
 
     Returns
     -------
-    SVDBasis, n_train, n_test
-        Since EOB waveforms can fail to generate, provide also the number used in
-        training and validation.
+    basis : SVDBasis
+        The trained SVD basis.
+    n_train : int
+        Number of waveforms used for training. Since EOB waveforms can fail to
+        generate, this can be lower than requested.
+    n_test : int
+        Number of waveforms used for validation.
     """
     # Prepare data for training and validation.
     train_data = np.vstack([val[:n_train] for val in dataset.polarizations.values()])
@@ -151,7 +157,8 @@ def generate_dataset(settings: Dict, num_processes: int) -> WaveformDataset:
 
     Returns
     -------
-    A WaveformDataset based on the settings.
+    dataset : WaveformDataset
+        A WaveformDataset based on the settings.
     """
 
     prior = build_prior_with_defaults(settings["intrinsic_prior"])

@@ -28,7 +28,8 @@ def split_time_segments(time_segments, condor_dir, num_jobs):
         number of jobs that should be used per detector to parallelize the PSD estimation
     Returns
     -------
-    List of paths where the files including the subsets of all time segments are stored
+    time_segments_path_list : list of str
+        Paths to the files holding the subsets of all time segments.
     """
     time_segments_path_list = []
     segment_path = join(condor_dir, "time_segments")
@@ -67,7 +68,8 @@ def create_dag(data_dir, settings_file, time_segments, out_name):
 
     Returns
     -------
-        Condor DAG
+    dagman : pycondor.Dagman
+        The Condor DAG.
     """
 
     with open(settings_file, "r") as f:

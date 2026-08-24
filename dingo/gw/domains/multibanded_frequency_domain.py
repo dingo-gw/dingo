@@ -144,7 +144,8 @@ class MultibandedFrequencyDomain(BaseFrequencyDomain):
 
         Returns
         -------
-        Decimated array of the same type as the input.
+        data_decimated : np.ndarray or torch.Tensor
+            Decimated array of the same type as the input.
         """
         if data.shape[-1] == len(self.base_domain):
             offset_idx = 0
@@ -310,7 +311,8 @@ class MultibandedFrequencyDomain(BaseFrequencyDomain):
 
         Returns
         -------
-        Updated data of the same type as input.
+        data : np.ndarray or torch.Tensor
+            Updated data of the same type as input.
         """
         if data.shape[axis] == len(self):
             return data
@@ -401,7 +403,7 @@ def decimate_uniform(data, decimation_factor: int):
         Factor by how much to compress. Needs to divide data.shape[-1].
     Returns
     -------
-    data_decimated
+    data_decimated : np.ndarray or torch.Tensor
         Uniformly decimated data, as array or tensor.
         Shape (*data.shape[:-1], data.shape[-1]/decimation_factor).
     """

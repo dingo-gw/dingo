@@ -245,7 +245,7 @@ class GWSignal(object):
 
         Returns
         -------
-        dict
+        sample_out : dict
             keys:
                 waveform:
                     GW strain signal for each detector, with individual contributions
@@ -386,7 +386,7 @@ class Injection(GWSignal):
 
         Returns
         -------
-        dict
+        signal : dict
             keys:
                 waveform: data (signal + noise) in each detector
                 extrinsic_parameters: {}

@@ -60,7 +60,7 @@ def get_number_of_model_parameters(
 
     Returns
     -------
-    int
+    num_params : int
         number of parameters of the model with requested required_grad flags
     """
     num_params = 0
@@ -93,7 +93,8 @@ def get_optimizer_from_kwargs(
 
     Returns
     -------
-    optimizer
+    torch.optim.Optimizer
+        The optimizer, built for model_parameters.
     """
     optimizers_dict = {
         "adagrad": torch.optim.Adagrad,
@@ -131,7 +132,8 @@ def get_scheduler_from_kwargs(
 
     Returns
     -------
-    scheduler
+    torch.optim.lr_scheduler.LRScheduler
+        The scheduler, built for optimizer.
     """
     schedulers_dict = {
         "step": torch.optim.lr_scheduler.StepLR,
@@ -188,7 +190,10 @@ def split_dataset_into_train_and_test(dataset, train_fraction):
 
     Returns
     -------
-    trainset, testset
+    trainset : torch.utils.data.Dataset
+        The training split.
+    testset : torch.utils.data.Dataset
+        The test split.
     """
     train_size = int(train_fraction * len(dataset))
     test_size = len(dataset) - train_size
@@ -218,7 +223,10 @@ def build_train_and_test_loaders(
 
     Returns
     -------
-    (train_loader, test_loader)
+    train_loader : torch.utils.data.DataLoader
+        Loader for the training split.
+    test_loader : torch.utils.data.DataLoader
+        Loader for the test split.
     """
 
     # Split the dataset. This function uses a fixed seed for reproducibility.

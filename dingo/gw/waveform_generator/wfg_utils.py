@@ -260,7 +260,7 @@ def taper_td_modes_for_SEOBRNRv5_extra_time(
 
     Returns
     ----------
-    h_return
+    h_return : lal.COMPLEX16TimeSeries
         complex lal timeseries object
     """
 

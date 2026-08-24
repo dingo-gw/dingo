@@ -576,7 +576,8 @@ class Result(DingoDataset):
 
         Returns
         -------
-        PosteriorModel
+        unconditional_model : PosteriorModel
+            The trained unconditional flow.
         """
         sub_result = self.parameter_subset(parameters)
 
@@ -645,7 +646,8 @@ class Result(DingoDataset):
 
         Returns
         -------
-        list of sub-Results.
+        parts : list of Result
+            The sub-Results.
         """
 
         # Prepare a dictionary of all contents except the samples.
@@ -686,7 +688,8 @@ class Result(DingoDataset):
 
         Returns
         -------
-        Combined Result.
+        merged_result : Result
+            The combined Result.
         """
         dataset_dict = parts[0].to_dictionary()
         del dataset_dict["log_evidence"]

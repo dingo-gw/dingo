@@ -20,7 +20,8 @@ def torch_available_devices() -> List[Device]:
 
     Returns
     -------
-    List of available device identifiers
+    list of str
+        Available device identifiers.
     """
     devices: List[Device] = []
 
@@ -59,7 +60,8 @@ def torch_load_with_fallback(
 
     Returns
     -------
-    Loaded model and torch device on which it has been loaded
+    tuple
+        The loaded model, and the torch device on which it was loaded.
     """
 
     try:

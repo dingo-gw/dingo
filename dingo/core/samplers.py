@@ -236,7 +236,8 @@ class Sampler(object):
 
         Returns
         -------
-        np.array of log probabilities.
+        log_prob : np.ndarray
+            Log probabilities of the samples.
         """
         if self.context is None and not self.unconditional_model:
             raise ValueError("Context must be set in order to calculate log_prob.")

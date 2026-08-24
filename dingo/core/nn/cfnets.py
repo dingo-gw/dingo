@@ -174,7 +174,7 @@ def create_cf(
 
     Returns
     -------
-    nn.Module
+    model : nn.Module
         Neural network for the continuous flow.
     """
     theta_dim = posterior_kwargs["input_dim"]

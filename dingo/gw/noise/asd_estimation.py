@@ -35,7 +35,8 @@ def download_and_estimate_psds(
         optional parameter determining if progress should be printed
     Returns
     -------
-    A dictionary containing the paths to the dataset files
+    asd_filename_list : dict
+        A dictionary containing the paths to the dataset files.
     """
     dataset_settings = settings["dataset_settings"]
     run = dataset_settings["observing_run"]

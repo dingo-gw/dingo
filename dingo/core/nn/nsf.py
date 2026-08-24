@@ -179,7 +179,7 @@ def create_transform(
 
     Returns
     -------
-    Transform
+    transform : Transform
         the NSF transform sequence
     """
 
@@ -289,7 +289,7 @@ def create_nsf_model(
 
     Returns
     -------
-    Flow
+    flow : Flow
         the NSF (posterior model)
     """
 
@@ -340,7 +340,7 @@ def create_nsf_with_rb_projection_embedding_net(
 
     Returns
     -------
-    nn.Module
+    model : nn.Module
         Neural spline flow model
     """
     # We copy the embedding_kwargs to allow an insert of V_rb_list without

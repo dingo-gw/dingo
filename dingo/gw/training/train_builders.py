@@ -48,7 +48,8 @@ def build_dataset(
 
     Returns
     -------
-    WaveformDataset
+    wfd : WaveformDataset
+        The waveform dataset, with the domain and transforms set up for training.
     """
 
     # Build and truncate datasets
@@ -226,7 +227,7 @@ def build_svd_for_embedding_network(
 
     Returns
     -------
-    list of numpy arrays
+    V_rb_list : list of numpy arrays
         The V matrices for each interferometer. They are ordered as in data_settings[
         'detectors'].
     """

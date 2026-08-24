@@ -176,7 +176,8 @@ class SVDBasis(DingoDataset):
 
         Returns
         -------
-        array of decompressed data
+        np.ndarray
+            Array of decompressed data.
         """
         return coefficients @ self.Vh
 
@@ -191,7 +192,8 @@ class SVDBasis(DingoDataset):
 
         Returns
         -------
-        array of basis coefficients
+        np.ndarray
+            Array of basis coefficients.
         """
         return data @ self.V
 
