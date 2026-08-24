@@ -286,12 +286,7 @@ def get_band_nodes_for_adaptive_decimation(
 
     while upper - 1 < N:
         if upper - 1 + dec_factor * min_mfd_bins_per_band >= N:
-            # Closing node of the final band. It must stay inside the domain: when no
-            # decimation is possible at all (dec_factor == 1, min_mfd_bins_per_band == 1)
-            # `upper` reaches N exactly, which is one past the last bin.
-            final_node = min(upper, N - 1)
-            if final_node > band_nodes[-1]:
-                band_nodes.append(final_node)
+            band_nodes.append(upper)
         elif dec_factor * 2 <= max_dec_factor_array[upper]:
             band_nodes.append(upper)
             # Each band must contain a whole number of tokens.
@@ -495,7 +490,11 @@ def _build_mfd_for_threshold(
         min_mfd_bins_per_band=min_mfd_bins_per_band,
     )
     delta_f_initial = ufd.delta_f * initial_downsampling
-    mfd_nodes = ufd()[ufd.min_idx :][np.array(band_nodes_indices)]
+    # Band j spans base-domain bins [nodes[j], nodes[j + 1]), so the closing node is an
+    # exclusive end and can be one past the last bin (it is whenever the final band ends
+    # flush with the domain). Convert indices to frequencies arithmetically rather than
+    # by indexing the frequency array, which cannot represent that end point.
+    mfd_nodes = ufd.f_min + np.array(band_nodes_indices) * ufd.delta_f
     return MultibandedFrequencyDomain(
         nodes=mfd_nodes, delta_f_initial=delta_f_initial, base_domain=ufd
     )
