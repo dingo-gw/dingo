@@ -88,6 +88,25 @@ class TestTrainEpochWithoutAmp:
         )
         assert n_iter == 1
 
+    def test_gradient_accumulation_matches_full_batch(self):
+        """Accumulating 2 x 8 samples must update like a single batch of 16."""
+        torch.manual_seed(0)
+        theta = torch.randn(16, 4)
+        pm_full = _make_mock_pm()
+        pm_accum = _make_mock_pm()
+        pm_accum.network.load_state_dict(pm_full.network.state_dict())
+
+        train_epoch(pm_full, DataLoader(TensorDataset(theta), batch_size=16))
+        train_epoch(
+            pm_accum,
+            DataLoader(TensorDataset(theta), batch_size=8),
+            gradient_updates_per_optimizer_step=2,
+        )
+        for p_full, p_accum in zip(
+            pm_full.network.parameters(), pm_accum.network.parameters()
+        ):
+            torch.testing.assert_close(p_accum, p_full)
+
     def test_gradient_accumulation_no_step_on_incomplete_tail(self):
         """3 batches with accum=2 → only 1 complete step (last batch dropped)."""
         pm = _make_mock_pm()

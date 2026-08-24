@@ -617,15 +617,19 @@ def train_epoch(
 
         data = [d.to(pm.device, non_blocking=True) for d in data]
 
+        # Gradients are summed over the accumulated mini-batches, so divide each
+        # loss by the number of accumulation steps to obtain the gradient of the
+        # mean loss over the effective batch (an unbiased estimate that does not
+        # grow with gradient_updates_per_optimizer_step).
         if automatic_mixed_precision:
             with autocast("cuda"):
                 result = pm.loss(data[0], *data[1:])
             loss = result[0] if isinstance(result, tuple) else result
-            scaler.scale(loss).backward()
+            scaler.scale(loss / gradient_updates_per_optimizer_step).backward()
         else:
             result = pm.loss(data[0], *data[1:])
             loss = result[0] if isinstance(result, tuple) else result
-            loss.backward()
+            (loss / gradient_updates_per_optimizer_step).backward()
 
         loss_info.cache_loss(loss=loss, n=len(data[0]))
 
