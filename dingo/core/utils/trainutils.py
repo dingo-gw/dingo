@@ -148,7 +148,6 @@ class LossInfo:
     def update_timer(self, timer_mode: str = "Dataloader") -> None:
         if self.is_ddp:
             dt = torch.tensor(time.time() - self.t, device=self.device)
-            dist.barrier()
             dist.reduce(dt, dst=0, op=dist.ReduceOp.MAX)
             dt = dt.item()
         else:
@@ -168,7 +167,6 @@ class LossInfo:
             # that every rank ends up with the same loss (the LR scheduler steps
             # on it, so ranks must not diverge).
             abs_loss = loss * n
-            dist.barrier()
             dist.all_reduce(abs_loss)
             dist.all_reduce(n)
             loss = abs_loss / n
@@ -184,7 +182,6 @@ class LossInfo:
     def get_iteration(self) -> int:
         """Return the number of optimizer steps performed this epoch."""
         if self.is_ddp:
-            dist.barrier()
             iteration = torch.tensor(
                 self.iteration, device=self.device, dtype=torch.int64
             )
@@ -320,7 +317,6 @@ class RuntimeLimits:
 
         if self.is_ddp:
             flag = torch.tensor(exceeded, device=self.device, dtype=torch.bool)
-            dist.barrier()
             dist.all_reduce(flag, op=dist.ReduceOp.MAX)
             exceeded = flag.item()
 

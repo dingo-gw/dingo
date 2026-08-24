@@ -473,7 +473,6 @@ class BasePosteriorModel(ABC):
                 self.iteration += n_iter
 
                 if self.rank is not None:
-                    dist.barrier()
                     dist.all_reduce(time_start, op=dist.ReduceOp.MIN)
                 train_time = time.time() - time_start.item()
 
@@ -495,7 +494,6 @@ class BasePosteriorModel(ABC):
                     world_size=world_size,
                 )
                 if self.rank is not None:
-                    dist.barrier()
                     dist.all_reduce(time_start, op=dist.ReduceOp.MIN)
                 test_time = time.time() - time_start.item()
 
