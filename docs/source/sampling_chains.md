@@ -273,7 +273,7 @@ recipe, and the chirp-mass-scan record.
       "parameters": ["chirp_mass_proxy", "ra", "dec"], "conditioning": [],
       "values": {"chirp_mass_proxy": 1.1976, "ra": 3.446, "dec": -0.408}},
      {"step": "RAToTrainingFrame", ...},
-     {"step": "GNPEFlowFactor", ...},
+     {"step": "FlowFactor", ...},
  ],
  "models": {"model": "model.pt"}}
 ```
@@ -298,7 +298,7 @@ builders (see [](inference.md) for usage):
 
 `from_singlestep_gnpe(main_model, proxy_source, event_data, event_metadata)`
 : Single-step, density-preserving GNPE. The `proxy_source` supplies the proxies (a
-  `DeltaFactor` for prior conditioning, or an unconditional NDE for
+  `DeltaFactor` of fixed detector-time proxies, or an unconditional NDE for
   [density recovery](result.md#density-recovery)). The main network and the kernel
   correction follow it.
 

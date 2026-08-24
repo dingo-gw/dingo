@@ -128,26 +128,23 @@ def check_frequency_updates(
     f_max: dict[str, float] | float | None = None,
 ):
     """
-    Validate and apply optional minimum and maximum frequency constraints
-    for a model’s frequency domain.
+    Validate optional minimum and maximum frequency updates against a model's
+    frequency domain.
 
-    This function checks that any provided per-detector minimum (`f_min`)
-    or maximum (`f_max`) frequencies—either as a single float applied to
-    all detectors or as a dict mapping each detector to its own value—:
-      - Match exactly the set of detectors in the model metadata.
-      - Respect the hard bounds defined by the domain (`domain.f_min` /
-        `domain.f_max`).
-      - Comply with optional random-strain-cropping settings (probability,
-        independent vs. joint detectors, and per-detector caps/floors).
+    `f_min` / `f_max` may be a single float, applied to all detectors, or a dict
+    mapping each detector to its own value. The update must:
+
+    - match exactly the set of detectors in the model metadata,
+    - respect the hard bounds of the domain (`domain.f_min` / `domain.f_max`),
+    - comply with the training-time random-strain-cropping settings (probability,
+      independent vs. joint detectors, and per-detector caps and floors).
 
     Parameters
     ----------
     model_metadata : dict
-        Dictionary containing the model’s training settings and data.
-        Must include:
-          - `["train_settings"]["data"]["detectors"]`: list of detector names.
-          - `["train_settings"]["data"]["random_strain_cropping"]`: optional
-            dict of cropping parameters.
+        The model's training settings and data; the detector list and the
+        optional `random_strain_cropping` settings are read from
+        `["train_settings"]["data"]`.
     f_min : dict[str, float], float, or None, optional
         Single float or per-detector dict of minimum frequencies to enforce.
         If a float is provided, it is applied to all detectors. Each value

@@ -99,8 +99,8 @@ network's reference time equals the trigger time.
 When no external estimate of the chirp mass is available, the trigger value can be
 determined from the data (see the Methods of {footcite:p}`Dax:2024mcn`). The scan
 sweeps the proxy over the training chirp-mass prior on a grid whose spacing is set by
-the kernel width, draws a few posterior samples at each grid point in a single
-batched network pass, evaluates a phase-marginalized likelihood for every draw within
+the kernel width, draws a few posterior samples at each grid point in batched
+network passes over blocks of grid points, evaluates a phase-marginalized likelihood for every draw within
 the prior, and takes the chirp mass of the maximum-likelihood draw as the trigger
 value.
 

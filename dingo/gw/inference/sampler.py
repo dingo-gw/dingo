@@ -317,8 +317,8 @@ class GWComposedSampler(ComposedSampler):
         main_model : BasePosteriorModel
             The GNPE main network.
         proxy_source : Factor
-            Supplies the detector-time proxies -- a `DeltaFactor` for prior conditioning
-            (BNS), or an unconditional NDE for density recovery.
+            Supplies the detector-time proxies: a `DeltaFactor` of fixed proxies, or
+            an unconditional NDE for density recovery.
         event_data : dict
             The raw event data (strain + ASDs).
         event_metadata : dict, optional

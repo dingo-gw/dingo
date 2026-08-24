@@ -657,7 +657,7 @@ class SpinConventionReparam(Reparametrization):
 
     def forward(self, given, context):
         # The conversion runs in double; the outputs return in the input dtype
-        # and device (cf. RAToEventFrame: compute in float64, store the chain dtype).
+        # and device.
         reference = given["theta_jn"]
         theta = pd.DataFrame({k: _to_numpy(v) for k, v in given.items()})
         converted = self.to_physical(theta, context.model_metadata)

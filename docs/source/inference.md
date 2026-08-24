@@ -57,13 +57,14 @@ The constructors cover the standard analysis types:
   [density recovery](result.md#density-recovery).
 
 `run_sampler()` draws the requested number of samples in batches of `batch_size` and
-stores them as a DataFrame in `sampler.samples`, with one column per inference
-parameter plus `log_prob`, the log density of each sample under the model (absent for
-density-free GNPE chains). All processing, including the de-standardization of
+stores them as a DataFrame in `sampler.samples`, with one column per parameter the
+chain emits -- the inference parameters, plus any pins, GNPE proxies, or
+`delta_log_prob_target` -- and `log_prob`, the log density of each sample under the
+model (absent for density-free GNPE chains). All processing, including the de-standardization of
 network outputs and the rotation of the right ascension from the training reference
 frame to the event frame, is expressed as chain steps.
 
-The `metadata` attribute contains all settings that went into producing the samples.
+The `metadata` attribute contains the model metadata defining the analysis.
 `to_result()` exports a [Result](result.md) containing the samples, the settings
 (including the structured sampler provenance under `settings["sampler"]`), and the
 event data; `to_hdf5()` saves it directly. Importance sampling and plotting then

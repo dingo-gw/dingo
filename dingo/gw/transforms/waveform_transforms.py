@@ -568,8 +568,10 @@ def factor_fiducial_waveform(
     the chirp mass and (optionally) mass ratio. Allows for batching.
 
     At leading order, this factors out the overall chirp by dividing the data by a
-    fiducial waveform of the form
-        exp( - 1j * (3/128) * (pi G chirp_mass f / c**3)**(-5/3) ) ;
+    fiducial waveform of the form::
+
+        exp(-1j * (3/128) * (pi * G * chirp_mass * f / c**3) ** (-5/3));
+
     see 2001.11412, eq. (7.2). This is the leading order chirp due to the emission of
     quadrupole radiation.
 

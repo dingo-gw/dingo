@@ -3,7 +3,7 @@
 A chirp-mass-conditioned network infers parameters relative to a proxy value
 that must be supplied per event. When no external trigger value is available,
 this scan determines it from the data: sweep the proxy over the training
-chirp-mass prior, draw a few samples per grid point in a single network pass,
+chirp-mass prior, draw a few samples per grid point in batched network passes,
 and take the chirp mass of the maximum-likelihood draw (Dax et al., Nature 639,
 49 (2025), Methods).
 
