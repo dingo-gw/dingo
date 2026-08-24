@@ -195,7 +195,7 @@ def prepare_training_resume(
             import wandb
 
             wandb.init(
-                resume="must",
+                resume="allow",
                 dir=train_dir,
                 **local_settings["wandb"],
             )
@@ -635,7 +635,7 @@ def run_training_ddp(
                     import wandb
 
                     wandb.init(
-                        resume="must",
+                        resume="allow",
                         dir=train_dir,
                         **local_settings["wandb"],
                     )
@@ -878,6 +878,8 @@ def train_local():
                     print("wandb not installed, cannot generate run id.")
             yaml.dump(local_settings, f, default_flow_style=False, sort_keys=False)
     else:
+        if not os.path.isfile(args.checkpoint):
+            raise FileNotFoundError(f"Checkpoint not found: {args.checkpoint}")
         print("Resuming training run.")
         train_settings = None
         with open(os.path.join(args.train_dir, "local_settings.yaml"), "r") as f:

@@ -114,6 +114,8 @@ def train_condor():
         resume = isfile(ckpt_path)
 
         if not resume:
+            if args.checkpoint != "model_latest.pt":
+                raise FileNotFoundError(f"Checkpoint not found: {ckpt_path}")
             print("Beginning new training run.")
             with open(join(args.train_dir, "train_settings.yaml"), "r") as f:
                 train_settings = yaml.safe_load(f)
@@ -190,16 +192,24 @@ def train_condor():
         if args.checkpoint != "model_latest.pt":
             condor_arguments += f" --checkpoint {args.checkpoint}"
 
+        if isfile(join(args.train_dir, "local_settings.yaml")):
+            with open(join(args.train_dir, "local_settings.yaml"), "r") as f:
+                local_settings = yaml.safe_load(f)
+        else:
+            local_settings = {}
+
     if args.exit_command:
         condor_arguments += f" --exit_command '{args.exit_command}'"
 
     submission_file = "submission_file.sub"
-    with open(join(args.train_dir, "train_settings.yaml"), "r") as f:
-        local_settings_from_file = yaml.safe_load(f)["local"]
-    condor_settings = local_settings_from_file.get("condor", {})
+    condor_settings = local_settings.get("condor")
+    if condor_settings is None:
+        with open(join(args.train_dir, "train_settings.yaml"), "r") as f:
+            local_settings = yaml.safe_load(f)["local"]
+        condor_settings = local_settings.get("condor", {})
     # Inject num_gpus from local.num_gpus so the submission file requests the
     # correct number of GPUs without the user having to duplicate it under condor:.
-    condor_settings["num_gpus"] = get_num_gpus(local_settings_from_file)
+    condor_settings["num_gpus"] = get_num_gpus(local_settings)
     condor_settings["arguments"] = condor_arguments
     condor_settings["executable"] = join(
         os.path.dirname(sys.executable), "dingo_train_condor"

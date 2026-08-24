@@ -563,7 +563,7 @@ class Result(CoreResult):
         log_prior = self.prior.ln_prob(theta, axis=0)
         constraints = self.prior.evaluate_constraints(theta)
         np.putmask(log_prior, constraints == 0, -np.inf)
-        within_prior = log_prior != -np.inf
+        within_prior = np.isfinite(log_prior)
 
         # Put a cap on the number of processes to avoid overhead:
         num_valid_samples = np.sum(within_prior)
@@ -690,7 +690,7 @@ class Result(CoreResult):
             num_processes=num_processes,
         )
 
-    def get_pesummary_samples(self, num_processes=1):
+    def get_pesummary_samples(self, num_processes=1, resampling_method="clip+rejection"):
         """Samples in a form suitable for PESummary.
 
         These samples are adjusted to undo certain conventions used internally by
@@ -701,13 +701,33 @@ class Result(CoreResult):
             * The spin angles phi_jl and theta_jn are transformed to account for a
             difference in phase definition.
             * Some columns are dropped: delta_log_prob_target, log_prob
+
+        Parameters
+        ----------
+        num_processes : int
+            Number of processes for spin conversion.
+        resampling_method : str
+            Method for producing unweighted samples from weighted ones.
+            'clip+rejection': clip extreme weights then rejection sample (default).
+            'sir': sampling importance resampling (old behavior).
         """
         if hasattr(self, "_pesummary_samples"):
             return self._pesummary_samples
 
         # Unweighted samples.
         if "weights" in self.samples:
-            samples = self.sampling_importance_resampling(random_state=RANDOM_STATE)
+            if resampling_method == "clip+rejection":
+                samples = self.rejection_sample(
+                    clip_weights=True,
+                    random_state=RANDOM_STATE,
+                )
+            elif resampling_method == "sir":
+                samples = self.sampling_importance_resampling(random_state=RANDOM_STATE)
+            else:
+                raise ValueError(
+                    f"Unknown resampling_method '{resampling_method}'. "
+                    "Use 'clip+rejection' or 'sir'."
+                )
         else:
             samples = self.samples.copy()
 

@@ -109,9 +109,9 @@ class Sampler(object):
     @context.setter
     def context(self, value):
         if value is not None and "parameters" in value:
-            if self.event_metadata is None:
-                self.event_metadata = {}
-            self.event_metadata["injection_parameters"] = value.pop("parameters")
+            if self._event_metadata is None:
+                self._event_metadata = {}
+            self._event_metadata["injection_parameters"] = value.pop("parameters")
         self._context = value
 
     @property
