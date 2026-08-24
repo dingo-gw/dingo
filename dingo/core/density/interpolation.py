@@ -27,7 +27,10 @@ def interpolated_sample_and_log_prob_multi(
 
     Returns
     -------
-    (np.ndarray, np.ndarray) : sample and log_prob arrays, each of length B
+    sample : np.ndarray
+        Samples, of length B.
+    log_prob : np.ndarray
+        Log probabilities of the samples, of length B.
     """
     with threadpool_limits(limits=1, user_api="blas"):
         data_generator = iter(values)
@@ -56,7 +59,10 @@ def interpolated_sample_and_log_prob(sample_points, values):
 
     Returns
     -------
-    (float, float) : sample and log_prob
+    sample : float
+        The sample.
+    log_prob : float
+        Log probability of the sample.
     """
     interp = Interped(sample_points, values)
     sample = interp.sample()
@@ -86,7 +92,8 @@ def interpolated_log_prob_multi(
 
     Returns
     -------
-    (np.ndarray, np.ndarray) : sample and log_prob arrays, each of length B
+    np.ndarray
+        Log probabilities at the evaluation points, of length B.
     """
     with threadpool_limits(limits=1, user_api="blas"):
         data_generator = zip(iter(values), iter(evaluation_points))

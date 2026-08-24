@@ -61,7 +61,8 @@ class BaseFrequencyDomain(Domain, ABC):
 
         Returns
         -------
-        Frequency array compatible with last index, of the same type as input
+        f : np.ndarray or torch.Tensor
+            Frequency array compatible with last index, of the same type as input.
         """
         # Type
         if isinstance(data, np.ndarray):
@@ -123,7 +124,8 @@ class BaseFrequencyDomain(Domain, ABC):
 
         Returns
         -------
-        Array-like of the same form as data.
+        np.ndarray or torch.Tensor
+            Array-like of the same form as data.
         """
         f = self.get_sample_frequencies_astype(data)
         if isinstance(data, np.ndarray):
@@ -156,7 +158,8 @@ class BaseFrequencyDomain(Domain, ABC):
 
         Returns
         -------
-        New array or tensor of the same shape as data.
+        np.ndarray or torch.Tensor
+            New array or tensor of the same shape as data.
         """
         if isinstance(data, np.ndarray) and np.iscomplexobj(data):
             return data * np.exp(-1j * phase)

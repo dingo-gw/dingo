@@ -67,7 +67,8 @@ def psd_data_path(data_dir, run, detector):
         Detector that is used for the PSD dataset generation
     Returns
     -------
-    the path where the data is stored
+    str
+        The path where the data is stored.
     """
     return join(data_dir, "tmp", run, detector)
 
@@ -89,7 +90,8 @@ def get_time_segments(settings):
         Settings that determine the segments
     Returns
     -------
-    Dictionary containing the time segments for each detector
+    time_segments : dict
+        The time segments for each detector.
     """
 
     time_segments = {}
@@ -150,7 +152,8 @@ def merge_datasets(asd_dataset_list):
 
     Returns
     -------
-    A single combined ASDDataset object
+    merged : ASDDataset
+        A single combined ASDDataset object.
     """
 
     merged_dict = {"asds": {}, "gps_times": {}}

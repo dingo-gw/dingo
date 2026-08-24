@@ -63,7 +63,8 @@ def get_latex_labels(prior: PriorDict) -> dict:
 
     Returns
     -------
-    dict of latex labels
+    labels : dict
+        LaTeX labels, keyed by parameter name.
     """
     labels = {}
     for k, v in prior.items():

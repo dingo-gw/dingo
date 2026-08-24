@@ -1507,7 +1507,8 @@ def generate_waveforms_task_func(
 
     Returns
     -------
-    The generated waveform polarization dictionary
+    dict
+        The generated waveform polarization dictionary.
     """
     parameters = args[1].to_dict()
     return waveform_generator.generate_hplus_hcross(parameters)

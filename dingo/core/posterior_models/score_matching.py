@@ -61,7 +61,7 @@ class ScoreDiffusionPosteriorModel(ContinuousFlowPosteriorModel):
 
         Returns
         -------
-        torch.tensor
+        loss : torch.tensor
             Loss.
         """
         t, theta_t, score = self.get_t_theta_t_score(theta_1=theta)

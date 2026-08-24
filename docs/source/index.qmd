@@ -1,0 +1,46 @@
+Dingo
+=====
+
+**Dingo (Deep Inference for Gravitational-wave Observations)** is a Python program for analyzing gravitational wave data using neural posterior
+estimation. It dramatically speeds up inference of astrophysical source parameters from
+data measured at gravitational-wave observatories. Dingo aims to enable the routine
+use of the most advanced theoretical models in analysing data, to make rapid predictions
+for multi-messenger counterparts, and to do so in the context of sensitive detectors with
+high event rates.
+
+The basic approach of Dingo is to *train a neural network to represent the Bayesian
+posterior*, conditioned on data. This enables **amortized inference**: when new data are
+observed, they can be plugged in and results obtained in a small amount of time. Tasks
+handled by Dingo include
+
+* [building training datasets](waveform_dataset.ipynb);
+* [training](training.qmd) normalizing flows to estimate the posterior density;
+* [performing inference](inference.qmd) on real or simulated data; and
+* verifying and correcting model results using [importance sampling](result.qmd#importance-sampling).
+
+As training a network from scratch can be expensive, we intend to also distribute trained networks that can be used directly for inference. These can be used with [dingo_pipe](dingo_pipe.qmd) to automate analysis of gravitational wave events.
+
+References
+----------
+
+Dingo is based on a series of papers developing neural posterior estimation for gravitational waves, starting from proof of concept [@Green:2020hst], to inclusion of all 15 parameters and analysis of real data [@Green:2020dnx], noise conditioning and full amortization [@Dax:2021tsq], and group-equivariant NPE [@Dax:2021myb]. Dingo results are augmented with importance sampling in [@Dax:2022pxd]. Finally, training with forecasted noise (needed for training *prior* to an observing run) is described in [@Wildberger:2022agw].
+
+::: {#refs}
+:::
+
+If you use Dingo in your work, we ask that you please cite at least [@Dax:2021tsq].
+
+Contributors to the code are listed in [AUTHORS.md](https://github.com/dingo-gw/dingo/blob/main/AUTHORS.md). We thank Vivien Raymond
+and Rory Smith for acting as LIGO-Virgo-KAGRA (LVK) code reviewers. Dingo makes use of
+many LVK software tools, including [Bilby](https://lscsoft.docs.ligo.org/bilby/),
+[bilby_pipe](https://lscsoft.docs.ligo.org/bilby_pipe/master/index.html), and
+[LALSimulation](https://lscsoft.docs.ligo.org/lalsuite/lalsimulation/), as well as third
+party tools such as [PyTorch](https://pytorch.org) and
+[nflows](https://github.com/bayesiains/nflows).
+
+Contact
+-------
+
+For questions or comments please contact
+[Maximilian Dax](mailto:maximilian.dax@tuebingen.mpg.de) or
+[Stephen Green](mailto:stephen.green2@nottingham.ac.uk).

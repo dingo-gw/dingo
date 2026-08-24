@@ -33,13 +33,6 @@ class Sampler(object):
     This is intended for use either as a standalone sampler, or as a sampler producing
     initial sample points for a GNPE sampler.
 
-    Methods
-    -------
-    run_sampler
-    log_prob
-    to_result
-    to_hdf5
-
     Attributes
     ----------
     model : BasePosteriorModel
@@ -243,7 +236,8 @@ class Sampler(object):
 
         Returns
         -------
-        np.array of log probabilities.
+        log_prob : np.ndarray
+            Log probabilities of the samples.
         """
         if self.context is None and not self.unconditional_model:
             raise ValueError("Context must be set in order to calculate log_prob.")

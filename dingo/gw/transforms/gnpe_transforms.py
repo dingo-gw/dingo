@@ -43,7 +43,8 @@ class GNPEBase(ABC):
 
         Returns
         -------
-        A dict of proxy parameters.
+        proxies : dict
+            A dict of proxy parameters.
         """
         proxies = {}
         for k in self.kernel:
@@ -69,7 +70,8 @@ class GNPEBase(ABC):
 
         Returns
         -------
-        Proxy variables in the same format as g.
+        Union[np.float64, float, torch.Tensor]
+            Proxy variables in the same format as g.
         """
         # First we sample from the kernel, ensuring the correct data type,
         # and accounting for possible batching.

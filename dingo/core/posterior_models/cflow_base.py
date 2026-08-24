@@ -241,8 +241,10 @@ class ContinuousFlowPosteriorModel(BasePosteriorModel):
 
         Returns
         -------
-        samples, log_prob: torch.Tensor, torch.Tensor
-            Shapes (B, num_samples, dim(theta)), (B, num_samples)
+        samples : torch.Tensor
+            Shape (B, num_samples, dim(theta)).
+        log_prob : torch.Tensor
+            Shape (B, num_samples).
         """
 
         context_size = context[0].shape[0]

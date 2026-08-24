@@ -663,10 +663,6 @@ def check_frequency_updates(
         - If cropping is disabled but a change in frequency is requested.
         - If per-detector constraints (independent vs. joint) or
           cropping caps/floors are violated.
-
-    Returns
-    -------
-    None
     """
     crop_settings = model_metadata["train_settings"]["data"].get(
         "random_strain_cropping"

@@ -18,7 +18,8 @@ def build_domain(settings: dict) -> Domain:
 
     Returns
     -------
-    A Domain instance of the correct type.
+    Domain
+        A Domain instance of the correct type.
     """
     if "type" not in settings:
         raise ValueError(
@@ -57,7 +58,8 @@ def build_domain_from_model_metadata(
 
     Returns
     -------
-    A Domain instance of the correct type.
+    domain : Domain
+        A Domain instance of the correct type.
     """
     domain = build_domain(model_metadata["dataset_settings"]["domain"])
     if "domain_update" in model_metadata["train_settings"]["data"]:

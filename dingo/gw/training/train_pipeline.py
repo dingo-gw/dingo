@@ -101,7 +101,10 @@ def prepare_training_new(
 
     Returns
     -------
-    (BasePosteriorModel, WaveformDataset)
+    pm : BasePosteriorModel
+        The new posterior model.
+    wfd : WaveformDataset
+        The waveform dataset it will be trained on.
     """
     data_settings = deepcopy(train_settings["data"])
     # Optionally copy files to local and update path
@@ -197,7 +200,10 @@ def prepare_training_resume(
 
     Returns
     -------
-    (BasePosteriorModel, WaveformDataset)
+    pm : BasePosteriorModel
+        The posterior model loaded from the checkpoint.
+    wfd : WaveformDataset
+        The waveform dataset it will continue training on.
     """
 
     pm = build_model_from_kwargs(
@@ -259,7 +265,10 @@ def initialize_stage(
 
     Returns
     -------
-    (train_loader, test_loader)
+    train_loader : torch.utils.data.DataLoader
+        Loader for the training split.
+    test_loader : torch.utils.data.DataLoader
+        Loader for the test split.
     """
 
     train_settings = pm.metadata["train_settings"]

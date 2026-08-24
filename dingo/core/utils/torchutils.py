@@ -20,9 +20,14 @@ def get_activation_function_from_string(activation_name: str):
     """
     Returns an activation function, based on the name provided.
 
-    :param activation_name: str
+    Parameters
+    ----------
+    activation_name : str
         name of the activation function, one of {'elu', 'relu', 'leaky_rely'}
-    :return: function
+
+    Returns
+    -------
+    function
         corresponding activation function
     """
     if activation_name.lower() == "elu":
@@ -45,11 +50,17 @@ def get_number_of_model_parameters(
     Counts parameters of the module. The list requires_grad_flag can be used
     to specify whether all parameters should be counted, or only those with
     requires_grad = True or False.
-    :param model: nn.Module
+
+    Parameters
+    ----------
+    model : nn.Module
         model
-    :param requires_grad_flags: tuple
+    requires_grad_flags : tuple
         tuple of bools, for requested requires_grad flags
-    :return:
+
+    Returns
+    -------
+    num_params : int
         number of parameters of the model with requested required_grad flags
     """
     num_params = 0
@@ -82,7 +93,8 @@ def get_optimizer_from_kwargs(
 
     Returns
     -------
-    optimizer
+    torch.optim.Optimizer
+        The optimizer, built for model_parameters.
     """
     optimizers_dict = {
         "adagrad": torch.optim.Adagrad,
@@ -120,7 +132,8 @@ def get_scheduler_from_kwargs(
 
     Returns
     -------
-    scheduler
+    torch.optim.lr_scheduler.LRScheduler
+        The scheduler, built for optimizer.
     """
     schedulers_dict = {
         "step": torch.optim.lr_scheduler.StepLR,
@@ -177,7 +190,10 @@ def split_dataset_into_train_and_test(dataset, train_fraction):
 
     Returns
     -------
-    trainset, testset
+    trainset : torch.utils.data.Dataset
+        The training split.
+    testset : torch.utils.data.Dataset
+        The test split.
     """
     train_size = int(train_fraction * len(dataset))
     test_size = len(dataset) - train_size
@@ -207,7 +223,10 @@ def build_train_and_test_loaders(
 
     Returns
     -------
-    (train_loader, test_loader)
+    train_loader : torch.utils.data.DataLoader
+        Loader for the training split.
+    test_loader : torch.utils.data.DataLoader
+        Loader for the test split.
     """
 
     # Split the dataset. This function uses a fixed seed for reproducibility.

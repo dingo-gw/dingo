@@ -19,7 +19,7 @@ flowchart TB
     #nbsp; #nbsp; --settings_file dataset_settings.yaml
     #nbsp; #nbsp; --data_dir asd_dataset"])
     style generate_asd text-align:left
-    train_init(["dingo_train 
+    train_init(["dingo_train
     #nbsp; #nbsp; --settings_file train_settings_init.yaml
     #nbsp; #nbsp; --train_dir model_init"])
     style train_init text-align:left
@@ -27,7 +27,7 @@ flowchart TB
     train_settings_init-->train_init
     generate_dataset--->train_init
     generate_asd--->train_init
-    generate_dataset--->train_main(["dingo_train 
+    generate_dataset--->train_main(["dingo_train
     #nbsp; #nbsp; --settings_file train_settings_main.yaml
     #nbsp; #nbsp; --train_dir model_main"])
     style train_main text-align:left
@@ -52,7 +52,7 @@ Dingo `venv` is active.
 
 To generate a waveform dataset for training, execute
 
-```
+```sh
 dingo_generate_dataset --settings_file waveform_dataset_settings.yaml --num_processes N --out_file waveform_dataset.hdf5
 ```
 
@@ -68,7 +68,7 @@ on a cluster. This is typically useful for slower waveform models.
 Training also requires a dataset of noise ASDs, which are sampled randomly for each
 training sample. To generate this dataset based on noise observed during a run, execute
 
-```
+```sh
 dingo_generate_ASD_dataset --data_dir data_dir --settings_file asd_dataset_settings.yaml
 ```
 
@@ -83,7 +83,7 @@ one `data_dir/asd_dataset_settings.yaml`.
 With a waveform dataset and ASD dataset(s), one can train a neural network. Configure
 the `train_settings.yaml` file to point to these datasets, and run
 
-```
+```sh
 dingo_train --settings_file train_settings.yaml --train_dir train_dir
 ```
 
@@ -91,7 +91,7 @@ This will configure the network, train it, and store checkpoints, a record of th
 and the final network in the directory `train_dir`. Alternatively, to resume training from
 a checkpoint file, run
 
-```
+```sh
 dingo_train --checkpoint model.pt --train_dir train_dir
 ```
 
@@ -99,43 +99,43 @@ If using CUDA on a machine with several GPUs, be sure to first select the desire
 number using the `CUDA_VISIBLE_DEVICES` environment variable. If using a cluster, Dingo
 can be trained using `dingo_train_condor`.
 
-Example training files can be found under `examples/training`. 
+Example training files can be found under `examples/training`.
 `train_settings_toy.yaml` and `train_settings_production.yaml` train a flow to
 estimate the full posterior of the event conditioned on the time of coalescence
-in the detectors. The "toy" label is to indicate this should NOT be used for production but 
-rather to get a feel for the Dingo pipeline. The production settings contain tested 
+in the detectors. The "toy" label is to indicate this should NOT be used for production but
+rather to get a feel for the Dingo pipeline. The production settings contain tested
 settings. Note that depending on the waveform model and event, these may need to occasionally
 be tuned. `train_settings_init_toy.yaml` and `train_settings_init_production.yaml` train
 flows to estimate the time of coalescence in the individual detectors. These two
-networks are needed to use [GNPE](gnpe.md). This is the preferred and
-most tested way of using Dingo. 
+networks are needed to use [GNPE](gnpe.qmd). This is the preferred and
+most tested way of using Dingo.
 
 Alternatively, the `train_settings_no_gnpe_toy.yaml` and
 `train_settings_no_gnpe_production.yaml` contain settings to train a network
 without the GNPE step. Note the lack of a `data/gnpe_time_shifts` option. While this is not
-recommended for production, it is still pedagogically useful and is good for prototyping 
-new ideas or doing a less expensive training.   
+recommended for production, it is still pedagogically useful and is good for prototyping
+new ideas or doing a less expensive training.
 
 ## Inference
 
 Once a Dingo model is trained, inference for real events can be performed using
-[dingo_pipe](dingo_pipe.md). There are 3 main inference steps, downloading the data, 
+[dingo_pipe](dingo_pipe.qmd). There are 3 main inference steps, downloading the data,
 running Dingo on this data and finally running importance sampling. The basic
 idea is to create a .ini file which contains the filepaths of the Dingo networks
 trained above and the segment of data to analyze. An example .ini file can be
-found under `examples/pipe/GW150914.ini`. 
+found under `examples/pipe/GW150914.ini`.
 
-To do inference, cd into the directory with the .ini file and run 
+To do inference, cd into the directory with the .ini file and run
 
-```
+```sh
 dingo_pipe GW150914.ini
 ```
 
 
 <!-- One can also just run the network without doing importance sampling with the following
-command line argument. 
+command line argument.
 
-```
+```sh
 dingo_analyze_event
   --model model
   --model_init model_init

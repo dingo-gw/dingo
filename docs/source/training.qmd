@@ -2,14 +2,13 @@
 
 Training a network can require a significant amount of time (for production models, typically a week with a fast GPU). We therefore expect that this will almost always be done non-interactively using a command-line script. Dingo offers two options, `dingo_train` and `dingo_train_condor`, depending on whether your GPU is local or cluster-based.
 
-Both of these scripts take as main argument a settings file, which specifies options relating to [](training_transforms.ipynb), training strategy, [](network_architecture.ipynb), hardware, and checkpointing. They produce a trained model in PyTorch `.pt` format, and they save checkpoints and the training history. The settings file is furthermore saved within the model files for reproducibility and to be able to resume training from a checkpoint. Finally, all *precursor* settings files (for the waveform or noise datasets) are also saved with the model.
+Both of these scripts take as main argument a settings file, which specifies options relating to [data pre-processing](training_transforms.ipynb), training strategy, [network architecture](network_architecture.ipynb), hardware, and checkpointing. They produce a trained model in PyTorch `.pt` format, and they save checkpoints and the training history. The settings file is furthermore saved within the model files for reproducibility and to be able to resume training from a checkpoint. Finally, all *precursor* settings files (for the waveform or noise datasets) are also saved with the model.
 
 ## Settings file
 
-```{code-block} yaml
----
-caption: Example `train_settings.yaml` file. This is also available in the examples/ folder. The specific settings listed will train a production-size network, taking about a week on an NVIDIA A100. Consider reducing some model hyperparameters for experimentation.
----
+Example `train_settings.yaml` file (also available in the `examples/` folder). The specific settings listed will train a production-size network, taking about a week on an NVIDIA A100. Consider reducing some model hyperparameters for experimentation.
+
+```yaml
 data:
   waveform_dataset_path: /path/to/waveform_dataset.hdf5  # Contains intrinsic waveforms
   train_fraction: 0.95
@@ -21,7 +20,7 @@ data:
   domain_update:
     f_min: 20.0
     f_max: 1024.0
-  svd_size_update: 200 
+  svd_size_update: 200
   detectors:
     - H1
     - L1
@@ -119,7 +118,7 @@ These settings point to a saved dataset of waveform polarizations and describe t
 
 ### `model`
 
-This describes the model architecture, including network type and hyperparameters. All of these settings are described in the section on [](network_architecture.ipynb).
+This describes the model architecture, including network type and hyperparameters. All of these settings are described in the section on [network architecture](network_architecture.ipynb).
 
 ### `training`
 
@@ -141,11 +140,11 @@ scheduler
 : Use a [learning rate scheduler](https://pytorch.org/docs/stable/optim.html#how-to-adjust-learning-rate) to reduce the learning rate over time. This can improve overall optimization.
 
 batch_size
-: Number of training samples per mini-batch. For a training dataset of size $N$, then each epoch will consist of $N / \text{batch_size}$ batches. Generally training will be faster for a larger batch size, but will require additional iterations.
+: Number of training samples per mini-batch. For a training dataset of size $N$, then each epoch will consist of $N / \text{batch\_size}$ batches. Generally training will be faster for a larger batch size, but will require additional iterations.
 
-```{important}
+::: {.callout-important}
 The stage-training framework allows for separate pre-training and fine-tuning stages. We found that having a pre-training stage where we freeze certain network weights and fix the noise ASD improves overall training results.
-```
+:::
 
 ### `local`
 
@@ -167,7 +166,7 @@ checkpoint_epochs
 : Dingo saves a temporary checkpoint in `model_latest.py` after every epoch, but this is later overwritten by the next checkpoint. This setting saves a permanent checkpoint after the specified number of epochs. Having these checkpoints can help in recovering from training failures that do not result in program termination.
 
 leave_waveforms_on_disk
-: To improve memory efficiency during training, the waveforms are not loaded into memory at the beginning of training, but separately for each batch during training. When training on a cluster, it is highly recommended to include a local path where the dataset is cached at the beginning of training (see `local_cache_path`). If RAM is not an issue, the default `leave_waveforms_on_disk=True` can be set to `False`. 
+: To improve memory efficiency during training, the waveforms are not loaded into memory at the beginning of training, but separately for each batch during training. When training on a cluster, it is highly recommended to include a local path where the dataset is cached at the beginning of training (see `local_cache_path`). If RAM is not an issue, the default `leave_waveforms_on_disk=True` can be set to `False`.
 
 local_cache_path
 : When training on a cluster and loading waveforms during training (i.e., `leave_waveforms_on_disk=True`), the waveform dataset should be copied to the disk storage of the local node at the beginning of training. This prevents unexpected long data loading times during training due to network traffic. Usually, paths for local storage are `tmp` or `dev/shm`. When submitting the job with `condor`, `request_disk: 50GB` should be included in the `condor` settings with the requested disk space larger than the size of the waveform dataset used for training.
@@ -187,7 +186,7 @@ usage: dingo_train [-h] [--settings_file SETTINGS_FILE] --train_dir TRAIN_DIR [-
 Train a neural network for gravitational-wave single-event inference.
 
 This program can be called in one of two ways:
-    a) with a settings file. This will create a new network based on the 
+    a) with a settings file. This will create a new network based on the
     contents of the settings file.
     b) with a checkpoint file. This will resume training from the checkpoint.
 
@@ -204,6 +203,7 @@ optional arguments:
 ### `dingo_train_condor`
 
 On a cluster using HTCondor, use `dingo_train_condor`. This calls itself recursively as follows:
+
 1. The first time you call it, use the flag `--start-submission`. This creates a condor submission file `submission_file.sub` that again calls the executable `dingo_train_condor` (now without the flag) and submits it. This will run `dingo_train_condor` directly on the cluster node that is assigned.
 2. On the cluster node, `dingo_train_condor` first trains the network until done or a runtime limit is reached (be careful to set this shorter than the condor time limit). Then it creates a *new* submission file that once again calls `dingo_train_condor`, and submits it. This will resume the run on a new node, and repeat.
 
@@ -221,6 +221,7 @@ optional arguments:
 ## Output
 
 Output from training is stored in the `TRAIN_DIR` folder passed to the training scripts. This consists of the following:
+
 * `model_latest.pt` checkpoints every epoch (overwritten);
 * `model_XXX.pt` checkpoints where `XXX` is the epoch number, every `checkpoint_epochs` epochs;
 * `model_stage_X.pt` at the end of training stage `X`;
@@ -256,7 +257,7 @@ optional arguments:
   --key KEY [KEY ...]
   --value VALUE
   ```
-  
-```{warning}
+
+::: {.callout-warning}
 Modifications to model metadata can easily break things. Do not use this unless completely sure what you are doing!
-```
+:::

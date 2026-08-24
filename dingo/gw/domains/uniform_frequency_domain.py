@@ -114,7 +114,7 @@ class UniformFrequencyDomain(BaseFrequencyDomain):
 
         Returns
         -------
-        np.ndarray
+        data : np.ndarray
             The new data array.
         """
         sl = [slice(None)] * data.ndim
@@ -145,7 +145,8 @@ class UniformFrequencyDomain(BaseFrequencyDomain):
 
         Returns
         -------
-        frequency array compatible with last index
+        f : np.ndarray or torch.Tensor
+            Frequency array compatible with last index.
         """
         f = super().get_sample_frequencies_astype(data)
 
