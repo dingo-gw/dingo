@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 import copy
-import logging
 from pathlib import Path
 from typing import Optional
 from bilby.core.prior import DeltaFunction

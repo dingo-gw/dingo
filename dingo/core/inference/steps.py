@@ -433,7 +433,7 @@ class DeltaFactor(Factor):
         # A delta factor creates fresh tensors, so it places them on the chain's
         # device (unlike steps that transform existing rows, which follow their
         # inputs).
-        device = getattr(context, "device", None)
+        device = context.device if context is not None else None
         samples = {
             p: torch.full((num_samples,), float(v), device=device)
             for p, v in self.values.items()
@@ -535,7 +535,7 @@ class SampleTableFactor(Factor):
             )
         # The table's fresh tensors join the chain on its device (the same policy
         # as DeltaFactor), so a table-rooted chain can condition a CUDA network.
-        device = getattr(context, "device", None)
+        device = context.device if context is not None else None
         table = {k: v.to(device) for k, v in self.table.items()}
         log_prob = (
             self.table_log_prob.to(device) if self.table_log_prob is not None else None

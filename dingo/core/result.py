@@ -13,7 +13,7 @@ import scipy
 from matplotlib import pyplot as plt
 from scipy.constants import golden
 from scipy.special import logsumexp
-from bilby.core.prior import Constraint, DeltaFunction, PriorDict
+from bilby.core.prior import Constraint, DeltaFunction
 
 from dingo.core.dataset import DingoDataset
 from dingo.core.density import train_unconditional_density_estimator

@@ -3,7 +3,6 @@
 import copy
 import sys
 from pathlib import Path
-import os
 
 from bilby_pipe.input import Input
 from bilby_pipe.utils import (
@@ -55,7 +54,6 @@ class SamplingInput(Input):
         self.model_init = args.model_init and (
             resolve_filename_with_transfer_fallback(args.model_init) or args.model_init
         )
-        self.sampler_implementation = args.sampler_implementation
         self.recover_log_prob = args.recover_log_prob
         self.device = args.device
         self.num_gnpe_iterations = args.num_gnpe_iterations
@@ -131,12 +129,6 @@ class SamplingInput(Input):
 
     def _load_sampler(self):
         """Build the sampler from the model(s) and the event data."""
-        if self.sampler_implementation == "legacy":
-            raise ValueError(
-                "The legacy samplers (GWSampler / GWSamplerGNPE) have been removed; "
-                "use sampler-implementation = composed. The last commit containing "
-                "them is tagged legacy-samplers-final."
-            )
         model = build_model_from_kwargs(
             filename=self.model, device=self.device, load_training_info=False
         )

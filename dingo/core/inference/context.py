@@ -9,12 +9,11 @@ implementation is `dingo.gw.inference.context.GWSamplerContext`.
 
 from __future__ import annotations
 
-from typing import Optional, Protocol, Union, runtime_checkable
+from typing import Optional, Protocol, Union
 
 import torch
 
 
-@runtime_checkable
 class SamplerContext(Protocol):
     """
     Protocol for the per-event state shared by all steps of a chain.

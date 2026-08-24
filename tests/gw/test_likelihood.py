@@ -271,90 +271,20 @@ def likelihood_and_theta():
     return likelihood, theta
 
 
-class TestLikelihoodDecomposition:
-    """Test the likelihood decomposition log L = log_Zn + kappa2 - 0.5*rho2opt."""
-
-    def test_log_likelihood_decomposition(self, likelihood_and_theta):
-        """log L = log_Zn + Re(d|h) - 0.5*(h|h)"""
-        likelihood, theta = likelihood_and_theta
-        log_l = likelihood.log_likelihood(theta)
-        d_inner_h, rho2opt = likelihood._d_inner_h_complex(theta)
-        kappa2 = d_inner_h.real
-        reconstructed = likelihood.log_Zn + kappa2 - 0.5 * rho2opt
-        assert np.isclose(log_l, reconstructed)
-
-    def test_rho2opt_is_positive(self, likelihood_and_theta):
-        """rho2opt = (h|h) should be non-negative."""
-        likelihood, theta = likelihood_and_theta
-        _, rho2opt = likelihood._d_inner_h_complex(theta)
-        assert rho2opt >= 0
-
-    def test_rho2opt_matches_direct_computation(self, likelihood_and_theta):
-        """rho2opt from _d_inner_h_complex should match direct (h|h)."""
-        likelihood, theta = likelihood_and_theta
-        _, rho2opt = likelihood._d_inner_h_complex(theta)
-
-        mu = likelihood.signal(theta)["waveform"]
-        rho2opt_direct = sum([inner_product(mu_ifo, mu_ifo) for mu_ifo in mu.values()])
-        assert np.isclose(rho2opt, rho2opt_direct)
+def test_d_inner_h_complex_returns_complex(likelihood_and_theta):
+    likelihood, theta = likelihood_and_theta
+    result = likelihood.d_inner_h_complex(theta)
+    assert np.isscalar(result) or isinstance(result, (complex, np.complexfloating))
 
 
-class TestDInnerHComplex:
-    """Test the complex inner product methods."""
-
-    def test_d_inner_h_complex_returns_complex(self, likelihood_and_theta):
-        """d_inner_h_complex returns a complex scalar (backward compat)."""
-        likelihood, theta = likelihood_and_theta
-        result = likelihood.d_inner_h_complex(theta)
-        assert np.isscalar(result) or isinstance(result, (complex, np.complexfloating))
-
-    def test_private_returns_tuple(self, likelihood_and_theta):
-        """_d_inner_h_complex returns (d_inner_h, rho2opt) tuple."""
-        likelihood, theta = likelihood_and_theta
-        result = likelihood._d_inner_h_complex(theta)
-        assert isinstance(result, tuple)
-        assert len(result) == 2
-
-    def test_public_matches_private(self, likelihood_and_theta):
-        """d_inner_h_complex matches _d_inner_h_complex[0]."""
-        likelihood, theta = likelihood_and_theta
-        public = likelihood.d_inner_h_complex(theta)
-        private_tuple = likelihood._d_inner_h_complex(theta)
-        assert np.isclose(public, private_tuple[0])
-
-    def test_multi_without_rho2opt(self, likelihood_and_theta):
-        """d_inner_h_complex_multi without return_rho2opt returns array only."""
-        likelihood, theta = likelihood_and_theta
-        theta_df = pd.DataFrame([theta, theta])
-        result = likelihood.d_inner_h_complex_multi(theta_df)
-        assert isinstance(result, np.ndarray)
-        assert result.shape == (2,)
-        assert np.iscomplexobj(result)
-
-    def test_multi_with_rho2opt(self, likelihood_and_theta):
-        """d_inner_h_complex_multi with return_rho2opt returns tuple."""
-        likelihood, theta = likelihood_and_theta
-        theta_df = pd.DataFrame([theta, theta, theta])
-        d_inner_h, rho2opt = likelihood.d_inner_h_complex_multi(
-            theta_df, return_rho2opt=True
-        )
-        assert d_inner_h.shape == (3,)
-        assert rho2opt.shape == (3,)
-        assert np.iscomplexobj(d_inner_h)
-        assert not np.iscomplexobj(rho2opt)
-        assert np.all(rho2opt >= 0)
-
-    def test_multi_rho2opt_consistency(self, likelihood_and_theta):
-        """rho2opt from multi matches single-sample computation."""
-        likelihood, theta = likelihood_and_theta
-        d_inner_h_single, rho2opt_single = likelihood._d_inner_h_complex(theta)
-
-        theta_df = pd.DataFrame([theta])
-        d_inner_h_multi, rho2opt_multi = likelihood.d_inner_h_complex_multi(
-            theta_df, return_rho2opt=True
-        )
-        assert np.isclose(d_inner_h_single, d_inner_h_multi[0])
-        assert np.isclose(rho2opt_single, rho2opt_multi[0])
+def test_d_inner_h_complex_multi_returns_complex_array(likelihood_and_theta):
+    likelihood, theta = likelihood_and_theta
+    theta_df = pd.DataFrame([theta, theta])
+    result = likelihood.d_inner_h_complex_multi(theta_df)
+    assert isinstance(result, np.ndarray)
+    assert result.shape == (2,)
+    assert np.iscomplexobj(result)
+    assert np.isclose(result[0], likelihood.d_inner_h_complex(theta))
 
 
 def test_phase_marginalized_aux_snr_is_phase_maximized(domain, event_data):
@@ -370,5 +300,7 @@ def test_phase_marginalized_aux_snr_is_phase_maximized(domain, event_data):
     theta = dict(THETA)
     theta.pop("phase", None)
     _, snr = likelihood.log_likelihood(theta)
-    kappa2C, rho2opt = likelihood._d_inner_h_complex({**theta, "phase": 0.0})
+    kappa2C = likelihood.d_inner_h_complex({**theta, "phase": 0.0})
+    mu = likelihood.signal({**theta, "phase": 0.0})["waveform"]
+    rho2opt = sum(inner_product(m, m) for m in mu.values())
     assert snr == pytest.approx(np.abs(kappa2C) / rho2opt**0.5)

@@ -5,7 +5,6 @@ and the likelihood."""
 from __future__ import annotations
 
 import copy
-import logging
 from typing import Optional, Union
 import numpy as np
 import torch
@@ -31,8 +30,6 @@ from dingo.gw.transforms import (
     ToTorch,
     WhitenAndScaleStrain,
 )
-
-logger = logging.getLogger(__name__)
 
 
 def _frequency_range_update(domain, event_metadata) -> Optional[dict]:
