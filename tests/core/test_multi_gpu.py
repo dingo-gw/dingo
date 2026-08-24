@@ -32,6 +32,31 @@ from dingo.gw.training.train_pipeline import get_num_gpus
 # ---------------------------------------------------------------------------
 
 
+_TINY_FLOW_METADATA = {
+    "train_settings": {
+        "model": {
+            "posterior_model_type": "normalizing_flow",
+            "posterior_kwargs": {
+                "input_dim": 2,
+                "context_dim": 4,
+                "num_flow_steps": 2,
+                "base_transform_kwargs": {
+                    "hidden_dim": 8,
+                    "num_transform_blocks": 1,
+                    "activation": "elu",
+                    "dropout_probability": 0.0,
+                    "batch_norm": False,
+                    "num_bins": 4,
+                    "base_transform_type": "rq-coupling",
+                },
+            },
+            "embedding_type": None,
+            "embedding_kwargs": None,
+        }
+    }
+}
+
+
 class _TinyNet(nn.Module):
     def __init__(self):
         super().__init__()
@@ -119,6 +144,18 @@ class TestReplaceBatchNorm:
         assert isinstance(net.bn, nn.SyncBatchNorm)
 
 
+class TestNetworkToDeviceRank:
+    def test_rank_stays_none_without_process_group(self):
+        """Single-GPU training on e.g. cuda:1 must not enable the DDP paths."""
+        from dingo.core.posterior_models.normalizing_flow import (
+            NormalizingFlowPosteriorModel,
+        )
+
+        pm = NormalizingFlowPosteriorModel(metadata=_TINY_FLOW_METADATA, device="cpu")
+        pm.network_to_device("cpu:0")
+        assert pm.rank is None
+
+
 class TestDDPStateDictStripping:
     """Test that model_dict() strips DDP 'module.' prefix when saving."""
 
@@ -127,28 +164,7 @@ class TestDDPStateDictStripping:
             NormalizingFlowPosteriorModel,
         )
 
-        model_kwargs = {
-            "posterior_model_type": "normalizing_flow",
-            "posterior_kwargs": {
-                "input_dim": 2,
-                "context_dim": 4,
-                "num_flow_steps": 2,
-                "base_transform_kwargs": {
-                    "hidden_dim": 8,
-                    "num_transform_blocks": 1,
-                    "activation": "elu",
-                    "dropout_probability": 0.0,
-                    "batch_norm": False,
-                    "num_bins": 4,
-                    "base_transform_type": "rq-coupling",
-                },
-            },
-            "embedding_type": None,
-            "embedding_kwargs": None,
-        }
-        metadata = {"train_settings": {"model": model_kwargs}}
-
-        pm = NormalizingFlowPosteriorModel(metadata=metadata, device="cpu")
+        pm = NormalizingFlowPosteriorModel(metadata=_TINY_FLOW_METADATA, device="cpu")
 
         # Simulate DDP wrapping by injecting "module." prefixes into state dict.
         original_sd = pm.network.state_dict()
@@ -288,6 +304,19 @@ def _worker_loss_info(rank, world_size, port, result_queue):
     _cleanup()
 
 
+def _worker_network_to_device(rank, world_size, port, result_queue):
+    """Worker checking that network_to_device sets the rank inside a group."""
+    from dingo.core.posterior_models.normalizing_flow import (
+        NormalizingFlowPosteriorModel,
+    )
+
+    _setup_gloo(rank, world_size, port)
+    pm = NormalizingFlowPosteriorModel(metadata=_TINY_FLOW_METADATA, device="cpu")
+    pm.network_to_device(f"cpu:{rank}")
+    result_queue.put((rank, pm.rank))
+    _cleanup()
+
+
 def _worker_runtime_limits(rank, world_size, port, result_queue):
     """Worker function for testing RuntimeLimits broadcast with gloo."""
     _setup_gloo(rank, world_size, port)
@@ -342,6 +371,29 @@ class TestGlooDDP:
         # mean over ranks of (1, 2) and (2, 4), averaged over the two steps.
         assert results[0][0] == pytest.approx(2.25)
         assert results[1][0] == pytest.approx(2.25)
+
+    def test_network_to_device_sets_rank(self, free_port):
+        """Inside a process group, the device index becomes the rank."""
+        result_queue = mp.Queue()
+        world_size = 2
+        processes = [
+            mp.Process(
+                target=_worker_network_to_device,
+                args=(rank, world_size, free_port, result_queue),
+            )
+            for rank in range(world_size)
+        ]
+        for p in processes:
+            p.start()
+        for p in processes:
+            p.join()
+            assert p.exitcode == 0
+
+        results = {}
+        while not result_queue.empty():
+            rank, pm_rank = result_queue.get()
+            results[rank] = pm_rank
+        assert results == {0: 0, 1: 1}
 
     def test_runtime_limits_broadcast(self, free_port):
         """When rank 0 hits the epoch limit, rank 1 should also stop."""

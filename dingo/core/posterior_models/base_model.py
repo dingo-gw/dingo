@@ -210,12 +210,15 @@ class BasePosteriorModel(ABC):
         Put model to device and set ``self.device`` accordingly.
 
         Accepts plain device strings (``"cpu"``, ``"cuda"``) as well as
-        rank-qualified CUDA strings (``"cuda:0"``, ``"cuda:1"``, …).  In the
-        latter case ``self.rank`` is set to the integer rank index.
+        index-qualified strings (``"cuda:0"``, ``"cuda:1"``, …).  ``self.rank``
+        is set to the device index only when a DDP process group is active;
+        otherwise it stays ``None`` so that single-GPU training on e.g.
+        ``"cuda:1"`` (a shared multi-GPU machine) does not enable the DDP code
+        paths.
         """
         if "cpu" not in device and "cuda" not in device:
             raise ValueError(f"Device should contain 'cpu' or 'cuda', got {device}.")
-        if ":" in device:
+        if ":" in device and dist.is_initialized():
             self.rank = int(device.split(":")[1])
         self.device = torch.device(device)
         print(f"Putting posterior model to device {self.device}.")
@@ -456,7 +459,9 @@ class BasePosteriorModel(ABC):
 
                 if is_primary:
                     print(f"\nStart training epoch {self.epoch} with lr {lr}")
-                time_start = torch.tensor(time.time(), device=self.device, dtype=torch.float64)
+                time_start = torch.tensor(
+                    time.time(), device=self.device, dtype=torch.float64
+                )
 
                 train_loss, n_iter = train_epoch(
                     self,
@@ -480,7 +485,9 @@ class BasePosteriorModel(ABC):
                     )
                     print(f"Start testing epoch {self.epoch}")
 
-                time_start = torch.tensor(time.time(), device=self.device, dtype=torch.float64)
+                time_start = torch.tensor(
+                    time.time(), device=self.device, dtype=torch.float64
+                )
                 test_loss = test_epoch(
                     self,
                     dataloader=test_loader,
