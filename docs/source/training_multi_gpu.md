@@ -123,8 +123,8 @@ Every training stage has to be adapted independently.
 `BatchNorm` computes its statistics from the batch on each GPU, so under DDP every replica normalizes with
 slightly different statistics, and synchronizing them (`SyncBatchNorm`) stalls the forward pass at every
 normalization layer. Use `LayerNorm` instead, which normalizes each sample independently and needs no
-communication between GPUs. Set `layer_norm: True` (and `batch_norm: False`) in the flow and embedding network
-settings:
+communication between GPUs. The example settings files already select it via `layer_norm: True` (and
+`batch_norm: False`) in the flow and embedding network settings:
 
 ```yaml
 model:

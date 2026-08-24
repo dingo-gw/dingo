@@ -46,7 +46,8 @@ model:
       num_transform_blocks: 5
       activation: elu
       dropout_probability: 0.0
-      batch_norm: True
+      batch_norm: False
+      layer_norm: True
       num_bins: 8
       base_transform_type: rq-coupling
   embedding_kwargs:
@@ -57,7 +58,8 @@ model:
                   128, 128, 128, 128, 128, 128]
     activation: elu
     dropout: 0.0
-    batch_norm: True
+    batch_norm: False
+    layer_norm: True
     svd:
       num_training_samples: 20000
       num_validation_samples: 5000
