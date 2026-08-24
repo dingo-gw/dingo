@@ -248,3 +248,25 @@ def test_backward_pass_of_2stage_enet_with_context(data_setup_rb):
 
 if __name__ == '__main__':
     pass
+
+
+def test_dense_residual_net_layer_norm():
+    """
+    With layer_norm=True every glasflow BatchNorm1d must be swapped for a
+    LayerNorm (same features and eps), and the net must run on a batch of one,
+    which BatchNorm rejects in training mode.
+    """
+    net = DenseResidualNet(
+        input_dim=8, output_dim=4, hidden_dims=(16, 16), batch_norm=False,
+        layer_norm=True)
+    modules = list(net.modules())
+    assert not any(isinstance(m, torch.nn.BatchNorm1d) for m in modules)
+    layer_norms = [m for m in modules if isinstance(m, torch.nn.LayerNorm)]
+    assert len(layer_norms) == 2 * 2  # two norms per residual block
+    assert all(m.normalized_shape == (16,) and m.eps == 1e-3 for m in layer_norms)
+    net.train()
+    assert net(torch.randn(1, 8)).shape == (1, 4)
+
+    with pytest.raises(ValueError):
+        DenseResidualNet(input_dim=8, output_dim=4, hidden_dims=(16,),
+                         batch_norm=True, layer_norm=True)

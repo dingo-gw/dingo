@@ -118,6 +118,27 @@ training.
 
 Every training stage has to be adapted independently.  
 
+### Normalization layers
+
+`BatchNorm` computes its statistics from the batch on each GPU, so under DDP every replica normalizes with
+slightly different statistics, and synchronizing them (`SyncBatchNorm`) stalls the forward pass at every
+normalization layer. Use `LayerNorm` instead, which normalizes each sample independently and needs no
+communication between GPUs. Set `layer_norm: True` (and `batch_norm: False`) in the flow and embedding network
+settings:
+
+```yaml
+model:
+  posterior_kwargs:
+    base_transform_kwargs:
+      batch_norm: False
+      layer_norm: True
+  embedding_kwargs:
+    batch_norm: False
+    layer_norm: True
+```
+
+Checkpoints trained with `batch_norm: True` keep their `BatchNorm` layers when loaded.
+
 ### Freezing layers
 
 It is currently not possible to set `freeze_rb_layer: True` in DDP. The reason is that when starting the separate 

@@ -21,7 +21,6 @@ from torch.utils.data import TensorDataset
 from dingo.core.utils.torchutils import (
     build_train_and_test_loaders,
     get_cuda_info,
-    replace_BatchNorm_with_SyncBatchNorm,
     set_seed_based_on_rank,
 )
 from dingo.core.utils.trainutils import LossInfo, RuntimeLimits
@@ -55,17 +54,6 @@ _TINY_FLOW_METADATA = {
         }
     }
 }
-
-
-class _TinyNet(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.linear = nn.Linear(4, 1)
-        self.bn = nn.BatchNorm1d(4)
-        self.name = "FlowWrapper"
-
-    def forward(self, x):
-        return self.linear(self.bn(x))
 
 
 def _setup_gloo(rank: int, world_size: int, port: int):
@@ -134,14 +122,6 @@ class TestSetSeedBasedOnRank:
         set_seed_based_on_rank(0)
         b = np.random.rand(3)
         np.testing.assert_array_equal(a, b)
-
-
-class TestReplaceBatchNorm:
-    def test_converts_batchnorm(self):
-        net = _TinyNet()
-        assert isinstance(net.bn, nn.BatchNorm1d)
-        net = replace_BatchNorm_with_SyncBatchNorm(net)
-        assert isinstance(net.bn, nn.SyncBatchNorm)
 
 
 class TestNetworkToDeviceRank:

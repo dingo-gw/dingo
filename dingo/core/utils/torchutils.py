@@ -102,9 +102,20 @@ def cleanup_ddp() -> None:
     print("Destroyed process group.")
 
 
-def replace_BatchNorm_with_SyncBatchNorm(network: nn.Module) -> nn.Module:
-    """Replace all BatchNorm layers with SyncBatchNorm for DDP training."""
-    return nn.SyncBatchNorm.convert_sync_batchnorm(network)
+def replace_BatchNorm_with_LayerNorm(network: nn.Module) -> nn.Module:
+    """
+    Replace every ``nn.BatchNorm1d`` in ``network`` (in place) with an
+    ``nn.LayerNorm`` over the same number of features and the same eps.
+
+    LayerNorm normalizes each sample independently, so unlike BatchNorm it needs
+    no cross-GPU statistics synchronization under DDP.
+    """
+    for name, child in network.named_children():
+        if isinstance(child, nn.BatchNorm1d):
+            setattr(network, name, nn.LayerNorm(child.num_features, eps=child.eps))
+        else:
+            replace_BatchNorm_with_LayerNorm(child)
+    return network
 
 
 def print_number_of_model_parameters(network: nn.Module) -> None:

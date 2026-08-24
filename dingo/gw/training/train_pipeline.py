@@ -30,7 +30,6 @@ from dingo.core.utils import (
 from dingo.core.utils.torchutils import (
     cleanup_ddp,
     document_gpus,
-    replace_BatchNorm_with_SyncBatchNorm,
     set_seed_based_on_rank,
     setup_ddp,
 )
@@ -643,7 +642,6 @@ def run_training_ddp(
                 except ImportError:
                     print("WandB is enabled but not installed.")
 
-        pm.network = replace_BatchNorm_with_SyncBatchNorm(pm.network)
         pm.network = DDP(pm.network, device_ids=[rank])
 
         global_epoch.value = pm.epoch

@@ -42,6 +42,7 @@ def create_base_transform(
     activation: str = "relu",
     dropout_probability: float = 0.0,
     batch_norm: bool = False,
+    layer_norm: bool = False,
     num_bins: int = 8,
     tail_bound: float = 1.0,
     apply_unconditional_transform: bool = False,
@@ -82,6 +83,9 @@ def create_base_transform(
         dropout probability for regularization
     :param batch_norm: bool = False
         whether to use batch normalization
+    :param layer_norm: bool = False
+        whether to use layer normalization instead of batch normalization
+        (mutually exclusive with batch_norm)
     :param num_bins: int = 8
         number of bins for the spline
     :param tail_bound: float = 1.
@@ -95,6 +99,8 @@ def create_base_transform(
     """
 
     activation_fn = torchutils.get_activation_function_from_string(activation)
+    if batch_norm and layer_norm:
+        raise ValueError("Set at most one of batch_norm and layer_norm.")
 
     if base_transform_type == "rq-coupling":
         if param_dim == 1:
@@ -103,7 +109,7 @@ def create_base_transform(
             mask = nflows.utils.create_alternating_binary_mask(
                 param_dim, even=(i % 2 == 0)
             )
-        return transforms.PiecewiseRationalQuadraticCouplingTransform(
+        transform = transforms.PiecewiseRationalQuadraticCouplingTransform(
             mask=mask,
             transform_net_create_fn=(
                 lambda in_features, out_features: nflows_nets.ResidualNet(
@@ -114,7 +120,7 @@ def create_base_transform(
                     num_blocks=num_transform_blocks,
                     activation=activation_fn,
                     dropout_probability=dropout_probability,
-                    use_batch_norm=batch_norm,
+                    use_batch_norm=batch_norm or layer_norm,
                 )
             ),
             num_bins=num_bins,
@@ -124,7 +130,7 @@ def create_base_transform(
         )
 
     elif base_transform_type == "rq-autoregressive":
-        return transforms.MaskedPiecewiseRationalQuadraticAutoregressiveTransform(
+        transform = transforms.MaskedPiecewiseRationalQuadraticAutoregressiveTransform(
             features=param_dim,
             hidden_features=hidden_dim,
             context_features=context_dim,
@@ -136,11 +142,15 @@ def create_base_transform(
             random_mask=False,
             activation=activation_fn,
             dropout_probability=dropout_probability,
-            use_batch_norm=batch_norm,
+            use_batch_norm=batch_norm or layer_norm,
         )
 
     else:
         raise ValueError
+
+    if layer_norm:
+        torchutils.replace_BatchNorm_with_LayerNorm(transform)
+    return transform
 
 
 def create_transform(

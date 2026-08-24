@@ -254,3 +254,33 @@ def test_model_builder_for_nsf_with_rb_embedding_net(data_setup_nsf_small):
         model(d.y, d.x, d.z, d.z)
     with pytest.raises(RuntimeError):
         model(d.y, d.x, d.x)
+
+
+@pytest.mark.parametrize("base_transform_type", ["rq-coupling", "rq-autoregressive"])
+def test_nsf_layer_norm(base_transform_type):
+    """
+    With layer_norm=True the flow must contain LayerNorm layers and no
+    BatchNorm1d, and evaluate the log_prob on a batch of one, which BatchNorm
+    rejects in training mode.
+    """
+    torch.manual_seed(0)
+    flow = create_nsf_model(
+        input_dim=3,
+        context_dim=5,
+        num_flow_steps=2,
+        base_transform_kwargs={
+            "hidden_dim": 16,
+            "num_transform_blocks": 2,
+            "activation": "elu",
+            "dropout_probability": 0.0,
+            "batch_norm": False,
+            "layer_norm": True,
+            "num_bins": 4,
+            "base_transform_type": base_transform_type,
+        },
+    )
+    modules = list(flow.modules())
+    assert not any(isinstance(m, torch.nn.BatchNorm1d) for m in modules)
+    assert any(isinstance(m, torch.nn.LayerNorm) for m in modules)
+    flow.train()
+    assert flow.log_prob(torch.randn(1, 3), context=torch.randn(1, 5)).shape == (1,)

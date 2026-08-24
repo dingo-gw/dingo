@@ -178,6 +178,7 @@ class DenseResidualNet(nn.Module):
         activation: Callable = F.elu,
         dropout: float = 0.0,
         batch_norm: bool = True,
+        layer_norm: bool = False,
         context_features: int = None,
     ):
         """
@@ -195,12 +196,17 @@ class DenseResidualNet(nn.Module):
             dropout probability for residual blocks used for reqularization
         batch_norm: bool
             flag that specifies whether to use batch normalization
+        layer_norm: bool
+            flag that specifies whether to use layer normalization instead of
+            batch normalization (mutually exclusive with batch_norm)
         context_features: int
             Number of additional context features, which are provided to the residual
             blocks via gated linear units. If None, no additional context expected.
         """
 
         super(DenseResidualNet, self).__init__()
+        if batch_norm and layer_norm:
+            raise ValueError("Set at most one of batch_norm and layer_norm.")
         self.input_dim = input_dim
         self.output_dim = output_dim
         self.hidden_dims = hidden_dims
@@ -214,11 +220,13 @@ class DenseResidualNet(nn.Module):
                     context_features=context_features,
                     activation=activation,
                     dropout_probability=dropout,
-                    use_batch_norm=batch_norm,
+                    use_batch_norm=batch_norm or layer_norm,
                 )
                 for n in range(self.num_res_blocks)
             ]
         )
+        if layer_norm:
+            torchutils.replace_BatchNorm_with_LayerNorm(self.blocks)
         self.resize_layers = nn.ModuleList(
             [
                 nn.Linear(self.hidden_dims[n - 1], self.hidden_dims[n])
@@ -287,6 +295,7 @@ def create_enet_with_projection_layer_and_dense_resnet(
     activation: str = "elu",
     dropout: float = 0.0,
     batch_norm: bool = True,
+    layer_norm: bool = False,
     added_context: bool = False,
 ):
     """
@@ -341,6 +350,9 @@ def create_enet_with_projection_layer_and_dense_resnet(
         dropout probability for residual blocks used for reqularization
     :param batch_norm: bool
         flag that specifies whether to use batch normalization
+    :param layer_norm: bool
+        flag that specifies whether to use layer normalization instead of
+        batch normalization (mutually exclusive with batch_norm)
     :param added_context: bool
         if set to True, additional context z is concatenated to the embedded
         feature vector enet(x); note that in this case, the expected input is
@@ -356,6 +368,7 @@ def create_enet_with_projection_layer_and_dense_resnet(
         activation=activation_fn,
         dropout=dropout,
         batch_norm=batch_norm,
+        layer_norm=layer_norm,
     )
     enet = nn.Sequential(module_1, module_2)
 
