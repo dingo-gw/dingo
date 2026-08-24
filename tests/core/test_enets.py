@@ -19,7 +19,7 @@ def data_setup_rb():
         'hidden_dims': [32, 16, 16, 8],
         'activation': 'elu',
         'dropout': 0.0,
-        'batch_norm': True,
+        'norm': 'BatchNorm',
         'svd': {'size': n_rb}
     }
     return {
@@ -252,13 +252,12 @@ if __name__ == '__main__':
 
 def test_dense_residual_net_layer_norm():
     """
-    With layer_norm=True every glasflow BatchNorm1d must be swapped for a
+    With norm="LayerNorm" every glasflow BatchNorm1d must be swapped for a
     LayerNorm (same features and eps), and the net must run on a batch of one,
     which BatchNorm rejects in training mode.
     """
     net = DenseResidualNet(
-        input_dim=8, output_dim=4, hidden_dims=(16, 16), batch_norm=False,
-        layer_norm=True)
+        input_dim=8, output_dim=4, hidden_dims=(16, 16), norm="LayerNorm")
     modules = list(net.modules())
     assert not any(isinstance(m, torch.nn.BatchNorm1d) for m in modules)
     layer_norms = [m for m in modules if isinstance(m, torch.nn.LayerNorm)]
@@ -269,4 +268,4 @@ def test_dense_residual_net_layer_norm():
 
     with pytest.raises(ValueError):
         DenseResidualNet(input_dim=8, output_dim=4, hidden_dims=(16,),
-                         batch_norm=True, layer_norm=True)
+                         norm="GroupNorm")

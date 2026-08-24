@@ -44,7 +44,7 @@ _TINY_FLOW_METADATA = {
                     "num_transform_blocks": 1,
                     "activation": "elu",
                     "dropout_probability": 0.0,
-                    "batch_norm": False,
+                    "norm": None,
                     "num_bins": 4,
                     "base_transform_type": "rq-coupling",
                 },

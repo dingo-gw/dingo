@@ -25,8 +25,7 @@ nde:
         num_transform_blocks: 2
         activation: elu
         dropout_probability: 0.1
-        batch_norm: False
-        layer_norm: True
+        norm: BatchNorm
         num_bins: 8
         base_transform_type: rq-coupling
   # nde training

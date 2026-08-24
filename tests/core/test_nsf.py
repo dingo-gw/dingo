@@ -22,7 +22,7 @@ def data_setup_nsf_large():
         "num_transform_blocks": 5,
         "activation": "elu",
         "dropout_probability": 0.0,
-        "batch_norm": True,
+        "norm": "BatchNorm",
         "num_bins": 8,
         "base_transform_type": "rq-coupling",
     }
@@ -60,7 +60,7 @@ def data_setup_nsf_large():
         ],
         "activation": "elu",
         "dropout": 0.0,
-        "batch_norm": True,
+        "norm": "BatchNorm",
         "added_context": True,
     }
     d.embedding_net_builder = create_enet_with_projection_layer_and_dense_resnet
@@ -85,7 +85,7 @@ def data_setup_nsf_small():
         "num_transform_blocks": 2,
         "activation": "elu",
         "dropout_probability": 0.0,
-        "batch_norm": True,
+        "norm": "BatchNorm",
         "num_bins": 8,
         "base_transform_type": "rq-coupling",
     }
@@ -97,7 +97,7 @@ def data_setup_nsf_small():
         "hidden_dims": [32, 16, 8],
         "activation": "elu",
         "dropout": 0.0,
-        "batch_norm": True,
+        "norm": "BatchNorm",
         "added_context": True,
         "svd": {"size": 10},
     }
@@ -259,7 +259,7 @@ def test_model_builder_for_nsf_with_rb_embedding_net(data_setup_nsf_small):
 @pytest.mark.parametrize("base_transform_type", ["rq-coupling", "rq-autoregressive"])
 def test_nsf_layer_norm(base_transform_type):
     """
-    With layer_norm=True the flow must contain LayerNorm layers and no
+    With norm="LayerNorm" the flow must contain LayerNorm layers and no
     BatchNorm1d, and evaluate the log_prob on a batch of one, which BatchNorm
     rejects in training mode.
     """
@@ -273,8 +273,7 @@ def test_nsf_layer_norm(base_transform_type):
             "num_transform_blocks": 2,
             "activation": "elu",
             "dropout_probability": 0.0,
-            "batch_norm": False,
-            "layer_norm": True,
+            "norm": "LayerNorm",
             "num_bins": 4,
             "base_transform_type": base_transform_type,
         },

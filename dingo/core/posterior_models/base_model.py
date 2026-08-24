@@ -87,6 +87,7 @@ class BasePosteriorModel(ABC):
         self.metadata = metadata
         if self.metadata is not None:
             self.model_kwargs = self.metadata["train_settings"]["model"]
+            update_model_config(self.model_kwargs)  # For backward compatibility
             # Expect self.optimizer_settings and self.scheduler_settings to be set
             # separately, and before calling initialize_optimizer_and_scheduler().
 

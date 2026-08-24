@@ -25,7 +25,7 @@ def data_setup_pm_1():
             "num_transform_blocks": 2,
             "activation": "elu",
             "dropout_probability": 0.0,
-            "batch_norm": True,
+            "norm": "BatchNorm",
             "num_bins": 8,
             "base_transform_type": "rq-coupling",
         },
@@ -39,7 +39,7 @@ def data_setup_pm_1():
         "hidden_dims": [32, 16, 8],
         "activation": "elu",
         "dropout": 0.0,
-        "batch_norm": True,
+        "norm": "BatchNorm",
         "added_context": True,
     }
 
@@ -222,3 +222,48 @@ def test_pm_scheduler(data_setup_pm_1, data_setup_optimizer_scheduler):
         factors.append(lr / pm.optimizer.defaults["lr"])
         torchutils.perform_scheduler_step(pm.scheduler, loss)
     assert np.allclose(factors, e.cosine_factors), "Scheduler does not load correctly."
+
+
+def test_legacy_batch_norm_setting_is_converted():
+    """
+    Checkpoints and settings from before the `norm` option carry a boolean
+    `batch_norm` key; it must map to norm="BatchNorm"/None at any nesting level
+    so that old networks are rebuilt with the same layers.
+    """
+    model_kwargs = {
+        "posterior_model_type": "normalizing_flow",
+        "posterior_kwargs": {
+            "input_dim": 3,
+            "context_dim": 5,
+            "num_flow_steps": 2,
+            "base_transform_kwargs": {
+                "hidden_dim": 16,
+                "num_transform_blocks": 2,
+                "activation": "elu",
+                "dropout_probability": 0.0,
+                "batch_norm": "true",
+                "num_bins": 4,
+                "base_transform_type": "rq-coupling",
+            },
+        },
+        "embedding_type": None,
+        "embedding_kwargs": None,
+    }
+    pm = NormalizingFlowPosteriorModel(
+        metadata={"train_settings": {"model": model_kwargs}}, device="cpu"
+    )
+    base_kwargs = pm.model_kwargs["posterior_kwargs"]["base_transform_kwargs"]
+    assert "batch_norm" not in base_kwargs
+    assert base_kwargs["norm"] == "BatchNorm"
+    assert any(isinstance(m, torch.nn.BatchNorm1d) for m in pm.network.modules())
+
+    base_kwargs["batch_norm"] = False
+    del base_kwargs["norm"]
+    pm = NormalizingFlowPosteriorModel(
+        metadata={"train_settings": {"model": model_kwargs}}, device="cpu"
+    )
+    assert pm.model_kwargs["posterior_kwargs"]["base_transform_kwargs"]["norm"] is None
+    assert not any(
+        isinstance(m, (torch.nn.BatchNorm1d, torch.nn.LayerNorm))
+        for m in pm.network.modules()
+    )

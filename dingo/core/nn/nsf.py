@@ -12,7 +12,7 @@ from glasflow.nflows import distributions, flows, transforms
 import glasflow.nflows.nn.nets as nflows_nets
 from dingo.core.utils import torchutils
 from dingo.core.nn.enets import create_enet_with_projection_layer_and_dense_resnet
-from typing import Union, Callable, Tuple
+from typing import Union, Callable, Tuple, Optional
 
 
 def create_linear_transform(param_dim: int):
@@ -41,8 +41,7 @@ def create_base_transform(
     num_transform_blocks: int = 2,
     activation: str = "relu",
     dropout_probability: float = 0.0,
-    batch_norm: bool = False,
-    layer_norm: bool = False,
+    norm: Optional[str] = None,
     num_bins: int = 8,
     tail_bound: float = 1.0,
     apply_unconditional_transform: bool = False,
@@ -81,11 +80,9 @@ def create_base_transform(
         activation function
     :param dropout_probability: float = 0.0
         dropout probability for regularization
-    :param batch_norm: bool = False
-        whether to use batch normalization
-    :param layer_norm: bool = False
-        whether to use layer normalization instead of batch normalization
-        (mutually exclusive with batch_norm)
+    :param norm: str or None = None
+        normalization used in the residual blocks: "BatchNorm", "LayerNorm" or
+        None
     :param num_bins: int = 8
         number of bins for the spline
     :param tail_bound: float = 1.
@@ -99,8 +96,10 @@ def create_base_transform(
     """
 
     activation_fn = torchutils.get_activation_function_from_string(activation)
-    if batch_norm and layer_norm:
-        raise ValueError("Set at most one of batch_norm and layer_norm.")
+    if norm not in ("BatchNorm", "LayerNorm", None):
+        raise ValueError(
+            f"norm must be 'BatchNorm', 'LayerNorm' or None, got {norm!r}."
+        )
 
     if base_transform_type == "rq-coupling":
         if param_dim == 1:
@@ -120,7 +119,7 @@ def create_base_transform(
                     num_blocks=num_transform_blocks,
                     activation=activation_fn,
                     dropout_probability=dropout_probability,
-                    use_batch_norm=batch_norm or layer_norm,
+                    use_batch_norm=norm is not None,
                 )
             ),
             num_bins=num_bins,
@@ -142,13 +141,13 @@ def create_base_transform(
             random_mask=False,
             activation=activation_fn,
             dropout_probability=dropout_probability,
-            use_batch_norm=batch_norm or layer_norm,
+            use_batch_norm=norm is not None,
         )
 
     else:
         raise ValueError
 
-    if layer_norm:
+    if norm == "LayerNorm":
         torchutils.replace_BatchNorm_with_LayerNorm(transform)
     return transform
 

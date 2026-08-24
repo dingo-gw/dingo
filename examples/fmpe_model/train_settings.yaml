@@ -35,8 +35,7 @@ model:
   posterior_model_type: flow_matching
   posterior_kwargs:
     activation: gelu
-    batch_norm: False
-    layer_norm: True
+    norm: BatchNorm
     context_with_glu: false
     dropout: 0.0
     hidden_dims: [4096, 4096, 4096,
@@ -52,8 +51,6 @@ model:
     theta_embedding_kwargs:
       embedding_net:
         activation: gelu
-        batch_norm: False
-        layer_norm: True
         hidden_dims: [16, 32, 64, 128, 256]
         output_dim: 256
         type: DenseResidualNet
@@ -65,8 +62,7 @@ model:
     type: DenseResidualNet
   embedding_kwargs:
     activation: gelu
-    batch_norm: False
-    layer_norm: True
+    norm: BatchNorm
     dropout: 0.0
     hidden_dims:
     - 2048
