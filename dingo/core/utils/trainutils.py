@@ -163,12 +163,14 @@ class LossInfo:
         n = torch.tensor(sum(self.cached_n), device=self.device, dtype=torch.float32)
 
         if self.is_ddp:
-            # Reduce absolute loss across GPUs so that normalization is correct
-            # even when GPUs process different numbers of samples.
+            # All-reduce the absolute loss across GPUs so that normalization is
+            # correct even when GPUs process different numbers of samples, and so
+            # that every rank ends up with the same loss (the LR scheduler steps
+            # on it, so ranks must not diverge).
             abs_loss = loss * n
             dist.barrier()
-            dist.reduce(abs_loss, dst=0)
-            dist.reduce(n, dst=0)
+            dist.all_reduce(abs_loss)
+            dist.all_reduce(n)
             loss = abs_loss / n
             self.update_timer(timer_mode="Aggregation")
 

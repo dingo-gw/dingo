@@ -338,6 +338,10 @@ class TestGlooDDP:
         assert len(results) == world_size
         # Both ranks should report the same number of iterations.
         assert results[0][1] == results[1][1] == 2
+        # Losses are all-reduced, so every rank sees the same average: per step
+        # mean over ranks of (1, 2) and (2, 4), averaged over the two steps.
+        assert results[0][0] == pytest.approx(2.25)
+        assert results[1][0] == pytest.approx(2.25)
 
     def test_runtime_limits_broadcast(self, free_port):
         """When rank 0 hits the epoch limit, rank 1 should also stop."""
