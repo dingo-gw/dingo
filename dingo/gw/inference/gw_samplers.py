@@ -33,6 +33,7 @@ from dingo.gw.transforms import (
     DecimateWaveformsAndASDS,
     MaskDataForFrequencyRangeUpdate,
     StrainTokenization,
+    MaskTokensForFrequencyRangeUpdate,
     UnpackDict,
 )
 
@@ -92,6 +93,32 @@ class GWSamplerMixin(object):
         )
 
     @property
+    def mask_frequency_edges_settings(self: SamplerProtocol):
+        tok = self.base_model_metadata["train_settings"]["data"].get("tokenization")
+        if tok is not None:
+            return tok.get("mask_frequency_edges")
+        return None
+
+    @property
+    def is_flexible_freq(self: SamplerProtocol) -> bool:
+        """True if the model was trained to handle variable f_min / f_max.
+
+        Flexibility can come from:
+        - random_strain_cropping (ResNet path)
+        - mask_frequency_edges in the tokenization settings (transformer path,
+          with specific f_min/f_max bounds)
+        - mask_random_tokens in the tokenization settings (transformer path,
+          no specific bounds but the network is robust to missing tokens)
+        """
+        if self.random_strain_cropping is not None:
+            return True
+        tok = self.base_model_metadata["train_settings"]["data"].get("tokenization")
+        if tok is not None:
+            if "mask_frequency_edges" in tok or "mask_random_tokens" in tok:
+                return True
+        return False
+
+    @property
     def minimum_frequency(self) -> float | dict[str, float]:
         if self._minimum_frequency is not None:
             return self._minimum_frequency
@@ -106,12 +133,35 @@ class GWSamplerMixin(object):
             domain = self.domain
         else:
             raise ValueError("Frequency updates only possible for frequency domains.")
-        _validate_minimum_frequency(
-            value,
-            self.detectors,
-            domain,
-            self.random_strain_cropping,
-        )  # TODO: Ensure minimum frequency is a dict?
+        f_min_vals = np.array(
+            list(value.values())
+            if isinstance(value, dict)
+            else [value] * len(self.detectors)
+        )
+        if np.all(f_min_vals == domain.f_min):
+            self._minimum_frequency = value
+            self._initialize_transforms()
+            return
+        if not self.is_flexible_freq:
+            raise ValueError(
+                "Model was not trained with variable frequency ranges "
+                "(no random_strain_cropping, mask_frequency_edges, or mask_random_tokens). "
+                "Cannot update minimum_frequency."
+            )
+        if self.random_strain_cropping is not None:
+            _validate_minimum_frequency(
+                value,
+                self.detectors,
+                domain,
+                self.random_strain_cropping,
+            )
+        if self.mask_frequency_edges_settings is not None:
+            _validate_minimum_frequency_transformer(
+                value,
+                self.detectors,
+                domain,
+                self.mask_frequency_edges_settings,
+            )
         self._minimum_frequency = value
         self._initialize_transforms()
 
@@ -130,12 +180,35 @@ class GWSamplerMixin(object):
             domain = self.domain
         else:
             raise ValueError("Frequency updates only possible for frequency domains.")
-        _validate_maximum_frequency(
-            value,
-            self.detectors,
-            domain,
-            self.random_strain_cropping,
+        f_max_vals = np.array(
+            list(value.values())
+            if isinstance(value, dict)
+            else [value] * len(self.detectors)
         )
+        if np.all(f_max_vals == domain.f_max):
+            self._maximum_frequency = value
+            self._initialize_transforms()
+            return
+        if not self.is_flexible_freq:
+            raise ValueError(
+                "Model was not trained with variable frequency ranges "
+                "(no random_strain_cropping, mask_frequency_edges, or mask_random_tokens). "
+                "Cannot update maximum_frequency."
+            )
+        if self.random_strain_cropping is not None:
+            _validate_maximum_frequency(
+                value,
+                self.detectors,
+                domain,
+                self.random_strain_cropping,
+            )
+        if self.mask_frequency_edges_settings is not None:
+            _validate_maximum_frequency_transformer(
+                value,
+                self.detectors,
+                domain,
+                self.mask_frequency_edges_settings,
+            )
         self._maximum_frequency = value
         self._initialize_transforms()
 
@@ -346,6 +419,16 @@ class GWSampler(GWSamplerMixin, Sampler):
                     drop_last_token=tok.get("drop_last_token", False),
                 )
             )
+            if self.frequency_updates:
+                transform_pre.append(
+                    MaskTokensForFrequencyRangeUpdate(
+                        domain=self.domain,
+                        detectors=self.detectors,
+                        minimum_frequency=self.minimum_frequency,
+                        maximum_frequency=self.maximum_frequency,
+                        mask_frequency_edges_settings=self.mask_frequency_edges_settings,
+                    )
+                )
 
         transform_pre.append(ToTorch(device=self.model.device))
 
@@ -648,6 +731,52 @@ def _validate_minimum_frequency(
             )
 
 
+def _validate_minimum_frequency_transformer(
+    f_min: dict[str, float] | float,
+    detectors: list[str],
+    domain: UniformFrequencyDomain | MultibandedFrequencyDomain,
+    mask_frequency_edges_settings: dict,
+):
+    """Validate f_min update against the MaskFrequencyEdges training bounds.
+
+    The model was trained to handle f_min values up to f_max_lower, so any
+    requested f_min must not exceed that bound.
+    """
+    if isinstance(f_min, (float, int)):
+        f_min = {d: f_min for d in detectors}
+    cap = mask_frequency_edges_settings.get("f_max_lower", domain.f_max)
+    for d in detectors:
+        if d in f_min and f_min[d] > cap:
+            raise ValueError(
+                f"Requested minimum_frequency for {d} ({f_min[d]} Hz) exceeds "
+                f"the upper bound f_max_lower={cap} Hz from mask_frequency_edges. "
+                f"The model was not trained for this frequency range."
+            )
+
+
+def _validate_maximum_frequency_transformer(
+    f_max: dict[str, float] | float,
+    detectors: list[str],
+    domain: UniformFrequencyDomain | MultibandedFrequencyDomain,
+    mask_frequency_edges_settings: dict,
+):
+    """Validate f_max update against the MaskFrequencyEdges training bounds.
+
+    The model was trained to handle f_max values down to f_min_upper, so any
+    requested f_max must not fall below that bound.
+    """
+    if isinstance(f_max, (float, int)):
+        f_max = {d: f_max for d in detectors}
+    floor = mask_frequency_edges_settings.get("f_min_upper", domain.f_min)
+    for d in detectors:
+        if d in f_max and f_max[d] < floor:
+            raise ValueError(
+                f"Requested maximum_frequency for {d} ({f_max[d]} Hz) is below "
+                f"the lower bound f_min_upper={floor} Hz from mask_frequency_edges. "
+                f"The model was not trained for this frequency range."
+            )
+
+
 def check_frequency_updates(
     model_metadata: dict,
     f_min: dict[str, float] | float | None = None,
@@ -703,15 +832,43 @@ def check_frequency_updates(
     crop_settings = model_metadata["train_settings"]["data"].get(
         "random_strain_cropping"
     )
+    tok = model_metadata["train_settings"]["data"].get("tokenization")
+    mask_frequency_edges_settings = tok.get("mask_frequency_edges") if tok else None
+    has_flexible_freq = crop_settings is not None or (
+        tok is not None
+        and ("mask_frequency_edges" in tok or "mask_random_tokens" in tok)
+    )
     detectors = model_metadata["train_settings"]["data"]["detectors"]
     domain = build_domain_from_model_metadata(model_metadata, base=True)
     if not isinstance(domain, (UniformFrequencyDomain, MultibandedFrequencyDomain)):
         raise ValueError("Frequency updates only possible for frequency domains.")
 
     if f_min is not None:
-        _validate_minimum_frequency(f_min, detectors, domain, crop_settings)
+        if not has_flexible_freq:
+            raise ValueError(
+                "Model was not trained with variable frequency ranges "
+                "(no random_strain_cropping, mask_frequency_edges, or mask_random_tokens). "
+                "Cannot update minimum_frequency."
+            )
+        if crop_settings is not None:
+            _validate_minimum_frequency(f_min, detectors, domain, crop_settings)
+        if mask_frequency_edges_settings is not None:
+            _validate_minimum_frequency_transformer(
+                f_min, detectors, domain, mask_frequency_edges_settings
+            )
     if f_max is not None:
-        _validate_maximum_frequency(f_max, detectors, domain, crop_settings)
+        if not has_flexible_freq:
+            raise ValueError(
+                "Model was not trained with variable frequency ranges "
+                "(no random_strain_cropping, mask_frequency_edges, or mask_random_tokens). "
+                "Cannot update maximum_frequency."
+            )
+        if crop_settings is not None:
+            _validate_maximum_frequency(f_max, detectors, domain, crop_settings)
+        if mask_frequency_edges_settings is not None:
+            _validate_maximum_frequency_transformer(
+                f_max, detectors, domain, mask_frequency_edges_settings
+            )
 
 
 def _validate_detectors_transformer(

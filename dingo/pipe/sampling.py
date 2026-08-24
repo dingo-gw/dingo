@@ -65,8 +65,8 @@ class SamplingInput(Input):
 
         # Frequencies
         # self.sampling_frequency = args.sampling_frequency
-        # self.minimum_frequency = args.minimum_frequency
-        # self.maximum_frequency = args.maximum_frequency
+        self.minimum_frequency = args.minimum_frequency
+        self.maximum_frequency = args.maximum_frequency
         # self.reference_frequency = args.reference_frequency
 
         # # Waveform, source model and likelihood
@@ -137,6 +137,10 @@ class SamplingInput(Input):
 
         self.dingo_sampler.context = self.context
         self.dingo_sampler.event_metadata = self.event_metadata
+        if self.minimum_frequency is not None:
+            self.dingo_sampler.minimum_frequency = self.minimum_frequency_dict
+        if self.maximum_frequency is not None:
+            self.dingo_sampler.maximum_frequency = self.maximum_frequency_dict
 
     @property
     def density_recovery_settings(self):

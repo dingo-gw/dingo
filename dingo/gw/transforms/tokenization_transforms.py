@@ -3,8 +3,10 @@ from typing import Optional
 import numpy as np
 
 from dingo.gw.domains import UniformFrequencyDomain, MultibandedFrequencyDomain
+from dingo.gw.gwutils import add_defaults_for_missing_detectors
 
 DETECTOR_DICT = {"H1": 0, "L1": 1, "V1": 2}
+DETECTOR_DICT_INVERSE = {v: k for k, v in DETECTOR_DICT.items()}
 
 
 class StrainTokenization:
@@ -955,6 +957,207 @@ class MaskFrequencyInterval(object):
         )
 
         return input_sample
+
+
+class MaskTokensForFrequencyRangeUpdate(object):
+    """
+    Inference-time token-level counterpart to MaskDataForFrequencyRangeUpdate.
+
+    Whereas MaskDataForFrequencyRangeUpdate sets the strain to zero and the ASD to one
+    outside [minimum_frequency, maximum_frequency] (operating on raw frequency bins),
+    this transform sets token_mask=True for any token that falls outside the updated
+    range (operating on the tokenized representation).
+
+    Both minimum_frequency and maximum_frequency can be set globally (float) or
+    per-detector (dict). Missing detectors in a per-detector dict fall back to the
+    domain default.
+    """
+
+    def __init__(
+        self,
+        domain: UniformFrequencyDomain | MultibandedFrequencyDomain,
+        detectors: list[str],
+        minimum_frequency: Optional[float | dict] = None,
+        maximum_frequency: Optional[float | dict] = None,
+        mask_frequency_edges_settings: Optional[dict] = None,
+        print_output: bool = True,
+    ):
+        """
+        Parameters
+        ----------
+        domain:
+            Domain corresponding to the data being transformed.
+        detectors:
+            List of detector names (e.g. ["H1", "L1"]).
+        minimum_frequency: float | dict | None
+            New lower frequency bound. Float applies to all detectors; dict specifies
+            per-detector values. Detectors missing from the dict use domain.f_min.
+        maximum_frequency: float | dict | None
+            New upper frequency bound. Float applies to all detectors; dict specifies
+            per-detector values. Detectors missing from the dict use domain.f_max.
+        mask_frequency_edges_settings: dict | None
+            Training settings for MaskFrequencyEdges (e.g. ``p_mask``, ``f_max_lower``,
+            ``f_min_upper``). When provided, the first call to :meth:`__call__` checks
+            whether the inference-time masking is out of distribution relative to training
+            and prints a warning when it is.
+        print_output:
+            Whether to write a summary to stdout on construction and on the first call.
+        """
+        self.minimum_frequency = add_defaults_for_missing_detectors(
+            object_to_update=minimum_frequency,
+            update_value=domain.f_min,
+            detectors=detectors,
+        )
+        self.maximum_frequency = add_defaults_for_missing_detectors(
+            object_to_update=maximum_frequency,
+            update_value=domain.f_max,
+            detectors=detectors,
+        )
+        self._mask_frequency_edges_settings = mask_frequency_edges_settings
+        self._distribution_checked = False
+        self.print_output = print_output
+        if print_output:
+            print(
+                f"Transform MaskTokensForFrequencyRangeUpdate activated:\n"
+                f"    - minimum_frequency: {self.minimum_frequency}\n"
+                f"    - maximum_frequency: {self.maximum_frequency}\n"
+            )
+
+    def __call__(self, input_sample: dict) -> dict:
+        """
+        Parameters
+        ----------
+        input_sample: dict
+            Must contain:
+            - 'position', shape [num_tokens, 3],
+               last dim = [f_min, f_max, detector_index]
+            - 'token_mask', shape [num_tokens]
+
+        Returns
+        -------
+        dict with 'token_mask' updated: tokens outside the new frequency range are
+        set to True (masked out).
+        """
+        sample = input_sample.copy()
+        detector_indices = np.unique(sample["position"][..., 2])
+        num_detectors = len(detector_indices)
+        num_tokens_per_detector = sample["position"].shape[-2] // num_detectors
+
+        f_min_per_token = sample["position"][..., 0]
+        f_max_per_token = sample["position"][..., 1]
+        # All detectors share the same frequency grid; use the first detector's tokens
+        # as the reference for per-detector masking.
+        f_min_per_token_single = f_min_per_token[:num_tokens_per_detector]
+        f_max_per_token_single = f_max_per_token[:num_tokens_per_detector]
+
+        mask = np.zeros_like(sample["token_mask"], dtype=bool)
+
+        if self.minimum_frequency is not None:
+            if isinstance(self.minimum_frequency, (float, int)):
+                mask = np.logical_or(
+                    mask,
+                    np.where(f_min_per_token < self.minimum_frequency, True, False),
+                )
+            elif isinstance(self.minimum_frequency, dict):
+                for b in detector_indices:
+                    det = DETECTOR_DICT_INVERSE[b]
+                    if det in self.minimum_frequency:
+                        mask_min = np.where(
+                            f_min_per_token_single < self.minimum_frequency[det],
+                            True,
+                            False,
+                        )
+                        mask_b = sample["position"][..., 2] == b
+                        mask[mask_b] = np.logical_or(mask_min, mask[mask_b])
+            else:
+                raise TypeError(
+                    f"minimum_frequency must be float, int, or dict, "
+                    f"got {type(self.minimum_frequency)}."
+                )
+            if self.print_output:
+                print(f"Updated f_min to {self.minimum_frequency}.")
+
+        if self.maximum_frequency is not None:
+            if isinstance(self.maximum_frequency, (float, int)):
+                mask = np.logical_or(
+                    mask,
+                    np.where(f_max_per_token > self.maximum_frequency, True, False),
+                )
+            elif isinstance(self.maximum_frequency, dict):
+                for b in detector_indices:
+                    det = DETECTOR_DICT_INVERSE[b]
+                    if det in self.maximum_frequency:
+                        mask_max = np.where(
+                            f_max_per_token_single > self.maximum_frequency[det],
+                            True,
+                            False,
+                        )
+                        mask_b = sample["position"][..., 2] == b
+                        mask[mask_b] = np.logical_or(mask_max, mask[mask_b])
+            else:
+                raise TypeError(
+                    f"maximum_frequency must be float, int, or dict, "
+                    f"got {type(self.maximum_frequency)}."
+                )
+            if self.print_output:
+                print(f"Updated f_max to {self.maximum_frequency}.")
+
+        if not self._distribution_checked and self.print_output:
+            self._distribution_checked = True
+            self._check_inference_masking_distribution(
+                mask, sample["token_mask"], sample["position"]
+            )
+
+        sample["token_mask"] = np.logical_or(mask, sample["token_mask"])
+        return sample
+
+    def _check_inference_masking_distribution(
+        self,
+        new_mask: np.ndarray,
+        existing_mask: np.ndarray,
+        position: np.ndarray,
+    ) -> None:
+        """Print token masking counts and warn if inference masking exceeds training maximum.
+
+        Called once on the first forward pass so the actual token structure is available.
+        Counts how many tokens are masked per detector and compares to the maximum the
+        model could have seen during training (derived from ``f_max_lower`` / ``f_min_upper``
+        in mask_frequency_edges_settings).
+        """
+        if self._mask_frequency_edges_settings is None:
+            return
+
+        # Reduce to a single (unbatched) example for reporting.
+        first_new = new_mask[0] if new_mask.ndim > 1 else new_mask
+        first_existing = existing_mask[0] if existing_mask.ndim > 1 else existing_mask
+        first_pos = position[0] if position.ndim > 2 else position
+
+        detector_indices = np.unique(first_pos[..., 2])
+        num_detectors = len(detector_indices)
+        n_total = first_new.shape[0]
+        n_tokens_per_detector = n_total // num_detectors
+
+        # Token f_min / f_max for one detector (shared grid).
+        f_min_per_token = first_pos[:n_tokens_per_detector, 0]
+        f_max_per_token = first_pos[:n_tokens_per_detector, 1]
+
+        n_newly_masked = int(np.sum(first_new & ~first_existing))
+
+        # Maximum tokens maskable during training from each side.
+        f_max_lower = self._mask_frequency_edges_settings.get("f_max_lower", np.inf)
+        f_min_upper = self._mask_frequency_edges_settings.get("f_min_upper", -np.inf)
+        n_train_max_fmin = int(np.sum(f_min_per_token < f_max_lower))
+        n_train_max_fmax = int(np.sum(f_max_per_token > f_min_upper))
+        n_train_max_per_detector = n_train_max_fmin + n_train_max_fmax
+        n_train_max_total = n_train_max_per_detector * num_detectors
+
+        if n_newly_masked > n_train_max_total:
+            print(
+                f"  WARNING: {n_newly_masked}/{n_total} tokens are masked by the "
+                f"inference frequency update, which exceeds the training maximum of "
+                f"{n_train_max_total} tokens ({n_train_max_per_detector} per detector). "
+                f"This frequency range update is out of distribution."
+            )
 
 
 def _check_mfd_node_compatibility(

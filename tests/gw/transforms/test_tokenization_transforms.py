@@ -8,6 +8,7 @@ from dingo.gw.transforms import (
     MaskDetectors,
     MaskFrequencyEdges,
     MaskFrequencyInterval,
+    MaskTokensForFrequencyRangeUpdate,
     DETECTOR_DICT,
 )
 
@@ -888,3 +889,165 @@ def test_MaskFrequencyInterval_preserves_existing_mask():
         print_output=False,
     )(out)
     assert np.all(out["token_mask"][:, 0])
+
+
+# ---------------------------------------------------------------------------
+# MaskTokensForFrequencyRangeUpdate
+# ---------------------------------------------------------------------------
+
+# MaskTokensForFrequencyRangeUpdate is an inference-time transform applied to a single
+# (non-batched) tokenized sample.  We use a UFD with a coarse token grid so
+# that we can reason about exact token counts.
+
+
+def _make_tokenized_sample_unbatched(domain, num_tokens_per_block=10):
+    """Return a tokenized, unbatched sample (no batch dimension).
+
+    drop_last_token=True avoids zero-padding, ensuring every token's f_max is
+    within the domain — so tests can rely on domain.f_max as a clean boundary.
+    """
+    sample = make_sample(domain, batch_size=None)
+    out = StrainTokenization(
+        domain,
+        num_tokens_per_block=num_tokens_per_block,
+        drop_last_token=True,
+        print_output=False,
+    )(sample)
+    return out
+
+
+def test_MaskTokensForFrequencyRangeUpdate_fmin_float():
+    """Tokens whose f_min falls below the new minimum_frequency are masked."""
+    domain = make_ufd(f_min=20.0, f_max=1024.0)
+    out = _make_tokenized_sample_unbatched(domain)
+    new_fmin = 200.0
+
+    out = MaskTokensForFrequencyRangeUpdate(
+        domain=domain,
+        detectors=["H1", "L1"],
+        minimum_frequency=new_fmin,
+        print_output=False,
+    )(out)
+
+    f_min_per_token = out["position"][..., 0]
+    masked = out["token_mask"]
+    assert np.all(masked[f_min_per_token < new_fmin])
+    assert not np.any(masked[f_min_per_token >= new_fmin])
+
+
+def test_MaskTokensForFrequencyRangeUpdate_fmax_float():
+    """Tokens whose f_max exceeds the new maximum_frequency are masked."""
+    domain = make_ufd(f_min=20.0, f_max=1024.0)
+    out = _make_tokenized_sample_unbatched(domain)
+    new_fmax = 500.0
+
+    out = MaskTokensForFrequencyRangeUpdate(
+        domain=domain,
+        detectors=["H1", "L1"],
+        maximum_frequency=new_fmax,
+        print_output=False,
+    )(out)
+
+    f_max_per_token = out["position"][..., 1]
+    masked = out["token_mask"]
+    assert np.all(masked[f_max_per_token > new_fmax])
+    assert not np.any(masked[f_max_per_token <= new_fmax])
+
+
+def test_MaskTokensForFrequencyRangeUpdate_fmin_fmax_float():
+    """Both f_min and f_max updates applied together mask the correct tokens."""
+    domain = make_ufd(f_min=20.0, f_max=1024.0)
+    out = _make_tokenized_sample_unbatched(domain)
+    new_fmin, new_fmax = 200.0, 800.0
+
+    out = MaskTokensForFrequencyRangeUpdate(
+        domain=domain,
+        detectors=["H1", "L1"],
+        minimum_frequency=new_fmin,
+        maximum_frequency=new_fmax,
+        print_output=False,
+    )(out)
+
+    f_min_per_token = out["position"][..., 0]
+    f_max_per_token = out["position"][..., 1]
+    masked = out["token_mask"]
+    expected = (f_min_per_token < new_fmin) | (f_max_per_token > new_fmax)
+    np.testing.assert_array_equal(masked, expected)
+
+
+def test_MaskTokensForFrequencyRangeUpdate_fmin_dict():
+    """Per-detector f_min update: only the specified detector's tokens are masked."""
+    domain = make_ufd(f_min=20.0, f_max=1024.0)
+    out = _make_tokenized_sample_unbatched(domain)
+    new_fmin_h1 = 200.0
+
+    out = MaskTokensForFrequencyRangeUpdate(
+        domain=domain,
+        detectors=["H1", "L1"],
+        minimum_frequency={"H1": new_fmin_h1},
+        print_output=False,
+    )(out)
+
+    position = out["position"]
+    masked = out["token_mask"]
+    h1_tokens = position[..., 2] == DETECTOR_DICT["H1"]
+    l1_tokens = position[..., 2] == DETECTOR_DICT["L1"]
+    assert np.all(masked[h1_tokens & (position[..., 0] < new_fmin_h1)])
+    assert not np.any(masked[h1_tokens & (position[..., 0] >= new_fmin_h1)])
+    # L1 not in the dict so it falls back to domain.f_min — no tokens masked
+    assert not np.any(masked[l1_tokens])
+
+
+def test_MaskTokensForFrequencyRangeUpdate_fmax_dict():
+    """Per-detector f_max update: only the specified detector's tokens are masked."""
+    domain = make_ufd(f_min=20.0, f_max=1024.0)
+    out = _make_tokenized_sample_unbatched(domain)
+    new_fmax_l1 = 700.0
+
+    out = MaskTokensForFrequencyRangeUpdate(
+        domain=domain,
+        detectors=["H1", "L1"],
+        maximum_frequency={"L1": new_fmax_l1},
+        print_output=False,
+    )(out)
+
+    position = out["position"]
+    masked = out["token_mask"]
+    h1_tokens = position[..., 2] == DETECTOR_DICT["H1"]
+    l1_tokens = position[..., 2] == DETECTOR_DICT["L1"]
+    assert np.all(masked[l1_tokens & (position[..., 1] > new_fmax_l1)])
+    assert not np.any(masked[l1_tokens & (position[..., 1] <= new_fmax_l1)])
+    assert not np.any(masked[h1_tokens])
+
+
+def test_MaskTokensForFrequencyRangeUpdate_no_update():
+    """When min/max equal the domain defaults, the mask stays all-False."""
+    domain = make_ufd(f_min=20.0, f_max=1024.0)
+    out = _make_tokenized_sample_unbatched(domain)
+
+    out = MaskTokensForFrequencyRangeUpdate(
+        domain=domain,
+        detectors=["H1", "L1"],
+        minimum_frequency=domain.f_min,
+        maximum_frequency=domain.f_max,
+        print_output=False,
+    )(out)
+
+    assert not out["token_mask"].any()
+
+
+def test_MaskTokensForFrequencyRangeUpdate_preserves_existing_mask():
+    """Pre-existing True entries in token_mask must remain True after the transform."""
+    domain = make_ufd(f_min=20.0, f_max=1024.0)
+    out = _make_tokenized_sample_unbatched(domain)
+    out["token_mask"][0] = True
+
+    out = MaskTokensForFrequencyRangeUpdate(
+        domain=domain,
+        detectors=["H1", "L1"],
+        minimum_frequency=domain.f_min,
+        maximum_frequency=domain.f_max,
+        print_output=False,
+    )(out)
+
+    assert out["token_mask"][0]

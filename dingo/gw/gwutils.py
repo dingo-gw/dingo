@@ -144,3 +144,21 @@ def get_standardization_dict(
         "std": {k: std[k] for k in selected_parameters},
     }
     return standardization_dict
+
+
+def add_defaults_for_missing_detectors(
+    object_to_update: Optional[float | dict],
+    update_value: float,
+    detectors: list[str],
+) -> Optional[float | dict]:
+    """Fill in a default frequency value for any detector missing from a per-detector dict.
+
+    If `object_to_update` is a dict, any detector in `detectors` not present in the dict
+    gets `update_value` inserted. Floats and None are returned unchanged.
+    """
+    object_to_update = deepcopy(object_to_update)
+    if isinstance(object_to_update, dict) and detectors is not None:
+        for det in detectors:
+            if det not in object_to_update:
+                object_to_update[det] = update_value
+    return object_to_update

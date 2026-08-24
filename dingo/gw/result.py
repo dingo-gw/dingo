@@ -70,6 +70,15 @@ class Result(CoreResult):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+        # Correct bug in recursive hdf5 load: If we want to analyze a single detector event, the detector list gets
+        # loaded as a string instead of a list (i.e., 'L1' instead of ['L1']). This has to be reverted because the code
+        # expects detectors to be a list in result.reset_event(). If it is not a list, event_metadata is not the same as
+        # the event metadata loaded from the events file (where detectors is a list) and it assumes that a domain update
+        # is necessary (which is not implemented for MFD).
+        if self.event_metadata is not None and isinstance(
+            self.event_metadata.get("detectors"), str
+        ):
+            self.event_metadata["detectors"] = [self.event_metadata["detectors"]]
 
     @property
     def synthetic_phase_kwargs(self):
@@ -415,13 +424,18 @@ class Result(CoreResult):
         self.calibration_sampling_kwargs = calibration_sampling_kwargs
 
         # Handle correction_type defaults
-        correction_type = self.calibration_sampling_kwargs.get("correction_type", "data")
+        correction_type = self.calibration_sampling_kwargs.get(
+            "correction_type", "data"
+        )
         if correction_type is None:
             correction_type_dict = {
-                ifo: CALIBRATION_CORRECTION_TYPE_LOOKUP[ifo] for ifo in self.interferometers
+                ifo: CALIBRATION_CORRECTION_TYPE_LOOKUP[ifo]
+                for ifo in self.interferometers
             }
         elif correction_type == "data" or correction_type == "template":
-            correction_type_dict = {ifo: correction_type for ifo in self.interferometers}
+            correction_type_dict = {
+                ifo: correction_type for ifo in self.interferometers
+            }
         elif isinstance(correction_type, dict):
             correction_type_dict = correction_type
         else:
@@ -440,7 +454,7 @@ class Result(CoreResult):
             )
 
         # Removing the delta function priors on the frequency nodes, amplitude and phase.
-        # Usually the frequency nodes are set to delta functions, but we also remove the 
+        # Usually the frequency nodes are set to delta functions, but we also remove the
         # the amplitude and phase delta functions if present.
         # This avoids large log probs and log priors, since the density of a delta function
         # at the sampled point is infinite. The delta functions do not affect the sampling,
@@ -457,9 +471,9 @@ class Result(CoreResult):
         delta_log_prob = np.zeros(num_samples)
 
         # Here we will sample the calibration parameters from the prior.
-        # We treat the *prior as the proposal* distribution and 
-        # therefore add the log_prob of the sampled calibration parameters 
-        # to the existing log_prob. We also will update the prior 
+        # We treat the *prior as the proposal* distribution and
+        # therefore add the log_prob of the sampled calibration parameters
+        # to the existing log_prob. We also will update the prior
         # to include the calibration priors using the importance_sampling_metadata
         prior_update = self.importance_sampling_metadata.get("prior_update", {})
         for ifo, prior in calibration_priors.items():
@@ -690,7 +704,9 @@ class Result(CoreResult):
             num_processes=num_processes,
         )
 
-    def get_pesummary_samples(self, num_processes=1, resampling_method="clip+rejection"):
+    def get_pesummary_samples(
+        self, num_processes=1, resampling_method="clip+rejection"
+    ):
         """Samples in a form suitable for PESummary.
 
         These samples are adjusted to undo certain conventions used internally by
