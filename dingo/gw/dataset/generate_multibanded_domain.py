@@ -286,7 +286,12 @@ def get_band_nodes_for_adaptive_decimation(
 
     while upper - 1 < N:
         if upper - 1 + dec_factor * min_mfd_bins_per_band >= N:
-            band_nodes.append(upper)
+            # Closing node of the final band. It must stay inside the domain: when no
+            # decimation is possible at all (dec_factor == 1, min_mfd_bins_per_band == 1)
+            # `upper` reaches N exactly, which is one past the last bin.
+            final_node = min(upper, N - 1)
+            if final_node > band_nodes[-1]:
+                band_nodes.append(final_node)
         elif dec_factor * 2 <= max_dec_factor_array[upper]:
             band_nodes.append(upper)
             # Each band must contain a whole number of tokens.
