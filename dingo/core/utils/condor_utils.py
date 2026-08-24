@@ -6,10 +6,12 @@ import yaml
 def resubmit_condor_job(train_dir, train_settings, epoch):
     """
     TODO: documentation
-    :param train_dir:
-    :param train_settings:
-    :param epoch:
-    :return:
+
+    Parameters
+    ----------
+    train_dir
+    train_settings
+    epoch
     """
     if 'condor_settings' in train_settings:
         print('Copying log files')
@@ -27,9 +29,11 @@ def create_submission_file_and_submit_job(train_dir,
                                           filename='submission_file.sub'):
     """
     TODO: documentation
-    :param train_dir:
-    :param filename:
-    :return:
+
+    Parameters
+    ----------
+    train_dir
+    filename
     """
     create_submission_file(train_dir, filename)
     with open(join(train_dir, 'train_settings.yaml'), 'r') as fp:
@@ -40,9 +44,11 @@ def create_submission_file_and_submit_job(train_dir,
 def create_submission_file(train_dir, filename='submission_file.sub'):
     """
     TODO: documentation
-    :param train_dir:
-    :param filename:
-    :return:
+
+    Parameters
+    ----------
+    train_dir
+    filename
     """
     with open(join(train_dir, 'train_settings.yaml'), 'r') as fp:
         d = yaml.safe_load(fp)['condor_settings']

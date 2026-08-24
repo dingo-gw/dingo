@@ -20,9 +20,14 @@ def get_activation_function_from_string(activation_name: str):
     """
     Returns an activation function, based on the name provided.
 
-    :param activation_name: str
+    Parameters
+    ----------
+    activation_name : str
         name of the activation function, one of {'elu', 'relu', 'leaky_rely'}
-    :return: function
+
+    Returns
+    -------
+    function
         corresponding activation function
     """
     if activation_name.lower() == "elu":
@@ -45,11 +50,17 @@ def get_number_of_model_parameters(
     Counts parameters of the module. The list requires_grad_flag can be used
     to specify whether all parameters should be counted, or only those with
     requires_grad = True or False.
-    :param model: nn.Module
+
+    Parameters
+    ----------
+    model : nn.Module
         model
-    :param requires_grad_flags: tuple
+    requires_grad_flags : tuple
         tuple of bools, for requested requires_grad flags
-    :return:
+
+    Returns
+    -------
+    int
         number of parameters of the model with requested required_grad flags
     """
     num_params = 0

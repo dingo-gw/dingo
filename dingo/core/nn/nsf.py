@@ -19,9 +19,14 @@ def create_linear_transform(param_dim: int):
     """
     Create the composite linear transform PLU.
 
-    :param param_dim: int
+    Parameters
+    ----------
+    param_dim : int
         dimension of the parameter space
-    :return: nde.Transform
+
+    Returns
+    -------
+    nde.Transform
         the linear transform PLU
     """
 
@@ -66,31 +71,35 @@ def create_base_transform(
     by a residual neural network that depends on y_fixed and x. The residual
     network consists of a sequence of two-layer fully-connected blocks.
 
-    :param i: int
+    Parameters
+    ----------
+    i : int
         index of transform in sequence
-    :param param_dim: int
+    param_dim : int
         dimensionality of y
-    :param context_dim: int = None
+    context_dim : int, default=None
         dimensionality of x
-    :param hidden_dim: int = 512
+    hidden_dim : int, default=512
         number of hidden units per layer
-    :param num_transform_blocks: int = 2
+    num_transform_blocks : int, default=2
         number of transform blocks comprising the transform
-    :param activation: str = 'relu'
+    activation : str, default='relu'
         activation function
-    :param dropout_probability: float = 0.0
+    dropout_probability : float, default=0.0
         dropout probability for regularization
-    :param batch_norm: bool = False
+    batch_norm : bool, default=False
         whether to use batch normalization
-    :param num_bins: int = 8
+    num_bins : int, default=8
         number of bins for the spline
-    :param tail_bound: float = 1.
-    :param apply_unconditional_transform: bool = False
+    tail_bound : float, default=1.
+    apply_unconditional_transform : bool, default=False
         whether to apply an unconditional transform to fixed components
-    :param base_transform_type: str = 'rq-coupling'
+    base_transform_type : str, default='rq-coupling'
         type of base transform, one of {rq-coupling, rq-autoregressive}
 
-    :return: Transform
+    Returns
+    -------
+    Transform
         the NSF transform
     """
 
@@ -157,15 +166,20 @@ def create_transform(
         * A NSF transform of y, conditioned on x.
     There is one final linear transform at the end.
 
-    :param num_flow_steps: int,
+    Parameters
+    ----------
+    num_flow_steps : int
         number of transforms in sequence
-    :param param_dim: int,
+    param_dim : int
         dimensionality of parameter space (y)
-    :param context_dim: int,
+    context_dim : int
         dimensionality of context (x)
-    :param base_transform_kwargs: int
+    base_transform_kwargs : int
         hyperparameters for NSF step
-    :return: Transform
+
+    Returns
+    -------
+    Transform
         the NSF transform sequence
     """
 
@@ -199,8 +213,10 @@ class FlowWrapper(nn.Module):
     def __init__(self, flow: flows.base.Flow, embedding_net: nn.Module = None):
         """
 
-        :param flow: flows.base.Flow
-        :param embedding_net: nn.Module
+        Parameters
+        ----------
+        flow : flows.base.Flow
+        embedding_net : nn.Module
         """
         super(FlowWrapper, self).__init__()
         self.embedding_net = embedding_net
@@ -256,19 +272,24 @@ def create_nsf_model(
         * a base distribution (StandardNormal, dim(y))
         * a sequence of transforms, each conditioned on x
 
-    :param input_dim: int,
+    Parameters
+    ----------
+    input_dim : int
         dimensionality of y
-    :param context_dim: int,
+    context_dim : int
         dimensionality of the (embedded) context
-    :param num_flow_steps: int,
+    num_flow_steps : int
         number of sequential transforms
-    :param base_transform_kwargs: dict,
+    base_transform_kwargs : dict
         hyperparameters for transform steps
-    :param embedding_net_builder: Callable=None,
+    embedding_net_builder : Callable, default=None
         build function for embedding network TODO
-    :param embedding_kwargs: dict=None,
+    embedding_kwargs : dict, default=None
         hyperparameters for embedding network
-    :return: Flow
+
+    Returns
+    -------
+    Flow
         the NSF (posterior model)
     """
 

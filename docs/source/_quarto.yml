@@ -1,3 +1,21 @@
+# Quarto project configuration for the Dingo documentation.
+#
+# This single file defines the whole site:
+#   * `project`  — the render list (which pages build, and in what order).
+#   * `website`  — the top navbar (major sections) and the left sidebar (full docs
+#                  tree), plus site/repo URLs.
+#   * `format`   — theme (flatly/darkly + custom.scss/custom-dark.scss), TOC, etc.
+#   * `quartodoc`— the API reference: which objects get a page, and how they render.
+#
+# EDITING: everything here is hand-maintained EXCEPT the `quartodoc.sections` block
+# between the `BEGIN AUTOGEN SECTIONS` / `END AUTOGEN SECTIONS` markers near the
+# bottom. That block is overwritten wholesale by `python gen_api.py`, which walks the
+# `dingo` package and lists every public class/function — so hand edits inside it are
+# lost on the next run. Add or remove API objects by changing the source (or
+# `gen_api.py`'s rules) and re-running it; edit anything outside the markers directly.
+#
+# Build: `python gen_api.py && python build_api.py && quarto render` (see docs/README.md).
+
 project:
   type: website
   output-dir: _site

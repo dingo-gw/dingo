@@ -320,32 +320,38 @@ def create_enet_with_projection_layer_and_dense_resnet(
                             (batch_size, N)
         output dimension:   (batch_size, output_dim + N)
 
-    :param input_dims:  list
+    Parameters
+    ----------
+    input_dims : list
         dimensions of input batch, omitting batch dimension
         input_dims = (num_blocks, num_channels, num_bins)
-    :param n_rb: int
-        number of reduced basis elements used for projection
-        the output dimension of the layer is 2 * n_rb * num_blocks
-    :param V_rb_list: tuple of np.arrays, or None
+    V_rb_list : tuple of np.arrays, or None
         tuple with V matrices of the reduced basis SVD projection,
         convention for SVD matrix decomposition: U @ s @ V^h;
         if None, layer is not initialized with reduced basis projection,
         this is useful when loading a saved model
-    :param output_dim: int
+    output_dim : int
         output dimension of the full module
-    :param hidden_dims: tuple
+    hidden_dims : tuple
         tuple with dimensions of hidden layers of module 2
-    :param activation: str
+    svd : dict
+        SVD settings; svd["size"] is the number of reduced basis elements used
+        for the projection, so the output dimension of that layer is
+        2 * svd["size"] * num_blocks
+    activation : str
         str that specifies activation function used in residual blocks
-    :param dropout: float
+    dropout : float
         dropout probability for residual blocks used for reqularization
-    :param batch_norm: bool
+    batch_norm : bool
         flag that specifies whether to use batch normalization
-    :param added_context: bool
+    added_context : bool
         if set to True, additional context z is concatenated to the embedded
         feature vector enet(x); note that in this case, the expected input is
         a tuple with 2 elements, input = (x, z) rather than just the tensor x.
-    :return: nn.Module
+
+    Returns
+    -------
+    nn.Module
     """
     activation_fn = torchutils.get_activation_function_from_string(activation)
     module_1 = LinearProjectionRB(input_dims, svd["size"], V_rb_list)

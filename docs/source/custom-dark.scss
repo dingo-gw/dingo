@@ -116,3 +116,26 @@ pre.mermaid svg {
   display: block;
   margin-inline: auto;
 }
+
+// ── API reference: long dotted object paths ──────────────────────────────────
+// Generated reference pages are titled by an object's full dotted path — one
+// unbreakable token, up to ~80 characters. Left alone it runs past the content
+// column, and in the index tables it starves the description column (which
+// collapsed to a few characters wide). Let those break, size the object-page
+// title for a path rather than prose, and give the index tables an explicit
+// column split so the description keeps its share of the width.
+// (Layout rules live in both custom.scss and custom-dark.scss — only one of the
+// two is loaded, depending on the active theme.)
+main#quarto-document-content {
+  h1, h2, h3 { overflow-wrap: anywhere; }
+
+  // Object pages: `<section id="dingo.…">` wraps the whole page.
+  section[id^="dingo."] > h1 { font-size: 1.75rem; }
+
+  .doc-index table {
+    table-layout: fixed;
+    width: 100%;
+    td { overflow-wrap: anywhere; }
+    td:first-child { width: 45%; }
+  }
+}
