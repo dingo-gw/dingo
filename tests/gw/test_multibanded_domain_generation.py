@@ -316,8 +316,11 @@ class TestBuildExtremePrior:
             "chirp_mass"
         ].minimum
         prior = build_extreme_prior(settings)
-        assert isinstance(prior["chirp_mass"], DeltaFunction)
-        assert prior["chirp_mass"].peak == nominal_minimum
+        # chirp_mass is a negligibly narrow Uniform rather than a DeltaFunction, so that
+        # the mass_1/mass_2 Constraint priors can still be sampled; see
+        # build_extreme_prior.
+        assert prior["chirp_mass"].minimum == nominal_minimum
+        assert prior["chirp_mass"].maximum == pytest.approx(nominal_minimum, rel=1e-8)
 
     def test_geocent_time_fixed_at_boundary(self, settings):
         prior = build_extreme_prior(settings)
@@ -434,7 +437,7 @@ class TestEvaluateMultibandingMain:
             "chirp_mass"
         ].minimum
         prior = captured_prior["prior"]
-        assert isinstance(prior["chirp_mass"], DeltaFunction)
-        assert prior["chirp_mass"].peak == nominal_minimum
+        assert prior["chirp_mass"].minimum == nominal_minimum
+        assert prior["chirp_mass"].maximum == pytest.approx(nominal_minimum, rel=1e-8)
         assert isinstance(prior["geocent_time"], DeltaFunction)
         assert prior["geocent_time"].peak == 0.12
