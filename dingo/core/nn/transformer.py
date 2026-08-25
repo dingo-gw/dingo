@@ -161,6 +161,9 @@ class TransformerModel(nn.Module):
         self.pooling = pooling
         self.final_net = final_net
 
+        # The fast path is incompatible with some CUDA kernels (e.g. B200).
+        torch.backends.mha.set_fastpath_enabled(False)
+
         encoder_layer = TransformerEncoderLayer(
             d_model=d_model,
             nhead=nhead,
