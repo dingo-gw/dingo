@@ -162,3 +162,82 @@ def add_defaults_for_missing_detectors(
             if det not in object_to_update:
                 object_to_update[det] = update_value
     return object_to_update
+
+
+def parse_psd_notch_dict(raw: dict) -> dict:
+    """Convert string-valued intervals from convert_string_to_dict to floats.
+
+    ``convert_string_to_dict`` returns numeric values as strings.  This helper
+    normalises ``{det: [f_lo, f_hi]}`` and ``{det: [[f_lo1, f_hi1], ...]}``
+    entries so all boundaries are Python floats.
+    """
+    result = {}
+    for det, notch in raw.items():
+        if isinstance(notch[0], (list, tuple)):
+            result[det] = [[float(a), float(b)] for a, b in notch]
+        else:
+            result[det] = [float(notch[0]), float(notch[1])]
+    return result
+
+
+def detect_asd_notches(asd_dict: dict, domain) -> dict | None:
+    """
+    Detect contiguous interior frequency intervals where ASD >= 0.5 * HIGH_ASD_VALUE.
+
+    Scans per-detector ASDs (as stored in the event HDF5) and returns the
+    frequency ranges of any suppressed regions.  The threshold is
+    ``0.5 * HIGH_ASD_VALUE`` (= 0.5 for the current sentinel value of 1.0),
+    which sits midway between real noise levels (~10⁻²³ 1/√Hz) and the notch
+    sentinel, giving a robust detection margin in case of floating-point rounding.
+    Intervals starting at the first valid frequency bin (f_min) are skipped
+    because those can arise from normal edge-padding, not notching.
+
+    Parameters
+    ----------
+    asd_dict:
+        Per-detector ASD arrays of length ``domain.max_idx + 1``.
+    domain:
+        UniformFrequencyDomain corresponding to the data.
+
+    Returns
+    -------
+    dict or None
+        ``{det: [[f_lo, f_hi], ...]}`` for each detector that has at least one
+        notch.  Returns ``None`` when no notches are found.
+    """
+    from dingo.gw.noise.asd_dataset import HIGH_ASD_VALUE
+
+    sample_freqs = domain.sample_frequencies  # length max_idx + 1
+    min_idx = domain.min_idx
+    notch_dict = {}
+
+    for ifo, asd in asd_dict.items():
+        valid_asd = asd[min_idx:]
+        valid_freqs = sample_freqs[min_idx:]
+
+        is_notched = valid_asd >= HIGH_ASD_VALUE * 0.5
+
+        if not np.any(is_notched):
+            continue
+
+        changes = np.diff(is_notched.astype(int))
+        starts = list(np.where(changes == 1)[0] + 1)
+        ends = list(np.where(changes == -1)[0] + 1)
+
+        if is_notched[0]:
+            starts = [0] + starts
+        if is_notched[-1]:
+            ends = ends + [len(is_notched)]
+
+        intervals = []
+        for s, e in zip(starts, ends):
+            if s == 0:
+                continue  # skip edge-padding region at f_min
+            f_lo = float(valid_freqs[s])
+            f_hi = float(valid_freqs[e - 1])
+            intervals.append([f_lo, f_hi])
+
+        if intervals:
+            notch_dict[ifo] = intervals
+
+    return notch_dict if notch_dict else None

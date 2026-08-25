@@ -23,6 +23,8 @@ from dingo.core.posterior_models.build_model import build_model_from_kwargs
 from dingo.gw.data.event_dataset import EventDataset
 from dingo.gw.domains import UniformFrequencyDomain, build_domain_from_model_metadata
 from dingo.gw.injection import Injection
+from dingo.gw.gwutils import parse_psd_notch_dict
+from dingo.gw.noise.asd_dataset import HIGH_ASD_VALUE
 from dingo.pipe.parser import create_parser
 
 logger.name = "dingo_pipe"
@@ -163,6 +165,12 @@ class DataGenerationInput(BilbyDataGenerationInput):
         # PSD
         self.psd_maximum_duration = args.psd_maximum_duration
         self.psd_dict = args.psd_dict
+        if args.psd_notch_dict is not None:
+            self.psd_notch_dict = parse_psd_notch_dict(
+                convert_string_to_dict(args.psd_notch_dict)
+            )
+        else:
+            self.psd_notch_dict = None
         self.psd_length = args.psd_length
         self.psd_fractional_overlap = args.psd_fractional_overlap
         self.psd_start_time = args.psd_start_time
@@ -385,6 +393,19 @@ class DataGenerationInput(BilbyDataGenerationInput):
             # minimum frequency.
             strain = domain.update_data(strain)
             asd = domain.update_data(asd, low_value=1.0)
+
+            if self.psd_notch_dict is not None and ifo.name in self.psd_notch_dict:
+                notch = self.psd_notch_dict[ifo.name]
+                # Support single [f_lo, f_hi] or list of [[f_lo, f_hi], ...].
+                if not isinstance(notch[0], (list, tuple)):
+                    notch = [notch]
+                sample_freqs = domain.sample_frequencies
+                for f_lo, f_hi in notch:
+                    notch_mask = (sample_freqs >= f_lo) & (sample_freqs <= f_hi)
+                    asd[notch_mask] = HIGH_ASD_VALUE
+                logger.info(
+                    f"Applied PSD notch for {ifo.name}: {self.psd_notch_dict[ifo.name]}"
+                )
 
             # Dingo expects data to have trigger time 0, so we apply a cyclic time shift
             # by the post-trigger duration.

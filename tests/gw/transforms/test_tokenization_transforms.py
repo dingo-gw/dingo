@@ -2,6 +2,8 @@ import numpy as np
 import pytest
 
 from dingo.gw.domains import UniformFrequencyDomain, MultibandedFrequencyDomain
+from dingo.gw.gwutils import detect_asd_notches
+from dingo.gw.noise.asd_dataset import HIGH_ASD_VALUE
 from dingo.gw.transforms import (
     StrainTokenization,
     MaskRandomTokens,
@@ -1051,3 +1053,178 @@ def test_MaskTokensForFrequencyRangeUpdate_preserves_existing_mask():
     )(out)
 
     assert out["token_mask"][0]
+
+
+# ---------------------------------------------------------------------------
+# detect_asd_notches
+# ---------------------------------------------------------------------------
+
+
+def _make_asd_array(domain, notch_intervals=None):
+    """Build a full-length ASD array (length max_idx + 1) with real-valued noise
+    below HIGH_ASD_VALUE, except inside notch_intervals where ASD = HIGH_ASD_VALUE.
+    Edge-padding bins (0 .. min_idx-1) are set to HIGH_ASD_VALUE by convention.
+    """
+    n = domain.max_idx + 1
+    asd = np.full(n, 1e-23)  # realistic noise amplitude
+    # edge padding
+    asd[: domain.min_idx] = HIGH_ASD_VALUE
+    if notch_intervals:
+        freqs = domain.sample_frequencies
+        for f_lo, f_hi in notch_intervals:
+            mask = (freqs >= f_lo) & (freqs <= f_hi)
+            asd[mask] = HIGH_ASD_VALUE
+    return asd
+
+
+def test_detect_asd_notches_no_notch():
+    """No notches in any detector → returns None."""
+    domain = make_ufd(f_min=20.0, f_max=512.0)
+    asd = _make_asd_array(domain)
+    result = detect_asd_notches({"H1": asd, "L1": asd}, domain)
+    assert result is None
+
+
+def test_detect_asd_notches_single_notch():
+    """Single interior notch is correctly detected."""
+    domain = make_ufd(f_min=20.0, f_max=512.0)
+    f_lo, f_hi = 59.0, 61.0
+    asd = _make_asd_array(domain, notch_intervals=[[f_lo, f_hi]])
+    result = detect_asd_notches({"H1": asd}, domain)
+    assert result is not None
+    assert "H1" in result
+    intervals = result["H1"]
+    assert len(intervals) == 1
+    detected_lo, detected_hi = intervals[0]
+    assert detected_lo >= f_lo
+    assert detected_hi <= f_hi + domain.delta_f
+
+
+def test_detect_asd_notches_multiple_notches():
+    """Multiple disjoint notches per detector are all detected."""
+    domain = make_ufd(f_min=20.0, f_max=512.0)
+    notches = [[59.0, 61.0], [119.0, 121.0]]
+    asd = _make_asd_array(domain, notch_intervals=notches)
+    result = detect_asd_notches({"H1": asd}, domain)
+    assert result is not None
+    assert len(result["H1"]) == 2
+
+
+def test_detect_asd_notches_edge_padding_ignored():
+    """Edge-padding at f_min (index 0 of valid band) is not reported as a notch."""
+    domain = make_ufd(f_min=20.0, f_max=512.0)
+    # Set the very first valid bin (at f_min) to HIGH_ASD_VALUE to mimic edge padding.
+    asd = _make_asd_array(domain)
+    asd[domain.min_idx] = HIGH_ASD_VALUE
+    result = detect_asd_notches({"H1": asd}, domain)
+    assert result is None
+
+
+def test_detect_asd_notches_per_detector():
+    """Notch in H1 only is not reported for L1."""
+    domain = make_ufd(f_min=20.0, f_max=512.0)
+    asd_h1 = _make_asd_array(domain, notch_intervals=[[59.0, 61.0]])
+    asd_l1 = _make_asd_array(domain)
+    result = detect_asd_notches({"H1": asd_h1, "L1": asd_l1}, domain)
+    assert result is not None
+    assert "H1" in result
+    assert "L1" not in result
+
+
+# ---------------------------------------------------------------------------
+# MaskTokensForFrequencyRangeUpdate — psd_notch_dict
+# ---------------------------------------------------------------------------
+
+
+def test_MaskTokensForFrequencyRangeUpdate_psd_notch_single():
+    """Tokens overlapping the notch interval are masked for all detectors."""
+    domain = make_ufd(f_min=20.0, f_max=1024.0)
+    out = _make_tokenized_sample_unbatched(domain)
+
+    # Pick a notch that overlaps at least one token.  Token size with
+    # num_tokens_per_block=10 over [20, 1024] is ~100 Hz wide; centre on 500 Hz.
+    f_lo, f_hi = 480.0, 520.0
+    notch_dict = {"H1": [f_lo, f_hi], "L1": [f_lo, f_hi]}
+
+    out = MaskTokensForFrequencyRangeUpdate(
+        domain=domain,
+        detectors=["H1", "L1"],
+        psd_notch_dict=notch_dict,
+        print_output=False,
+    )(out)
+
+    position = out["position"]
+    masked = out["token_mask"]
+    f_min_tok = position[..., 0]
+    f_max_tok = position[..., 1]
+
+    # Tokens overlapping the notch must be masked.
+    overlapping = (f_max_tok >= f_lo) & (f_min_tok <= f_hi)
+    assert np.all(masked[overlapping]), "Overlapping tokens must be masked"
+    # Tokens clearly outside the notch must not be masked.
+    outside = (f_max_tok < f_lo - 1) | (f_min_tok > f_hi + 1)
+    assert not np.any(masked[outside]), "Non-overlapping tokens must not be masked"
+
+
+def test_MaskTokensForFrequencyRangeUpdate_psd_notch_per_detector():
+    """Notch on H1 only does not mask L1 tokens."""
+    domain = make_ufd(f_min=20.0, f_max=1024.0)
+    out = _make_tokenized_sample_unbatched(domain)
+    f_lo, f_hi = 480.0, 520.0
+    notch_dict = {"H1": [f_lo, f_hi]}  # L1 intentionally absent
+
+    out = MaskTokensForFrequencyRangeUpdate(
+        domain=domain,
+        detectors=["H1", "L1"],
+        psd_notch_dict=notch_dict,
+        print_output=False,
+    )(out)
+
+    position = out["position"]
+    masked = out["token_mask"]
+    l1_tokens = position[..., 2] == DETECTOR_DICT["L1"]
+    assert not np.any(masked[l1_tokens]), "L1 tokens must not be masked"
+
+
+def test_MaskTokensForFrequencyRangeUpdate_psd_notch_multiple_intervals():
+    """Multiple notch intervals per detector all produce masked tokens."""
+    domain = make_ufd(f_min=20.0, f_max=1024.0)
+    out = _make_tokenized_sample_unbatched(domain)
+    intervals = [[200.0, 240.0], [600.0, 640.0]]
+    notch_dict = {"H1": intervals, "L1": intervals}
+
+    out = MaskTokensForFrequencyRangeUpdate(
+        domain=domain,
+        detectors=["H1", "L1"],
+        psd_notch_dict=notch_dict,
+        print_output=False,
+    )(out)
+
+    position = out["position"]
+    masked = out["token_mask"]
+    f_min_tok = position[..., 0]
+    f_max_tok = position[..., 1]
+
+    for f_lo, f_hi in intervals:
+        overlapping = (f_max_tok >= f_lo) & (f_min_tok <= f_hi)
+        assert np.any(
+            masked[overlapping]
+        ), f"Notch [{f_lo}, {f_hi}] produced no masked tokens"
+
+
+def test_MaskTokensForFrequencyRangeUpdate_psd_notch_preserves_existing_mask():
+    """Pre-existing True entries in token_mask survive the notch masking."""
+    domain = make_ufd(f_min=20.0, f_max=1024.0)
+    out = _make_tokenized_sample_unbatched(domain)
+    # Pick a token that is well outside the notch range and pre-mask it.
+    out["token_mask"][0] = True
+    notch_dict = {"H1": [480.0, 520.0], "L1": [480.0, 520.0]}
+
+    out = MaskTokensForFrequencyRangeUpdate(
+        domain=domain,
+        detectors=["H1", "L1"],
+        psd_notch_dict=notch_dict,
+        print_output=False,
+    )(out)
+
+    assert out["token_mask"][0], "Pre-masked token must remain masked"

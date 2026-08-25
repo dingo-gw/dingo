@@ -980,6 +980,7 @@ class MaskTokensForFrequencyRangeUpdate(object):
         minimum_frequency: Optional[float | dict] = None,
         maximum_frequency: Optional[float | dict] = None,
         mask_frequency_edges_settings: Optional[dict] = None,
+        psd_notch_dict: Optional[dict] = None,
         print_output: bool = True,
     ):
         """
@@ -1000,6 +1001,11 @@ class MaskTokensForFrequencyRangeUpdate(object):
             ``f_min_upper``). When provided, the first call to :meth:`__call__` checks
             whether the inference-time masking is out of distribution relative to training
             and prints a warning when it is.
+        psd_notch_dict: dict | None
+            Per-detector interior frequency intervals to mask, e.g.
+            ``{H1: [[50, 60]], L1: [[50, 60]]}``.  Each value is either a
+            single ``[f_lo, f_hi]`` or a list of such pairs.  Tokens whose
+            frequency range overlaps with any notch interval are masked.
         print_output:
             Whether to write a summary to stdout on construction and on the first call.
         """
@@ -1013,6 +1019,7 @@ class MaskTokensForFrequencyRangeUpdate(object):
             update_value=domain.f_max,
             detectors=detectors,
         )
+        self.psd_notch_dict = psd_notch_dict
         self._mask_frequency_edges_settings = mask_frequency_edges_settings
         self._distribution_checked = False
         self.print_output = print_output
@@ -1021,6 +1028,11 @@ class MaskTokensForFrequencyRangeUpdate(object):
                 f"Transform MaskTokensForFrequencyRangeUpdate activated:\n"
                 f"    - minimum_frequency: {self.minimum_frequency}\n"
                 f"    - maximum_frequency: {self.maximum_frequency}\n"
+                + (
+                    f"    - psd_notch_dict: {self.psd_notch_dict}\n"
+                    if self.psd_notch_dict
+                    else ""
+                )
             )
 
     def __call__(self, input_sample: dict) -> dict:
@@ -1101,6 +1113,24 @@ class MaskTokensForFrequencyRangeUpdate(object):
                 )
             if self.print_output:
                 print(f"Updated f_max to {self.maximum_frequency}.")
+
+        if self.psd_notch_dict is not None:
+            for b in detector_indices:
+                det = DETECTOR_DICT_INVERSE[b]
+                if det not in self.psd_notch_dict:
+                    continue
+                notch = self.psd_notch_dict[det]
+                # Support single [f_lo, f_hi] or list of [[f_lo, f_hi], ...].
+                if not isinstance(notch[0], (list, tuple)):
+                    notch = [notch]
+                mask_b = sample["position"][..., 2] == b
+                for f_lo, f_hi in notch:
+                    mask_notch = (f_max_per_token_single >= f_lo) & (
+                        f_min_per_token_single <= f_hi
+                    )
+                    mask[mask_b] = np.logical_or(mask_notch, mask[mask_b])
+            if self.print_output:
+                print(f"Applied PSD notch masking: {self.psd_notch_dict}.")
 
         if not self._distribution_checked and self.print_output:
             self._distribution_checked = True

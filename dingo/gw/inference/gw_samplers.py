@@ -68,6 +68,7 @@ class GWSamplerMixin(object):
         self._minimum_frequency = None
         self._maximum_frequency = None
         self._detectors = None
+        self._psd_notch_dict = None
         super().__init__(**kwargs)
         self.t_ref = self.base_model_metadata["train_settings"]["data"]["ref_time"]
         self._pesummary_package = "gw"
@@ -222,6 +223,30 @@ class GWSamplerMixin(object):
         return normalize(self.minimum_frequency) != {self.domain.f_min} or normalize(
             self.maximum_frequency
         ) != {self.domain.f_max}
+
+    @property
+    def psd_notch_dict(self) -> dict | None:
+        return getattr(self, "_psd_notch_dict", None)
+
+    @psd_notch_dict.setter
+    def psd_notch_dict(self, value: dict | None):
+        if value is not None:
+            if isinstance(self.domain, MultibandedFrequencyDomain):
+                domain = self.domain.base_domain
+            elif isinstance(self.domain, UniformFrequencyDomain):
+                domain = self.domain
+            else:
+                raise ValueError("psd_notch_dict requires a frequency domain.")
+            for det, notch in value.items():
+                ranges = [notch] if not isinstance(notch[0], (list, tuple)) else notch
+                for f_lo, f_hi in ranges:
+                    if f_lo < domain.f_min or f_hi > domain.f_max:
+                        raise ValueError(
+                            f"psd_notch_dict interval [{f_lo}, {f_hi}] for {det} "
+                            f"is outside domain [{domain.f_min}, {domain.f_max}]."
+                        )
+        self._psd_notch_dict = value
+        self._initialize_transforms()
 
     @property
     def event_metadata(self):
@@ -419,7 +444,7 @@ class GWSampler(GWSamplerMixin, Sampler):
                     drop_last_token=tok.get("drop_last_token", False),
                 )
             )
-            if self.frequency_updates:
+            if self.frequency_updates or self.psd_notch_dict:
                 transform_pre.append(
                     MaskTokensForFrequencyRangeUpdate(
                         domain=self.domain,
@@ -427,6 +452,7 @@ class GWSampler(GWSamplerMixin, Sampler):
                         minimum_frequency=self.minimum_frequency,
                         maximum_frequency=self.maximum_frequency,
                         mask_frequency_edges_settings=self.mask_frequency_edges_settings,
+                        psd_notch_dict=self.psd_notch_dict,
                     )
                 )
 
