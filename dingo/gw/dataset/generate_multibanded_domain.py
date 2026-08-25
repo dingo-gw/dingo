@@ -33,6 +33,7 @@ import torch
 import yaml
 from bilby.gw.detector import PowerSpectralDensity
 from scipy.interpolate import interp1d
+from scipy.ndimage import grey_opening
 
 from dingo.gw.dataset._multibanded_domain_utils import (build_extreme_prior,
                                                         print_mismatch_stats)
@@ -322,13 +323,21 @@ def _get_asd_file(settings: dict) -> str:
 def _load_asd(
     asd_file: str,
     ufd_2x: UniformFrequencyDomain,
+    smoothing_hz: float = 8.0,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """Load and interpolate an ASD file to both the UFD and 2x-resolution grids.
 
     The 1x ASD is obtained by taking every other sample of the 2x ASD, so only
-    ``ufd_2x`` is needed. A spectral artefact (bump) in the frequency range 477–483 Hz
-    is suppressed by replacing those values with the ASD value at 477 Hz, preventing it
-    from artificially inflating the waveform difference in that band.
+    ``ufd_2x`` is needed.
+
+    Narrow spectral lines (violin modes, calibration lines, the 477–483 Hz artefact of
+    ``aLIGO_ZERO_DET_high_P_asd.txt``, ...) are sharp features of the *noise*, not
+    of the waveform. The problem is since we use the whitened strain to determine nodes,
+    this looks like stucture that cannot be decimated. A grayscale opening 
+    clips local maxima leaving monotonic stretches of the ASD untouched. This way the broadband shape 
+    of the PSD is still taken into account while the ASD specific spectral lines are not. 
+    We do the smoothing in this function rather than hard coding the location 
+    of the spectral line in ``aLIGO_ZERO_DET_high_P_asd.txt``since that is ASD-agnostic. 
 
     Parameters
     ----------
@@ -336,13 +345,16 @@ def _load_asd(
         Path to the ASD file (bilby-compatible format).
     ufd_2x : UniformFrequencyDomain
         Domain at twice the resolution of the base UFD.
+    smoothing_hz : float
+        Width (Hz) of the grayscale-opening structuring element used to suppress narrow
+        lines. Set to ``0`` to disable smoothing. Default: ``8.0``.
 
     Returns
     -------
     asd : np.ndarray
         ASD interpolated to ``ufd.sample_frequencies``.
     asd_2x : np.ndarray
-        ASD interpolated to ``ufd_2x.sample_frequencies`` with bump removed.
+        ASD interpolated to ``ufd_2x.sample_frequencies``, with narrow lines suppressed.
     """
     psd = PowerSpectralDensity(asd_file=asd_file)
     asd_2x = np.interp(
@@ -352,8 +364,9 @@ def _load_asd(
         left=np.inf,
         right=np.inf,
     )
-    bump_mask = np.where((ufd_2x() > 477) & (ufd_2x() < 483))[0]
-    asd_2x[bump_mask] = asd_2x[np.argmin(np.abs(ufd_2x() - 477))]
+    if smoothing_hz > 0:
+        width = max(1, int(round(smoothing_hz / ufd_2x.delta_f)))
+        asd_2x = grey_opening(asd_2x, size=width, mode="nearest")
     asd = asd_2x[::2]
     return asd, asd_2x
 

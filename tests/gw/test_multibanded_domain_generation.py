@@ -19,8 +19,8 @@ from dingo.gw.dataset._multibanded_domain_utils import build_extreme_prior
 from dingo.gw.dataset.evaluate_multibanded_domain import \
     _evaluate_multibanding_main
 from dingo.gw.dataset.generate_multibanded_domain import (
-    _build_mfd_for_threshold, _compute_mismatches, _output_settings_path,
-    compute_max_decimation_factor,
+    _build_mfd_for_threshold, _compute_mismatches, _load_asd,
+    _output_settings_path, compute_max_decimation_factor,
     compute_waveform_difference_per_decimation_factor, floor_to_power_of_2,
     get_band_nodes_for_adaptive_decimation)
 from dingo.gw.domains import MultibandedFrequencyDomain, UniformFrequencyDomain
@@ -441,3 +441,44 @@ class TestEvaluateMultibandingMain:
         assert prior["chirp_mass"].maximum == pytest.approx(nominal_minimum, rel=1e-8)
         assert isinstance(prior["geocent_time"], DeltaFunction)
         assert prior["geocent_time"].peak == 0.12
+
+
+# ---------------------------------------------------------------------------
+# _load_asd
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def asd_file_with_line(tmp_path):
+    """A smooth power-law ASD covering 10-300 Hz with a narrow 2 Hz line at 100 Hz."""
+    f = np.arange(10.0, 300.0, 0.05)
+    asd = 1e-23 * (f / 100.0) ** -1.5
+    asd[np.abs(f - 100.0) < 1.0] *= 50.0
+    path = tmp_path / "line_asd.txt"
+    np.savetxt(path, np.column_stack([f, asd]))
+    return str(path)
+
+
+def test_load_asd_suppresses_narrow_line(asd_file_with_line, ufd_2x):
+    asd, asd_2x = _load_asd(asd_file_with_line, ufd_2x, smoothing_hz=8.0)
+
+    f = ufd_2x()
+    line = np.abs(f - 100.0) < 1.0
+    smooth = np.isfinite(asd_2x) & (np.abs(f - 100.0) > 10.0)
+
+    reference = 1e-23 * (np.maximum(f, ufd_2x.delta_f) / 100.0) ** -1.5
+    # The line is gone: values there follow the underlying power law.
+    assert np.allclose(asd_2x[line], reference[line], rtol=0.05)
+    # Away from the line the ASD is untouched by the opening.
+    assert np.allclose(asd_2x[smooth], reference[smooth], rtol=0.05)
+    # 1x ASD is every other sample of the 2x ASD.
+    assert np.array_equal(asd, asd_2x[::2])
+
+
+def test_load_asd_preserves_out_of_range_infs(asd_file_with_line, ufd_2x):
+    _, asd_2x = _load_asd(asd_file_with_line, ufd_2x, smoothing_hz=8.0)
+    f = ufd_2x()
+    # Erosion pulls finite values outward, dilation pushes them back, so bins outside
+    # the ASD file's frequency range must remain infinite.
+    assert np.all(np.isinf(asd_2x[f < 10.0]))
+    assert np.all(np.isfinite(asd_2x[(f >= 10.0) & (f < 300.0)]))
