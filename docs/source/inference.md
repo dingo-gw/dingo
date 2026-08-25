@@ -18,6 +18,22 @@ which inherits from it.
 
 This is instantiated based on a `PosteriorModel`. To draw samples, the `context` property must first be set to the data to be analyzed. For gravitational waves this should be a dictionary with the following keys:
 
+### Inference-time frequency options (transformer models)
+
+For transformer-based (Dingo-T1) models, several properties of `GWSampler` can be set *after* construction.
+Restraining is not required when setting these properties:
+
+`minimum_frequency` / `maximum_frequency`
+: Restrict the frequency band per detector.  Accepts a single float (all detectors) or a `{det: value}` dict.  
+The model must have been trained with `mask_frequency_edges` or sufficient `mask_random_tokens` augmentation for a non-default range to be in-distribution.
+
+`psd_notch_dict`
+: Mask tokens that overlap one or more interior frequency intervals.  Accepts a `{det: [f_lo, f_hi]}` dict (single interval) 
+or `{det: [[f_lo1, f_hi1], ...]}` (multiple intervals). Either, this argument can be included in the `.ini` file 
+or the `psd_notch_dict` is detected automatically if a modified ASD dataset is specified where certain ASD values have been set to 1 (see [PSD notching](dingo_pipe.md#psd-notching) for details).
+
+These properties call `_initialize_transforms()` internally, so the transform chain is rebuilt immediately on assignment.  They can be set in any order and are independent of each other.
+
 waveform
 : (unwhitened) strain data in each detector
 

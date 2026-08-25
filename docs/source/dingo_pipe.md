@@ -92,6 +92,54 @@ Injections mirror the [approach of `bilby_pipe`](https://lscsoft.docs.ligo.org/b
 * Setting `zero-noise = True` will create a zero-noise injection, which is out-of-distribution with respect to Dingo training data. It should therefore be used with caution.
 * When running many injections `n-simulation > 1`, one may want to produce a PP plot. This can be done automatically by setting `plot-pp = true`.
 
+### Per-detector frequency range
+
+For transformer-based (Dingo-T1) models, the frequency band used for inference
+can be restricted per detector without retraining.  Both `minimum-frequency` and
+`maximum-frequency` accept either a single float (applied to all detectors) or a
+per-detector dict:
+
+```ini
+minimum-frequency = {H1: 30, L1: 30, V1: 40}
+maximum-frequency = {H1: 1024, L1: 1024, V1: 512}
+```
+
+Detectors absent from the dict fall back to the model's training range.  The
+model must have been trained with `mask_frequency_edges` augmentation for a
+non-default range to be in-distribution; an out-of-distribution warning is
+printed otherwise.
+
+### PSD notching
+
+For transformer-based models, specific frequency intervals can be suppressed
+(notched) to exclude spectral artefacts such as power-line harmonics.  Two
+equivalent paths produce the same result:
+
+**Standard path** — set `psd-notch-dict` in the ini file:
+
+```ini
+# Per-detector dict.  Each value is [f_lo, f_hi] or [[f_lo1, f_hi1], ...].
+psd-notch-dict = {H1: [[59.0, 61.0], [119.0, 121.0]], L1: [59.0, 61.0]}
+```
+
+dingo_pipe sets the ASD to `HIGH_ASD_VALUE = 1` in the specified bins during
+data generation and saves the modified ASD to the event HDF5.  At sampling
+time the notched regions are auto-detected from the stored ASD, and the
+overlapping tokens are masked before the network forward pass.
+
+**Asimov / pre-notched path** — leave `psd-notch-dict` commented out.  If the
+ASD has already been set to 1 in the notch regions by an external tool (e.g.
+the Asimov pipeline) before dingo_pipe runs, the notched regions are
+auto-detected automatically.  No ini flag is needed.
+
+In both paths the importance-sampling likelihood contribution from notched bins
+is negligible because ASD = 1 ≫ real noise level (~10⁻²³ 1/√Hz), so the
+noise-weighted inner product for those bins approaches zero.
+
+```{note}
+PSD notching is only supported for tokenized (transformer) models.
+```
+
 ## Sampling
 
 The next step is sampling from the Dingo model. The model is loaded into a [GWSampler](dingo.gw.inference.gw_samplers.GWSampler) or [GWSamplerGNPE](dingo.gw.inference.gw_samplers.GWSamplerGNPE) object. (If using [GNPE](gnpe) it is necessary to specify a `model-init`.) The Sampler `context` is then set from the EventDataset prepared in the previous step. `num-samples` samples are then generated in batches of size `batch-size`. The samples (and context) are stored in a [Result](dingo.gw.result.Result) object and saved in HDF5 format.

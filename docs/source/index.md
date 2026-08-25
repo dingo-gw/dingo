@@ -45,6 +45,7 @@ As training a network from scratch can be expensive, we intend to also distribut
    example_toy_npe_model
    example_npe_model
    example_gnpe_model
+   example_dingo_t1
    example_injection
 
 .. toctree::
@@ -75,7 +76,7 @@ As training a network from scratch can be expensive, we intend to also distribut
 References
 ----------
 
-Dingo is based on a series of papers developing neural posterior estimation for gravitational waves, starting from proof of concept {cite:p}`Green:2020hst`, to inclusion of all 15 parameters and analysis of real data {cite:p}`Green:2020dnx`, noise conditioning and full amortization {cite:p}`Dax:2021tsq`, and group-equivariant NPE {cite:p}`Dax:2021myb`. Dingo results are augmented with importance sampling in {cite:p}`Dax:2022pxd`. Finally, training with forecasted noise (needed for training *prior* to an observing run) is described in {cite:p}`Wildberger:2022agw`.
+Dingo is based on a series of papers developing neural posterior estimation for gravitational waves, starting from proof of concept {cite:p}`Green:2020hst`, to inclusion of all 15 parameters and analysis of real data {cite:p}`Green:2020dnx`, noise conditioning and full amortization {cite:p}`Dax:2021tsq`, and group-equivariant NPE {cite:p}`Dax:2021myb`. Dingo results are augmented with importance sampling in {cite:p}`Dax:2022pxd`. Training with forecasted noise (needed for training *prior* to an observing run) is described in {cite:p}`Wildberger:2022agw`. The flexible transformer-based architecture (Dingo-T1) is introduced in {cite:p}`Kofler:2026fgw`.
 
 ```{eval-rst}
 .. bibliography::
