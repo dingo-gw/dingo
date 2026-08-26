@@ -2,6 +2,7 @@ import numpy as np
 import torch
 from bilby.gw.detector import PowerSpectralDensity
 from scipy.interpolate import interp1d
+import copy
 
 from dingo.gw.domains import UniformFrequencyDomain
 from .utils import get_batch_size_of_input_sample
@@ -182,6 +183,25 @@ class AddWhiteNoiseComplex(object):
             noise = noise.numpy()
             noisy_strains[ifo] = pure_strain + noise
         sample["waveform"] = noisy_strains
+        return sample
+
+class DuplicateSamples(object):
+    """
+    Tile the sample waveforms and asds according to the given batch size
+    """
+
+    def __init__(self, batch_size):
+        self.batch_size = batch_size
+
+    def __call__(self, input_sample):
+        sample = copy.deepcopy(input_sample)
+        ifos = sample['waveform'].keys()
+
+        #duplicate waveforms over the batch
+        for ifo in ifos:
+            sample['waveform'][ifo] = np.broadcast_to(sample['waveform'][ifo], (self.batch_size, len(sample['waveform'][ifo])))
+            sample['asds'][ifo] = np.broadcast_to(sample['asds'][ifo], (self.batch_size, len(sample['asds'][ifo])))
+        
         return sample
 
 
