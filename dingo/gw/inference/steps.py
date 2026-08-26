@@ -106,7 +106,7 @@ class SyntheticPhaseFactor(Factor):
         and their proposal log-prob `log q(phase | theta_rest, d)`."""
         if num_samples != 1:
             raise ValueError(
-                "Synthetic phase is 1:1; draw one phase per sample (fan_out=1)."
+                "Synthetic phase is 1:1; draw one phase per sample (num_samples=1)."
             )
         reference = next(iter(given.values()))
         device = reference.device if torch.is_tensor(reference) else None
@@ -268,7 +268,7 @@ class GNPEKernelFactor(Factor):
         """Blur the conditioning detector times into proxies; `num_samples` must be 1
         (GNPE is 1:1). Returns the proxies and their kernel log-prob."""
         if num_samples != 1:
-            raise ValueError("GNPE proxy is 1:1; use fan_out=1.")
+            raise ValueError("GNPE proxy is 1:1; num_samples must be 1.")
         times = {k: given[k] for k in self.gnpe_parameters}
         proxies = self.gnpe.sample_proxies(times)
         return proxies, self.log_prob(proxies, context, given)
@@ -570,7 +570,7 @@ class SpinConventionReparam(Reparametrization):
         single LAL conversion between the transform and its Jacobian (the base
         implementation would convert twice)."""
         if num_samples != 1:
-            raise ValueError("A reparametrization is 1:1; use fan_out=1.")
+            raise ValueError("A reparametrization is 1:1; num_samples must be 1.")
         out = self.forward(given, context)
         return out, -self._log_det(given["theta_jn"], out["theta_jn"])
 

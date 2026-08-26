@@ -11,9 +11,9 @@ explained in the "Sampling chains" page of the documentation.
 
 from __future__ import annotations
 
-import math
-from dataclasses import dataclass
-from typing import Callable, Optional, Union
+import copy
+from numbers import Integral
+from typing import Callable, Optional, Sequence, Union
 
 import pandas as pd
 import torch
@@ -80,64 +80,39 @@ def _repeat_rows(samples, total, n):
     return samples, total
 
 
-@dataclass
-class Stage:
-    """A chain step together with its fan-out.
-
-    Every stage multiplies the table by its `fan_out`: for each row so far, `fan_out`
-    samples are drawn (a conditioned step draws them per conditioning row itself; an
-    unconditioned step is asked for the total), and the earlier columns are repeated
-    to match. The first stage that draws uses `num_samples` times its `fan_out`.
-    `fan_out` must be 1 on the root stage, where it would only multiply
-    `num_samples`, and on non-drawing steps.
-
-    Attributes
-    ----------
-    step : Step
-        The chain step.
-    fan_out : int
-        Samples drawn per row of the table so far. Default 1.
-    """
-
-    step: Step
-    fan_out: int = 1
-
-
 class ChainComposer:
     """
     Runs a chain of steps in order, building up a table of samples and the summed
     proposal log probability.
 
-    The composer holds an ordered list of `Stage` entries (bare steps are accepted,
-    and wrapped with `fan_out=1`). At construction it checks that the order is
-    consistent: every conditioning column must be produced by an earlier step, and
-    no step may overwrite an existing column, except a `Reparametrization` replacing
-    its own inputs. Sampling folds the steps forward, expanding the table by each
-    stage's fan-out and summing the log-probability contributions; `log_prob` folds
-    the steps in reverse to re-evaluate the same density at given samples. If any
-    step is density-free (a `GibbsBlock`), the chain has no tractable density and
-    `sample` omits `log_prob`.
+    The composer holds the steps as an ordered list. At construction it checks that
+    the order is consistent: every conditioning column must be produced by an
+    earlier step, and no step may overwrite an existing column, except a
+    `Reparametrization` replacing its own inputs. Sampling folds the steps forward,
+    drawing at each step that draws and summing the log-probability contributions;
+    `log_prob` folds the steps in reverse to re-evaluate the same density at given
+    samples. If any step is density-free (a `GibbsBlock`), the chain has no
+    tractable density and `sample` omits `log_prob`.
 
     This one class covers plain NPE, single-step GNPE, prior conditioning, synthetic
     phase, and, through `GibbsBlock`, multi-iteration GNPE. See the "Sampling
     chains" page of the documentation.
     """
 
-    def __init__(self, stages: list[Union["Stage", Step]]):
+    def __init__(self, steps: list[Step]):
         """
         Parameters
         ----------
-        stages : list[Stage or Step]
-            The chain, in order. Bare steps are wrapped as `Stage(step, fan_out=1)`.
+        steps : list[Step]
+            The chain, in order.
 
         Raises
         ------
         ValueError
-            If a step conditions on a column that no earlier step produces, would
-            overwrite an existing column, or has a `fan_out` other than 1 where it
-            has no effect (the root stage, or a non-drawing step).
+            If a step conditions on a column that no earlier step produces, or would
+            overwrite an existing column.
         """
-        self.stages = [s if isinstance(s, Stage) else Stage(s) for s in stages]
+        self.steps = list(steps)
         self._validate()
 
     def _validate(self):
@@ -145,15 +120,7 @@ class ChainComposer:
         conditioning DAG."""
         produced: set[str] = set()
         sampled: set[str] = set()  # parameter columns (as opposed to side channels)
-        for i, stage in enumerate(self.stages):
-            step = stage.step
-            if stage.fan_out != 1 and (i == 0 or not step.draws):
-                raise ValueError(
-                    f"Stage {i} ({type(step).__name__}) has fan_out={stage.fan_out}, "
-                    f"but fan_out must be 1 on the root stage (it would only multiply "
-                    f"num_samples) and on non-drawing steps (point masses, sample "
-                    f"tables, reparametrizations, target corrections)."
-                )
+        for step in self.steps:
             missing = [c for c in step.conditioning if c not in produced]
             if missing:
                 raise ValueError(
@@ -193,20 +160,9 @@ class ChainComposer:
             produced.difference_update(step.consumes)
             sampled.difference_update(step.consumes)
 
-    @property
-    def steps(self) -> list[Step]:
-        """The stage steps, in order."""
-        return [stage.step for stage in self.stages]
-
-    @property
-    def expansion(self) -> int:
-        """Product of the fan-outs of the stages after the root. `sample` returns
-        `num_samples * expansion` rows per root row."""
-        return math.prod(stage.fan_out for stage in self.stages[1:])
-
     def sample_and_log_prob(
         self,
-        num_samples: int,
+        num_samples: Union[int, Sequence[int]],
         context: SamplerContext,
         batch_size: Optional[int] = None,
     ) -> tuple[dict[str, torch.Tensor], Optional[torch.Tensor]]:
@@ -214,37 +170,83 @@ class ChainComposer:
 
         Parameters
         ----------
-        num_samples : int
-            The number of samples drawn per root row. A chain rooted in a pin or a
-            flow has a single root row, so this is the total; a chain rooted in a
-            `SampleTableFactor` draws `num_samples` per table row.
+        num_samples : int or sequence of int
+            How many samples to draw for each row of the table, at each step that
+            draws. An int is the count for the first drawing step (typically the
+            flow), after which any later drawing step draws one sample per row. This
+            is the usual case: the int is the total for a chain with a single root
+            row (a pin or a flow at the root), or the number per table row for a
+            chain rooted in a `SampleTableFactor`. A sequence instead gives one count
+            per drawing step, in chain order, so that a later step may draw several
+            samples for each row it receives (for example several extrinsic draws
+            per intrinsic sample). Steps that do not draw (pins, tables,
+            reparametrizations, target corrections) take no count. A chain with no
+            drawing step at all (a stored table run through a reparametrization,
+            say) runs once, with `num_samples=1`.
         context : SamplerContext
             The per-event shared state.
         batch_size : int, optional
-            Chunk `num_samples` into batches of this size, to cap the peak memory.
+            Chunk the first count into batches of this size, to cap the peak memory.
             `None` draws in one pass. For a chain rooted in a sample table, the rows
             of the result are then grouped by chunk rather than by table row.
 
         Returns
         -------
         samples : dict[str, torch.Tensor]
-            The chain's columns, with `(root rows) * num_samples * expansion` rows.
+            The chain's columns, with `(root rows) * prod(counts)` rows.
         log_prob : torch.Tensor or None
             The proposal log probability per row, or `None` if any step is
             density-free.
+
+        Raises
+        ------
+        ValueError
+            If a sequence of counts does not have one entry per drawing step, a
+            count is below 1, or the chain has no drawing step and `num_samples` is
+            not 1.
         """
+        counts = self._sample_counts(num_samples)
+        if not counts:
+            # Nothing draws: the chain transforms its root rows in a single pass.
+            return self._run_chain_once([], context)
         return chunk_and_concat(
-            num_samples, batch_size, lambda n: self._run_chain_once(n, context)
+            counts[0],
+            batch_size,
+            lambda n: self._run_chain_once([n, *counts[1:]], context),
         )
 
-    def _run_chain_once(
-        self, num_samples: int, context: SamplerContext
-    ) -> tuple[dict[str, torch.Tensor], Optional[torch.Tensor]]:
-        """One pass of the whole chain, for `num_samples` samples per root row.
+    def _sample_counts(self, num_samples: Union[int, Sequence[int]]) -> list[int]:
+        """Expand `num_samples` to one count per drawing step: an int is the count
+        for the first drawing step, followed by 1 for each later one. A chain with
+        no drawing step takes no count (an int must then be 1)."""
+        drawing = [type(step).__name__ for step in self.steps if step.draws]
+        if isinstance(num_samples, Integral):
+            if not drawing:
+                if num_samples != 1:
+                    raise ValueError(
+                        f"The chain has no drawing step, so it runs once: "
+                        f"num_samples must be 1, got {num_samples}."
+                    )
+                return []
+            return [int(num_samples)] + [1] * (len(drawing) - 1)
+        counts = [int(n) for n in num_samples]
+        if len(counts) != len(drawing):
+            raise ValueError(
+                f"num_samples has {len(counts)} entries, but the chain has "
+                f"{len(drawing)} drawing step(s) {drawing}. Pass an int, or one "
+                f"count per drawing step."
+            )
+        if any(n < 1 for n in counts):
+            raise ValueError(f"Every count must be at least 1, got {counts}.")
+        return counts
 
-        Every stage multiplies the table by a factor `k`: 1 for a non-drawing step,
-        `num_samples` times the stage's fan-out for the first step that draws, and
-        the fan-out for later stages. A conditioned step draws `k` samples per
+    def _run_chain_once(
+        self, counts: list[int], context: SamplerContext
+    ) -> tuple[dict[str, torch.Tensor], Optional[torch.Tensor]]:
+        """One pass of the whole chain, with one count per drawing step.
+
+        Every step multiplies the table by a factor `k`: its count for a step that
+        draws, and 1 for one that does not. A conditioned step draws `k` samples per
         conditioning row itself; an unconditioned step is asked for the total. The
         rows carried so far are then repeated `k` times so that every row stays
         complete. Returns the samples and the summed log probability (`None` if any
@@ -252,31 +254,20 @@ class ChainComposer:
         """
         samples: dict[str, torch.Tensor] = {}
         total: torch.Tensor | float | None = 0.0
-        # The requested count lands on the first step that draws.
-        num_samples_pending: Optional[int] = num_samples
-        for stage in self.stages:
-            step = stage.step
-            if not step.draws:
-                per_row = 1
-            elif num_samples_pending is not None:
-                per_row = num_samples_pending * stage.fan_out
-                num_samples_pending = None
-            else:
-                per_row = stage.fan_out
+        pending = iter(counts)
+        for step in self.steps:
+            k = next(pending) if step.draws else 1
             rows = _n_rows(samples) if samples else 1
             given = {c: samples[c] for c in step.conditioning}
             block, lp = step.sample_and_log_prob(
-                per_row if step.conditioning else rows * per_row, context, given
+                k if step.conditioning else rows * k, context, given
             )
-            if samples and per_row > 1:
-                samples, total = _repeat_rows(samples, total, per_row)
+            if samples and k > 1:
+                samples, total = _repeat_rows(samples, total, k)
             samples.update(block)
             for c in step.consumes:
                 samples.pop(c, None)
             total = None if lp is None or total is None else total + lp
-        if num_samples_pending is not None and num_samples_pending > 1:
-            # No step draws (a chain of pins only): repeat the rows instead.
-            samples, total = _repeat_rows(samples, total, num_samples_pending)
         return samples, total
 
     def log_prob(
@@ -340,7 +331,7 @@ class ChainComposer:
 
     def sample(
         self,
-        num_samples: int,
+        num_samples: Union[int, Sequence[int]],
         context: SamplerContext,
         batch_size: Optional[int] = None,
     ) -> dict[str, torch.Tensor]:
@@ -416,7 +407,7 @@ class GibbsBlock:
         Parameters
         ----------
         num_samples : int
-            The number of walkers. Gibbs does not fan out; each walker is one row.
+            The number of walkers, one row each (the block's count in the chain).
         context : SamplerContext
             The per-event shared state.
         given : dict, optional
@@ -457,8 +448,9 @@ class ComposedSampler:
     DataFrame.
 
     All domain-specific processing lives in the chain's steps and in the context, so
-    the runner itself is domain-agnostic. The gravitational-wave subclass is
-    `dingo.gw.inference.sampler.GWComposedSampler`.
+    the runner itself is domain-agnostic; it also assembles the provenance record of
+    how the samples were made (`sampler_provenance`). The gravitational-wave
+    subclass is `dingo.gw.inference.sampler.GWComposedSampler`.
     """
 
     def __init__(self, composer: ChainComposer, context: SamplerContext):
@@ -473,16 +465,23 @@ class ComposedSampler:
         self.composer = composer
         self.context = context
         self.samples: Optional[pd.DataFrame] = None
+        # The `num_samples` last requested of `run_sampler`, for the provenance
+        # record: an int, or one count per drawing step.
+        self.num_samples: Optional[Union[int, list[int]]] = None
+        # Extra provenance merged into the record by `sampler_provenance` -- e.g. the
+        # pipe adds model checkpoint paths and the density-recovery recipe.
+        # Literal-only values (the settings dict round-trips through str/literal_eval).
+        self.provenance_extra: dict = {}
 
     def run_sampler(
-        self, num_samples: int, batch_size: Optional[int] = None
+        self, num_samples: Union[int, Sequence[int]], batch_size: Optional[int] = None
     ) -> pd.DataFrame:
         """Draw samples and store them as a DataFrame.
 
         Parameters
         ----------
-        num_samples : int
-            The number of samples per root row (see
+        num_samples : int or sequence of int
+            The number of samples per root row, or one count per drawing step (see
             `ChainComposer.sample_and_log_prob`).
         batch_size : int, optional
             Chunk size for drawing. `None` draws in one pass.
@@ -491,9 +490,36 @@ class ComposedSampler:
         -------
         pandas.DataFrame
             One row per sample, with a `log_prob` column unless the chain is
-            density-free. Also stored as `self.samples`.
+            density-free. Also stored as `self.samples`, with the request as
+            `self.num_samples`.
         """
+        # Keep the request as Python literals, for the provenance record.
+        self.num_samples = (
+            int(num_samples)
+            if isinstance(num_samples, Integral)
+            else [int(n) for n in num_samples]
+        )
         merged = self.composer.sample(num_samples, self.context, batch_size)
         merged = {k: v.cpu().numpy() for k, v in merged.items()}
         self.samples = pd.DataFrame(merged)
         return self.samples
+
+    def sampler_provenance(self) -> dict:
+        """Provenance of how the samples were made: the executed chain in order (one
+        descriptor per step, via `Step.describe()`), the `num_samples` requested of
+        `run_sampler` (an int, or one count per drawing step; absent before
+        sampling), plus anything in `provenance_extra`. A domain runner stores the
+        block with its exported result (the gravitational-wave subclass as
+        `settings["sampler"]` of the `Result`). It is purely a record; nothing
+        consumes it at load time.
+
+        Returns
+        -------
+        dict
+            The provenance block, of literal values only.
+        """
+        provenance = {"chain": [step.describe() for step in self.composer.steps]}
+        if self.num_samples is not None:
+            provenance["num_samples"] = self.num_samples
+        provenance.update(copy.deepcopy(self.provenance_extra))
+        return provenance

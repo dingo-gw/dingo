@@ -8,7 +8,7 @@ covers the two GW-builder concerns the branch's tests otherwise leave untested:
 * ``to_result`` / ``to_hdf5`` -- exporting the sampled DataFrame, the raw event data, and
   the chain provenance to a gw ``Result`` (and back through HDF5).
 
-Both use metadata-only stubs and a network-free ``DeltaFactor`` chain, so no waveform
+Both use metadata-only stubs and network-free chains, so no waveform
 generation or trained network is needed.
 
 (Adapts the ``run_sampler`` export coverage and the fixed-prior post-processing check
@@ -20,7 +20,7 @@ import numpy as np
 import pytest
 
 from dingo.core.inference.composer import ChainComposer
-from dingo.core.inference.steps import DeltaFactor
+from dingo.core.inference.steps import SampleTableFactor
 from dingo.gw.inference.context import GWSamplerContext
 from dingo.gw.inference.sampler import GWComposedSampler
 from dingo.gw.result import Result
@@ -122,18 +122,22 @@ def test_from_model_plain_npe_chain_fills_delta_prior_parameters():
 # ---------------------------------------------------------------------------
 
 
-def _network_free_sampler():
-    """A GWComposedSampler whose chain pins every inference parameter, so run_sampler
-    produces a DataFrame with no network involved."""
+def _network_free_sampler(num_rows=10):
+    """A GWComposedSampler whose chain is a fixed table of every inference parameter
+    (with zero log-prob), so run_sampler produces a DataFrame with no network
+    involved. Nothing draws, so the chain runs with num_samples=1."""
     context = GWSamplerContext.from_model_metadata(_metadata(), _event_data())
-    pins = {"chirp_mass": 30.0, "mass_ratio": 0.8, "ra": 1.0, "dec": 0.1}
-    composer = ChainComposer([DeltaFactor(pins)])
-    return GWComposedSampler(composer, context)
+    values = {"chirp_mass": 30.0, "mass_ratio": 0.8, "ra": 1.0, "dec": 0.1}
+    table = SampleTableFactor(
+        {k: np.full(num_rows, v) for k, v in values.items()},
+        log_prob=np.zeros(num_rows),
+    )
+    return GWComposedSampler(ChainComposer([table]), context)
 
 
 def test_to_result_round_trips_samples_and_provenance():
     sampler = _network_free_sampler()
-    sampler.run_sampler(num_samples=10)
+    sampler.run_sampler(num_samples=1)
 
     result = sampler.to_result()
     assert isinstance(result, Result)
@@ -147,12 +151,13 @@ def test_to_result_round_trips_samples_and_provenance():
     # Model metadata is carried through, and the chain provenance is recorded.
     assert result.settings["train_settings"] == sampler.metadata["train_settings"]
     provenance = result.settings["sampler"]
-    assert [step["step"] for step in provenance["chain"]] == ["DeltaFactor"]
+    assert [step["step"] for step in provenance["chain"]] == ["SampleTableFactor"]
+    assert provenance["num_samples"] == 1
 
 
 def test_to_hdf5_round_trips_samples(tmp_path):
     sampler = _network_free_sampler()
-    sampler.run_sampler(num_samples=10)
+    sampler.run_sampler(num_samples=1)
     sampler.to_hdf5(label="result", outdir=str(tmp_path))
 
     reloaded = Result(file_name=str(tmp_path / "result.hdf5"))

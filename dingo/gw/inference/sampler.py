@@ -156,9 +156,10 @@ class GWComposedSampler(ComposedSampler):
     """
     GW builder and exporter over the generic `ComposedSampler` runner. The `from_*`
     constructors assemble the chain for plain NPE, multi-iteration GNPE, or single-step
-    GNPE from model metadata; `to_result` exports the samples to a gw `Result`. All
-    GW-specific processing (RA frame, fixed parameters, kernel correction) is expressed as
-    chain steps, so there is no post-processing.
+    GNPE from model metadata; `to_result` exports the samples to a gw `Result`, with
+    the model metadata and the sampler provenance as its settings. All GW-specific
+    processing (RA frame, fixed parameters, kernel correction) is expressed as chain
+    steps, so there is no post-processing.
     """
 
     def __init__(self, composer: ChainComposer, context: GWSamplerContext):
@@ -172,26 +173,11 @@ class GWComposedSampler(ComposedSampler):
             exported `Result`.
         """
         super().__init__(composer, context)
-        # Extra provenance merged into settings["sampler"] by to_result -- e.g. the
-        # pipe records model checkpoint paths and the density-recovery recipe.
-        # Literal-only values (the settings dict round-trips through str/literal_eval).
-        self.provenance_extra: dict = {}
 
     @property
     def metadata(self) -> dict:
         """The model metadata defining the analysis (from the context)."""
         return self.context.model_metadata
-
-    def sampler_provenance(self) -> dict:
-        """Provenance of how the samples were made, stored as `settings["sampler"]`
-        in the exported `Result`: the executed chain in order (one descriptor per
-        step, via `Step.describe()`), plus anything in `provenance_extra`. The
-        block is purely a record; nothing consumes it at load time. The Dingo
-        version that wrote it is recorded by the `Result` itself."""
-        return {
-            "chain": [step.describe() for step in self.composer.steps],
-            **copy.deepcopy(self.provenance_extra),
-        }
 
     @classmethod
     def from_model(

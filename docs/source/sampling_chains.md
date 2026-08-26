@@ -58,7 +58,7 @@ flowchart TB
 In the figure, every step is written as a conditional $q_i$, which covers all factors, point masses included.
 
 The generic machinery is defined in `dingo.core.inference`: `steps` (the step
-types), `composer` (stages, the composer, and the runner), and `context` (the
+types), `composer` (the composer, the Gibbs block, and the runner), and `context` (the
 context protocol). The gravitational-wave steps, the per-event context, and the
 chain builders are defined in `dingo.gw.inference`. The builders described in
 [](inference.md) assemble the standard chains from model metadata. A chain is
@@ -242,22 +242,21 @@ a new domain family, write a new context class implementing the same interface
 
 ## Sampling mechanics
 
-### Stages, fan-out, and multiplicity
+### Sample counts and multiplicity
 
-The `ChainComposer` orchestrates passes through the chain to obtain samples and/or log probabilities. This includes managing batching, nontrivial sampling multiplicity, and ensuring consistency of the DAG. It represents the chain as an ordered list of `Stage(step, fan_out)` entries, where `fan_out` allows for multiple output samples per input sample at a given `step` (see below). Bare steps are accepted as well, and are wrapped as stages with `fan_out=1`. The stage list is validated at construction to ensure it satisfies the topological order of the conditioning DAG: every conditioning column must be produced by an earlier
-step, and no factor may overwrite an existing column. A reparametrization, however, may replace its own inputs.
+The `ChainComposer` orchestrates passes through the chain to obtain samples and/or log probabilities. This includes managing batching, nontrivial sampling multiplicity, and ensuring consistency of the DAG. It holds the steps as an ordered list, validated at construction to ensure it satisfies the topological order of the conditioning DAG: every conditioning column must be produced by an earlier step, and no factor may overwrite an existing column. A reparametrization, however, may replace its own inputs.
 
-When running `ChainComposer.sample_and_log_prob(num_samples, context, batch_size)`, the total number of samples produced by the chain is
+Sampling runs the steps in order over a growing table of rows. Only some steps *draw*: a `FlowFactor` or a `GibbsBlock` produces new random values, whereas a `DeltaFactor`, a `SampleTableFactor`, a reparametrization, or a target correction emits exactly one row for each row it receives (the `draws` attribute of a step records which). Each drawing step is given a *count*, the number of samples it draws for each row of the table so far, and the rows already in the table are repeated to match, so that every row stays complete. The total number of samples produced by the chain is therefore
 
 $$
-\text{(total samples)} = \text{(root rows)} \times \texttt{num_samples} \times \prod_{\text{stages } i} \texttt{fan_out}_i .
+\text{(total samples)} = \text{(root rows)} \times \prod_{\text{drawing steps } i} n_i .
 $$
 
-Here, the *root rows* are the rows the table starts with: one, unless the chain is rooted in a `SampleTableFactor`, in which case it starts with the rows of that table. The argument `num_samples` is used exactly once, by the first step that actually samples (typically a `FlowFactor`). It then produces `num_samples` samples for each row of the table it receives. A stage with `fan_out=k` draws $k$ further samples for each row it receives, multiplying the table by $k$. This is useful, for example, to draw several extrinsic-parameter samples for each intrinsic sample.
+Here, the *root rows* are the rows the table starts with: one, unless the chain is rooted in a `SampleTableFactor`, in which case it starts with the rows of that table. (A chain with no drawing step at all, such as a stored table run through a reparametrization, has an empty product and simply emits its root rows once.) The counts $n_i$ are the `num_samples` argument of `ChainComposer.sample_and_log_prob(num_samples, context, batch_size)`. In the usual case this is an int: the count for the first drawing step (typically a `FlowFactor`), after which every later drawing step draws one sample per row. A sequence of ints instead gives one count per drawing step, in chain order, so that a later step may draw several samples for each row it receives. This would allow, for example, several extrinsic-parameter draws for each intrinsic sample.
 
-The reason to consume `num_samples` only at the point of sampling is to avoid redundant calculations. For instance, in the DINGO-BNS chirp-mass scan, the `SampleTableFactor` emits a column vector of `chirp_mass_proxy` values, along a grid spanning the prior. For each of these, we prepare one set of heterodyned data. Then the flow draws `num_samples` samples (typically 10) for each grid point. By having the flow perform the expansion (rather than doing it earlier) we avoid redundant data preprocessing and embedding network passes.
+The reason to draw only at the point of sampling, rather than repeating a pinned root `num_samples` times up front, is to avoid redundant calculations. For instance, in the DINGO-BNS chirp-mass scan, the `SampleTableFactor` emits a column vector of `chirp_mass_proxy` values, along a grid spanning the prior. For each of these, we prepare one set of heterodyned data. Then the flow draws `num_samples` samples (typically 10) for each grid point. By having the flow perform the expansion (rather than doing it earlier) we avoid redundant data preprocessing and embedding network passes.
 
-`batch_size` splits `num_samples` into chunks, which caps the peak memory at one chunk. For a chain rooted in a `SampleTableFactor`, each chunk still runs over the whole table, so a caller with a large table, such as the chirp-mass scan, splits the table into blocks itself.
+`batch_size` splits the first count into chunks, which caps the peak memory at one chunk. For a chain rooted in a `SampleTableFactor`, each chunk still runs over the whole table, so a caller with a large table, such as the chirp-mass scan, splits the table into blocks itself.
 
 ### Provenance
 
@@ -357,5 +356,5 @@ The classes on this page are documented in the API reference:
 * {py:class}`dingo.core.inference.steps.Reparametrization`
 * {py:class}`dingo.core.inference.steps.TargetCorrection`
 * {py:class}`dingo.core.inference.composer.GibbsBlock`
-* {py:class}`dingo.core.inference.composer.Stage` and {py:class}`dingo.core.inference.composer.ChainComposer`
+* {py:class}`dingo.core.inference.composer.ChainComposer`
 * {py:class}`dingo.gw.inference.context.GWSamplerContext`, and the gravitational-wave steps in {py:mod}`dingo.gw.inference.steps`

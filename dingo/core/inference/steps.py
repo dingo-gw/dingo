@@ -147,8 +147,8 @@ class Factor(ABC):
         here; it enters through the context.
     draws : bool
         Whether the factor draws new samples (the default) or is a point mass or
-        fixed table that is run once. The chain's `num_samples` lands on the first
-        step that draws.
+        fixed table that is run once. The chain's sample counts go to the steps
+        that draw, one each; an int `num_samples` is the count for the first.
     consumes : tuple[str, ...]
         Columns removed from the chain after this step; none for an ordinary factor.
     """
@@ -638,7 +638,7 @@ class Reparametrization(ABC):
             If `num_samples` is not 1.
         """
         if num_samples != 1:
-            raise ValueError("A reparametrization is 1:1; use fan_out=1.")
+            raise ValueError("A reparametrization is 1:1; num_samples must be 1.")
         out = self.forward(given, context)
         return out, -self.log_det(given, context)
 
@@ -772,7 +772,7 @@ class TargetCorrection(ABC):
             If `num_samples` is not 1.
         """
         if num_samples != 1:
-            raise ValueError("A target correction is 1:1; use fan_out=1.")
+            raise ValueError("A target correction is 1:1; num_samples must be 1.")
         out = self.correction(given, context)
         # 0 proposal contribution per row, on the device of the emitted column.
         reference_column = next(iter(out.values()))
@@ -800,8 +800,9 @@ class Step(Protocol):
     conditioning : list[str]
         The earlier columns read.
     draws : bool
-        Whether the step draws new samples, or is run once (a point mass, a sample
-        table, a one-to-one transform).
+        Whether the step draws new samples, and so takes one of the chain's sample
+        counts, or is run once (a point mass, a sample table, a one-to-one
+        transform).
     consumes : list[str] or tuple[str, ...]
         Columns removed from the chain after the step.
     """

@@ -2,8 +2,9 @@
 Unit tests for the factorized-sampler core (``dingo.core.inference``).
 
 These exercise the vertical ``ChainComposer`` and ``chunk_and_concat`` with deterministic
-mock factors (no networks), so they are portable and fast: fan-out expansion + conditioning
-alignment, log-prob summation, topological validation, and the batching plumbing. Bit-exact
+mock factors (no networks), so they are portable and fast: per-step sample counts +
+conditioning alignment, log-prob summation, topological validation, and the batching
+plumbing. Bit-exact
 parity against the legacy samplers is a model-based check that lives with the GW models, not
 here.
 """
@@ -16,7 +17,6 @@ import torch
 from dingo.core.inference.composer import (
     ChainComposer,
     GibbsBlock,
-    Stage,
     chunk_and_concat,
 )
 from dingo.core.inference.steps import (
@@ -32,7 +32,7 @@ from dingo.core.inference.steps import (
 class _ConstFactor(Factor):
     """Deterministic factor (no RNG) honoring the executor contract: draws ``n`` samples
     per conditioning row. Unconditioned, it returns ``arange(n)``; conditioned, it returns
-    ``sum(given) + within_row_index/1000`` so fan-out alignment is checkable by eye. Each
+    ``sum(given) + within_row_index`` so row alignment is checkable by eye. Each
     factor contributes a constant ``0.5`` to the log-prob."""
 
     def __init__(self, name, conditioning=()):
@@ -45,7 +45,7 @@ class _ConstFactor(Factor):
             base = sum(given[k] for k in self.conditioning)  # (N,)
             n_rows = base.shape[0]
             # Integer-valued within-row offset: exact in float32 (no cancellation when
-            # the test recovers it as b - a), and distinct per fan-out draw.
+            # the test recovers it as b - a), and distinct per draw.
             within = torch.arange(n, dtype=base.dtype)
             vals = (base.unsqueeze(1) + within).reshape(-1)  # (N*n,), row-major
             lp = torch.full((n_rows * n,), 0.5)
@@ -60,29 +60,36 @@ class _ConstFactor(Factor):
 
 def test_root_only_draws_num_samples():
     comp = ChainComposer([_ConstFactor("a")])
-    assert comp.expansion == 1
     out = comp.sample(5, context=None)
     assert torch.equal(out["a"], torch.arange(5, dtype=torch.float32))
     assert torch.allclose(out["log_prob"], torch.full((5,), 0.5))
 
 
-def test_bare_factor_is_wrapped_as_stage():
-    comp = ChainComposer([_ConstFactor("a")])
-    assert isinstance(comp.stages[0], Stage)
-    assert comp.stages[0].fan_out == 1
-    assert comp.steps[0].parameters == ["a"]
+def test_int_num_samples_is_the_count_for_the_first_drawing_step():
+    # An int lands on the first drawing step; every later drawing step then draws one
+    # sample per row, so the int is also the total.
+    comp = ChainComposer(
+        [
+            DeltaFactor({"p": 1.0}),
+            _ConstFactor("u"),
+            _MockReparam(shift=0.0, log_det_val=0.0),
+            _ConstFactor("b", conditioning=["v"]),
+        ]
+    )
+    out = comp.sample(5, context=None)
+    assert all(out[p].shape == (5,) for p in ("p", "v", "b"))
+    assert torch.equal(out["v"], torch.arange(5, dtype=torch.float32))
 
 
-def test_fan_out_expansion_alignment_and_logprob():
+def test_later_count_draws_per_row_with_alignment_and_logprob():
     m, k = 4, 3
     comp = ChainComposer(
         [
-            Stage(_ConstFactor("a")),  # root -> base m
-            Stage(_ConstFactor("b", conditioning=["a"]), fan_out=k),
+            _ConstFactor("a"),  # root -> base m
+            _ConstFactor("b", conditioning=["a"]),  # k draws per row of a
         ]
     )
-    assert comp.expansion == k
-    out = comp.sample(m, context=None)  # num_samples is the base (M intrinsic)
+    out = comp.sample([m, k], context=None)
     assert out["a"].shape == (m * k,) and out["b"].shape == (m * k,)
 
     # 'a' is each root value repeated k times (repeat_interleave layout).
@@ -90,7 +97,7 @@ def test_fan_out_expansion_alignment_and_logprob():
     assert torch.all(a == a[:, :1])
     assert torch.equal(a[:, 0], torch.arange(m, dtype=torch.float32))
 
-    # 'b' conditions on the matching 'a': (b - a) recovers the within-row fan-out index,
+    # 'b' conditions on the matching 'a': (b - a) recovers the within-row draw index,
     # which is distinct per draw (0..k-1) and identical across rows.
     b = out["b"].reshape(m, k)
     expected_within = torch.arange(k, dtype=torch.float32).repeat(m, 1)
@@ -100,31 +107,48 @@ def test_fan_out_expansion_alignment_and_logprob():
     assert torch.allclose(out["log_prob"], torch.full((m * k,), 1.0))
 
 
-def test_chained_fan_out_product():
+def test_counts_multiply_along_the_chain():
     comp = ChainComposer(
         [
-            Stage(_ConstFactor("a")),
-            Stage(_ConstFactor("b", conditioning=["a"]), fan_out=2),
-            Stage(_ConstFactor("c", conditioning=["b"]), fan_out=5),
+            _ConstFactor("a"),
+            _ConstFactor("b", conditioning=["a"]),
+            _ConstFactor("c", conditioning=["b"]),
         ]
     )
-    assert comp.expansion == 10
-    out = comp.sample(3, context=None)  # base 3 -> 3 * 10 = 30 rows
+    out = comp.sample([3, 2, 5], context=None)  # 3 * 2 * 5 = 30 rows
     assert all(out[p].shape == (30,) for p in ("a", "b", "c"))
 
 
-def test_num_samples_is_the_base_count():
-    # num_samples is the base (root) count, not the total: total rows = num_samples *
-    # expansion, with no divisibility constraint (here 7 is not a multiple of 4).
+def test_first_count_is_per_root_row_not_the_total():
+    # The first count is the base (root) count, not the total: total rows = product
+    # of the counts, with no divisibility constraint (here 7 is not a multiple of 4).
     m, k = 7, 4
-    comp = ChainComposer(
-        [
-            Stage(_ConstFactor("a")),
-            Stage(_ConstFactor("b", conditioning=["a"]), fan_out=k),
-        ]
-    )
-    out = comp.sample(m, context=None)
+    comp = ChainComposer([_ConstFactor("a"), _ConstFactor("b", conditioning=["a"])])
+    out = comp.sample([m, k], context=None)
     assert out["a"].shape == (m * k,) and out["b"].shape == (m * k,)
+
+
+def test_sequence_must_have_one_count_per_drawing_step():
+    comp = ChainComposer(
+        [DeltaFactor({"p": 1.0}), _ConstFactor("a"), _ConstFactor("b")]
+    )
+    assert comp.sample([2, 3], context=None)["b"].shape == (6,)
+    with pytest.raises(ValueError, match="2 drawing step"):
+        comp.sample([2], context=None)
+    with pytest.raises(ValueError, match="2 drawing step"):
+        comp.sample([2, 3, 1], context=None)
+    with pytest.raises(ValueError, match="at least 1"):
+        comp.sample([2, 0], context=None)
+
+
+def test_chain_without_drawing_steps_runs_once():
+    # With nothing to draw, the chain emits its root rows once: num_samples must be
+    # 1 (or the empty sequence, one count per drawing step).
+    comp = ChainComposer([DeltaFactor({"p": 1.0})])
+    assert torch.equal(comp.sample(1, context=None)["p"], torch.full((1,), 1.0))
+    assert torch.equal(comp.sample([], context=None)["p"], torch.full((1,), 1.0))
+    with pytest.raises(ValueError, match="no drawing step"):
+        comp.sample(3, context=None)
 
 
 def test_topological_validation():
@@ -153,7 +177,7 @@ def test_chunk_and_concat_allows_none_log_prob():
 
 class _NoDensityStep:
     """A density-free step (like ``GibbsBlock``): emits a block but returns ``None`` for the
-    log-prob. Honors the per-row fan-out contract so it composes like any step."""
+    log-prob. Honors the per-row count contract so it composes like any step."""
 
     draws = True
     consumes = ()
@@ -189,9 +213,7 @@ def test_density_free_step_omits_log_prob():
 
 def test_one_density_free_step_nulls_the_whole_chain():
     # A single None step makes the chain density-free even alongside a density factor.
-    comp = ChainComposer(
-        [_ConstFactor("a"), Stage(_NoDensityStep("b", conditioning=["a"]))]
-    )
+    comp = ChainComposer([_ConstFactor("a"), _NoDensityStep("b", conditioning=["a"])])
     _, lp = comp.sample_and_log_prob(4, context=None)
     assert lp is None
     assert "log_prob" not in comp.sample(4, context=None)
@@ -320,7 +342,7 @@ class _MockReparam(Reparametrization):
 def test_point_mass_prefix_then_reparam_defers_base_count():
     # Regression: a 1:1 step directly after a point-mass root must not swallow
     # the base count -- it transforms the single pinned row, and the first
-    # sampling stage draws the base (the pinned-sky BNS chain
+    # drawing step draws the base (the pinned-sky BNS chain
     # [DeltaFactor, RAToTrainingFrame, flow]).
     comp = ChainComposer(
         [
@@ -347,7 +369,7 @@ def test_reparam_step_consumes_input_and_contributes_neg_logdet():
     assert torch.allclose(out["log_prob"], torch.zeros(4))
 
 
-def test_reparam_rejects_fan_out():
+def test_reparam_rejects_count_above_one():
     rp = _MockReparam()
     with pytest.raises(ValueError, match="1:1"):
         rp.sample_and_log_prob(2, None, {"u": torch.zeros(3)})
@@ -389,16 +411,16 @@ def test_unconditioned_filler_fills_the_current_batch():
     )  # factor(0.5) + fill(0)
 
 
-def test_unconditioned_filler_fills_after_fan_out():
+def test_unconditioned_filler_fills_after_expansion():
     # The filler matches the expanded batch, not the base count.
     comp = ChainComposer(
         [
             _ConstFactor("a"),
-            Stage(_ConstFactor("b", conditioning=["a"]), fan_out=3),
+            _ConstFactor("b", conditioning=["a"]),
             _ConstFillFactor("c", 7.0),
         ]
     )
-    out = comp.sample(4, context=None)  # 4 * 3 = 12 rows
+    out = comp.sample([4, 3, 1], context=None)  # 4 * 3 = 12 rows
     assert out["c"].shape == (12,)
     assert torch.equal(out["c"], torch.full((12,), 7.0))
 
@@ -424,48 +446,38 @@ def test_unconditioned_step_after_pins_is_aligned():
     assert torch.equal(out["b"], torch.arange(3, dtype=torch.float32))
 
 
-def test_unconditioned_stage_fan_out_multiplies_rows():
-    # fan_out applies to unconditioned stages too: k independent draws per row, with
+def test_count_on_unconditioned_step_multiplies_rows():
+    # A count applies to an unconditioned step too: k independent draws per row, with
     # the carried columns repeated.
-    comp = ChainComposer([_ConstFactor("a"), Stage(_ConstFactor("b"), fan_out=3)])
-    assert comp.expansion == 3
-    out = comp.sample(4, context=None)
+    comp = ChainComposer([_ConstFactor("a"), _ConstFactor("b")])
+    out = comp.sample([4, 3], context=None)
     expected_a = torch.arange(4, dtype=torch.float32).repeat_interleave(3)
     assert torch.equal(out["a"], expected_a)
     assert torch.equal(out["b"], torch.arange(12, dtype=torch.float32))
     assert torch.allclose(out["log_prob"], torch.full((12,), 1.0))
 
 
-def test_validation_rejects_fan_out_where_it_has_no_effect():
-    with pytest.raises(ValueError, match="fan_out"):
-        ChainComposer([Stage(_ConstFactor("a"), fan_out=2)])  # root
-    with pytest.raises(ValueError, match="fan_out"):
-        ChainComposer([_ConstFactor("a"), Stage(DeltaFactor({"c": 1.0}), fan_out=2)])
-    with pytest.raises(ValueError, match="fan_out"):
-        ChainComposer([_ConstFactor("u"), Stage(_MockReparam(), fan_out=2)])
-
-
 @pytest.mark.parametrize("num_samples", [1, 3])
-def test_row_count_is_root_rows_times_num_samples_times_expansion(num_samples):
-    # The same tail (a conditioned fan-out, an unconditioned fan-out, a filler) on a
-    # pin root, a drawing root, and a two-row table root.
+def test_row_count_is_root_rows_times_product_of_counts(num_samples):
+    # The same tail (a conditioned step, an unconditioned step, a pin filler) on a
+    # pin root, a drawing root, and a two-row table root. The sequence has one count
+    # per drawing step, so the drawing root takes an extra entry.
     roots = [
-        (DeltaFactor({"t": 0.0}), 1),
-        (_ConstFactor("t"), 1),
-        (SampleTableFactor({"t": torch.arange(2.0)}), 2),
+        (DeltaFactor({"t": 0.0}), 1, [num_samples, 2]),
+        (_ConstFactor("t"), 1, [num_samples, 2, 3]),
+        (SampleTableFactor({"t": torch.arange(2.0)}), 2, [num_samples, 2]),
     ]
-    for root, root_rows in roots:
+    for root, root_rows, counts in roots:
         comp = ChainComposer(
             [
                 root,
-                Stage(_ConstFactor("b", conditioning=["t"]), fan_out=2),
-                Stage(_ConstFactor("c"), fan_out=3),
-                _ConstFillFactor("d"),
+                _ConstFactor("b", conditioning=["t"]),
+                _ConstFactor("c"),
+                DeltaFactor({"d": 1.0}),
             ]
         )
-        assert comp.expansion == 6
-        out = comp.sample(num_samples, context=None)
-        n = root_rows * num_samples * 6
+        out = comp.sample(counts, context=None)
+        n = root_rows * math.prod(counts)
         assert all(v.shape == (n,) for v in out.values()), type(root).__name__
 
 
@@ -502,7 +514,7 @@ def test_validation_rejects_correction_consuming_a_sampled_parameter():
         ChainComposer([_ConstFactor("x"), _MockTargetCorrection(reads="x")])
 
 
-def test_target_correction_rejects_fan_out():
+def test_target_correction_rejects_count_above_one():
     tc = _MockTargetCorrection()
     with pytest.raises(ValueError, match="1:1"):
         tc.sample_and_log_prob(2, None, {"x": torch.zeros(3)})
@@ -560,7 +572,10 @@ class _GaussFactor(Factor):
 
     def sample_and_log_prob(self, n, context, given=None):
         n_rows = 1 if not self.conditioning else next(iter(given.values())).shape[0]
-        mean = self._mean(given, n_rows).repeat_interleave(n)
+        # Repeat the conditioning per draw, so that the mean and the density line up
+        # with the n_rows * n emitted rows.
+        given = {k: v.repeat_interleave(n) for k, v in (given or {}).items()}
+        mean = self._mean(given, n_rows * n)
         vals = mean + torch.randn(n_rows * n)
         return {self._name: vals}, self.log_prob({self._name: vals}, context, given)
 
@@ -598,22 +613,23 @@ def test_log_prob_replug_kind_aware():
     assert torch.allclose(lp, manual, atol=1e-6)
 
 
-def test_log_prob_replug_matches_forward_with_fan_outs():
-    # The reverse fold is row-wise and ignores fan-out, so it must reproduce the
+def test_log_prob_replug_matches_forward_with_counts():
+    # The reverse fold is row-wise and ignores the counts, so it must reproduce the
     # forward log_prob on a chain that mixes a pin root, a reparametrization, a
-    # conditioned fan-out, an unconditioned fan-out, and a conditioned tail.
+    # conditioned step, an unconditioned step, and a conditioned tail, each drawing
+    # several samples per row.
     torch.manual_seed(0)
     comp = ChainComposer(
         [
             DeltaFactor({"u": 2.0}),
             _MockReparam(shift=10.0, log_det_val=0.5),
-            Stage(_GaussFactor("a", conditioning=["v"]), fan_out=2),
-            Stage(_GaussFactor("b"), fan_out=3),
+            _GaussFactor("a", conditioning=["v"]),
+            _GaussFactor("b"),
             _GaussFactor("c", conditioning=["a", "b"]),
         ]
     )
-    samples, lp_forward = comp.sample_and_log_prob(5, context=None)
-    assert lp_forward.shape == (30,)  # 1 root row * 5 * 6
+    samples, lp_forward = comp.sample_and_log_prob([5, 3, 2], context=None)
+    assert lp_forward.shape == (30,)  # 1 root row * 5 * 3 * 2
     lp_reverse = comp.log_prob(samples, context=None)
     assert torch.allclose(lp_reverse, lp_forward, atol=1e-5)
 
@@ -814,12 +830,6 @@ def test_point_mass_prefix_passes_base_to_first_stochastic_stage():
     assert calls == [(5, 1)]
     assert samples["a"].shape == (5,) and torch.all(samples["a"] == 2.0)
     assert samples["x"].shape == (5,) and log_prob.shape == (5,)
-
-
-def test_all_point_mass_chain_expands_to_base():
-    chain = ChainComposer([DeltaFactor({"a": 2.0, "b": -1.0})])
-    samples, log_prob = chain.sample_and_log_prob(4, context=None)
-    assert samples["a"].shape == (4,) and log_prob.shape == (4,)
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs CUDA")
