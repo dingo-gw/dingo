@@ -81,7 +81,7 @@ def create_dag(data_dir, settings_file, time_segments, out_name):
         "error": os.path.join(condor_dir, "error"),
         "output": os.path.join(condor_dir, "output"),
         "log": os.path.join(condor_dir, "logging"),
-        "getenv": True,
+        "getenv": False,
     }
     # scripts are installed in the env's bin directory
     env_path = os.path.join(settings["condor"]["env_path"], "bin")
