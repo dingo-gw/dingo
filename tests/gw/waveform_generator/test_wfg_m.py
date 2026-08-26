@@ -11,8 +11,11 @@ spins to cartesian spins. This means that phi_12 and phi_jl have different defin
 which needs to be accounted for in postprocessing. The tests below all use
 wfg.spin_conversion_phase = 0.0.
 """
+
 import pytest
 import numpy as np
+import lal
+import lalsimulation as LS
 from matplotlib import pyplot as plt
 
 from dingo.gw.waveform_generator import (
@@ -44,6 +47,31 @@ def approximant(request):
 
 @pytest.fixture
 def intrinsic_prior(approximant):
+    if approximant == "NRSur7dq4":
+        # NRSur7dq4 is a precessing surrogate with a hard region of validity: mass ratio
+        # q >= 1/6, dimensionless spins <= 0.8, and (since it covers a fixed number of
+        # orbits) a total mass high enough that f_min = 10 Hz is reachable. The chirp-mass
+        # floor of 60 keeps the *entire* prior support inside validity -- the binding case
+        # is equal mass, where Mtot ~ 2.3 * chirp_mass ~ 138 > the ~120 solar-mass
+        # threshold -- so every sampled configuration generates without an out-of-domain
+        # error. The prior is precessing, to exercise the mode reconstruction broadly.
+        intrinsic_dict = {
+            "mass_1": "bilby.core.prior.Constraint(minimum=20.0, maximum=250.0)",
+            "mass_2": "bilby.core.prior.Constraint(minimum=20.0, maximum=250.0)",
+            "mass_ratio": "bilby.gw.prior.UniformInComponentsMassRatio(minimum=0.2, maximum=1.0)",
+            "chirp_mass": "bilby.gw.prior.UniformInComponentsChirpMass(minimum=60.0, maximum=100.0)",
+            "luminosity_distance": 1000.0,
+            "theta_jn": "bilby.core.prior.Sine(minimum=0.0, maximum=np.pi)",
+            "phase": 'bilby.core.prior.Uniform(minimum=0.0, maximum=2*np.pi, boundary="periodic")',
+            "a_1": "bilby.core.prior.Uniform(minimum=0.0, maximum=0.8)",
+            "a_2": "bilby.core.prior.Uniform(minimum=0.0, maximum=0.8)",
+            "tilt_1": "bilby.core.prior.Sine(minimum=0.0, maximum=np.pi)",
+            "tilt_2": "bilby.core.prior.Sine(minimum=0.0, maximum=np.pi)",
+            "phi_12": 'bilby.core.prior.Uniform(minimum=0.0, maximum=2*np.pi, boundary="periodic")',
+            "phi_jl": 'bilby.core.prior.Uniform(minimum=0.0, maximum=2*np.pi, boundary="periodic")',
+            "geocent_time": 0.0,
+        }
+        return build_prior_with_defaults(intrinsic_dict)
     if "PHM" in approximant:
         intrinsic_dict = {
             "mass_1": "bilby.core.prior.Constraint(minimum=10.0, maximum=80.0)",
@@ -100,6 +128,10 @@ def num_evaluations(approximant):
         return 10
     elif approximant == "SEOBNRv4PHM":
         return 1
+    elif approximant == "NRSur7dq4":
+        # The surrogate is comparatively slow to evaluate; a handful of samples is
+        # enough to exercise the mode reconstruction across the prior.
+        return 10
     else:
         return 10
 
@@ -128,6 +160,13 @@ def tolerances(approximant):
         # Tested on 1000 mismatches.
         return 1e-9, 1e-12
 
+    elif approximant == "NRSur7dq4":
+        # NRSur7dq4 is a time-domain surrogate whose modes (from SimInspiralChooseTDModes)
+        # are tapered and FFTed like the other TD approximants. Within its region of
+        # validity the mode-reconstruction mismatch is at the ~1e-4 level, with a tail up
+        # to ~1e-3 for precessing, high-spin or extreme-mass-ratio configurations.
+        return 3e-3, 5e-4
+
     else:
         return 1e-5, 1e-5
 
@@ -139,6 +178,39 @@ try:
     approximant_list = ["IMRPhenomXPHM", "SEOBNRv4PHM", "SEOBNRv5PHM", "SEOBNRv5HM"]
 except ImportError:
     approximant_list = ["IMRPhenomXPHM", "SEOBNRv4PHM"]
+
+
+def _nrsur7dq4_data_available():
+    """NRSur7dq4 needs its surrogate data file (NRSur7dq4_v1.0.h5) on $LAL_DATA_PATH.
+    Probe a minimal mode generation so the test is skipped (rather than failing) in
+    environments where the data is not installed. Only raw lalsimulation is exercised
+    here, so a genuine bug in the dingo mode reconstruction still fails the test."""
+    try:
+        LS.SimInspiralChooseTDModes(
+            0.0,
+            1.0 / 4096.0,
+            40 * lal.MSUN_SI,
+            30 * lal.MSUN_SI,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            30.0,
+            30.0,
+            1e6 * lal.PC_SI,
+            None,
+            2,
+            LS.NRSur7dq4,
+        )
+        return True
+    except Exception:
+        return False
+
+
+if _nrsur7dq4_data_available():
+    approximant_list.append("NRSur7dq4")
 
 
 @pytest.mark.parametrize("approximant", approximant_list)

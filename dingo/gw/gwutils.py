@@ -33,7 +33,7 @@ def get_extrinsic_prior_dict(extrinsic_prior):
     TODO: Move to dingo.gw.prior.py?"""
     extrinsic_prior_dict = default_extrinsic_dict.copy()
     for k, v in extrinsic_prior.items():
-        if v.lower() != "default":
+        if not isinstance(v, str) or v.lower() != "default":
             extrinsic_prior_dict[k] = v
     return extrinsic_prior_dict
 

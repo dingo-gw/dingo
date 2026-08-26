@@ -872,7 +872,8 @@ class WaveformGenerator:
         """
         # TD approximants that are implemented in L0 frame. Currently tested for:
         #   52: SEOBNRv4PHM
-        if self.approximant in [52]:
+        #   93: NRSur7dq4
+        if self.approximant in [52, 93]:
             parameters_lal_td_modes, iota = self._convert_parameters(
                 {**parameters, "f_ref": self.f_ref},
                 target_function="SimInspiralChooseTDModes",
