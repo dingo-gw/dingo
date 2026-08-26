@@ -7,7 +7,7 @@ import torch
 
 from dingo.core.posterior_models.build_model import build_model_from_kwargs
 from dingo.gw.result import Result
-from dingo.gw.inference.gw_samplers import GWSampler
+from dingo.gw.inference.sampler import GWComposedSampler
 from dingo.gw.noise.asd_dataset import ASDDataset
 from dingo.gw import injection
 
@@ -63,8 +63,7 @@ def evaluate_model(
 
 
 def run_inference(strain_data, pm_model, injection_dir, num_samples=1000):
-    sampler = GWSampler(model=pm_model)
-    sampler.context = strain_data
+    sampler = GWComposedSampler.from_model(pm_model, strain_data)
     sampler.run_sampler(num_samples=num_samples, batch_size=BATCH_SIZE)
     sampler.to_hdf5(outdir=injection_dir)
     return sampler.samples

@@ -148,6 +148,9 @@ dmypy.json
 # .DS_Store files for Mac OS
 .DS_Store
 
+# Claude Code personal notes
+CLAUDE.local.md
+
 # directories with temporary files
 **/tmp_files/*
 

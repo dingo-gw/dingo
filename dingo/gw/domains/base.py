@@ -70,7 +70,6 @@ class Domain(ABC):
         pass
 
     def __eq__(self, other):
-        if self.domain_dict == other.domain_dict:
-            return True
-        else:
-            return False
+        if not isinstance(other, Domain):
+            return NotImplemented
+        return self.domain_dict == other.domain_dict
