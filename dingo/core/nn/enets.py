@@ -5,7 +5,7 @@ import torch
 import numpy as np
 import torch.nn as nn
 from torch.nn import functional as F
-from glasflow.nflows.nn.nets.resnet import ResidualBlock
+from dingo.core.nn.resnet import DenseResidualNet
 from dingo.core.utils import torchutils
 
 
@@ -154,93 +154,6 @@ class LinearProjectionRB(nn.Module):
         for ind in range(self.num_blocks):
             out.append(self.layers_rb[ind](x[:, ind, ...].flatten(start_dim=1)))
         x = torch.cat(out, dim=1)
-        return x
-
-
-class DenseResidualNet(nn.Module):
-    """
-    A nn.Module consisting of a sequence of dense residual blocks. This is
-    used to embed high dimensional input to a compressed output. Linear
-    resizing layers are used for resizing the input and output to match the
-    first and last hidden dimension, respectively.
-
-    Module specs
-    --------
-        input dimension:    (batch_size, input_dim)
-        output dimension:   (batch_size, output_dim)
-    """
-
-    def __init__(
-        self,
-        input_dim: int,
-        output_dim: int,
-        hidden_dims: Tuple,
-        activation: Callable = F.elu,
-        dropout: float = 0.0,
-        norm: Optional[str] = "BatchNorm",
-        context_features: int = None,
-    ):
-        """
-        Parameters
-        ----------
-        input_dim : int
-            dimension of the input to this module
-        output_dim : int
-            output dimension of this module
-        hidden_dims : tuple
-            tuple with dimensions of hidden layers of this module
-        activation: callable
-            activation function used in residual blocks
-        dropout: float
-            dropout probability for residual blocks used for reqularization
-        norm: str or None
-            normalization used in the residual blocks: "BatchNorm", "LayerNorm"
-            or None
-        context_features: int
-            Number of additional context features, which are provided to the residual
-            blocks via gated linear units. If None, no additional context expected.
-        """
-
-        super(DenseResidualNet, self).__init__()
-        if norm not in ("BatchNorm", "LayerNorm", None):
-            raise ValueError(
-                f"norm must be 'BatchNorm', 'LayerNorm' or None, got {norm!r}."
-            )
-        self.input_dim = input_dim
-        self.output_dim = output_dim
-        self.hidden_dims = hidden_dims
-        self.num_res_blocks = len(self.hidden_dims)
-
-        self.initial_layer = nn.Linear(self.input_dim, hidden_dims[0])
-        self.blocks = nn.ModuleList(
-            [
-                ResidualBlock(
-                    features=self.hidden_dims[n],
-                    context_features=context_features,
-                    activation=activation,
-                    dropout_probability=dropout,
-                    use_batch_norm=norm is not None,
-                )
-                for n in range(self.num_res_blocks)
-            ]
-        )
-        if norm == "LayerNorm":
-            torchutils.replace_BatchNorm_with_LayerNorm(self.blocks)
-        self.resize_layers = nn.ModuleList(
-            [
-                nn.Linear(self.hidden_dims[n - 1], self.hidden_dims[n])
-                if self.hidden_dims[n - 1] != self.hidden_dims[n]
-                else nn.Identity()
-                for n in range(1, self.num_res_blocks)
-            ]
-            + [nn.Linear(self.hidden_dims[-1], self.output_dim)]
-        )
-
-    def forward(self, x, context=None):
-        x = self.initial_layer(x)
-        for block, resize_layer in zip(self.blocks, self.resize_layers):
-            x = block(x, context=context)
-            x = resize_layer(x)
         return x
 
 

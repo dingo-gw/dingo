@@ -3,14 +3,13 @@ This module contains the abstract base class for representing posterior models,
 as well as functions for training and testing across an epoch.
 """
 
-import ctypes
 import json
 import os
 import time
 from abc import ABC, abstractmethod
 from collections import OrderedDict
-from multiprocessing import Value
 from collections.abc import Sized
+from contextlib import nullcontext
 from os.path import join
 from typing import Optional, Tuple
 
@@ -25,10 +24,14 @@ from torch.utils.data import Dataset
 
 try:
     from torch.amp import GradScaler
+
+    _GRAD_SCALER_SUPPORTS_DEVICE = True
 except ImportError:
     # PyTorch < 2.3: GradScaler is not yet in torch.amp; use torch.cuda.amp.
     # Wrap it to accept the same device-string call signature as the new API.
     from torch.cuda.amp import GradScaler as _CudaGradScaler
+
+    _GRAD_SCALER_SUPPORTS_DEVICE = False
 
     class GradScaler:  # type: ignore[no-redef]
         def __new__(cls, device="cuda", **kwargs):
@@ -407,7 +410,6 @@ class BasePosteriorModel(ABC):
         gradient_updates_per_optimizer_step: int = 1,
         automatic_mixed_precision: bool = False,
         world_size: int = 1,
-        global_epoch: ctypes.c_int = Value(ctypes.c_int, 1),
     ):
         """
         Train the network for one or more epochs.
@@ -436,9 +438,6 @@ class BasePosteriorModel(ABC):
             FP32 parameter updates).
         world_size : int
             Number of GPUs (used only for logging the effective batch size).
-        global_epoch : multiprocessing.Value
-            Shared counter updated so that the WaveformDataset can query the
-            current epoch from any worker process.
         """
         is_primary = self.rank is None or self.rank == 0
 
@@ -448,9 +447,12 @@ class BasePosteriorModel(ABC):
                 print(f"test loss: {test_loss:.3f}")
             return
 
+        # The GradScaler keeps a calibrated loss scale, so create it once per
+        # training run rather than once per epoch.
+        scaler = _build_grad_scaler(self.device) if automatic_mixed_precision else None
+
         while not runtime_limits.limits_exceeded(self.epoch):
             self.epoch += 1
-            global_epoch.value = self.epoch
 
             lr = utils.get_lr(self.optimizer)
             with threadpool_limits(limits=1, user_api="blas"):
@@ -470,6 +472,7 @@ class BasePosteriorModel(ABC):
                     gradient_updates_per_optimizer_step=gradient_updates_per_optimizer_step,
                     automatic_mixed_precision=automatic_mixed_precision,
                     world_size=world_size,
+                    scaler=scaler,
                 )
                 self.iteration += n_iter
 
@@ -563,12 +566,37 @@ def _dataset_len(dataloader: torch.utils.data.DataLoader) -> int:
     return len(dataset)
 
 
+def _amp_device_type(device: torch.device) -> str:
+    """
+    Return the device type string ("cuda" or "cpu") to pass to ``torch.amp``.
+    """
+    device_type = torch.device(device).type
+    if device_type not in ("cuda", "cpu"):
+        raise ValueError(
+            f"Automatic mixed precision is only supported on 'cuda' or 'cpu' "
+            f"devices, got {device_type!r}."
+        )
+    return device_type
+
+
+def _build_grad_scaler(device: torch.device):
+    """Build a ``GradScaler`` for the given device."""
+    device_type = _amp_device_type(device)
+    if device_type != "cuda" and not _GRAD_SCALER_SUPPORTS_DEVICE:
+        raise RuntimeError(
+            "Automatic mixed precision on CPU requires PyTorch >= 2.3 "
+            "(torch.amp.GradScaler)."
+        )
+    return GradScaler(device_type)
+
+
 def train_epoch(
     pm: BasePosteriorModel,
     dataloader: torch.utils.data.DataLoader,
     gradient_updates_per_optimizer_step: int = 1,
     automatic_mixed_precision: bool = False,
     world_size: int = 1,
+    scaler=None,
 ) -> Tuple[float, int]:
     """
     Train the network for one epoch.
@@ -584,6 +612,10 @@ def train_epoch(
         Use ``torch.amp`` (FP16 forward pass, FP32 updates).
     world_size : int
         Number of GPUs, used only for logging the effective batch size.
+    scaler : torch.amp.GradScaler, optional
+        Loss scaler for mixed precision training. Should persist across epochs
+        so that its calibrated loss scale is not lost; if None and
+        ``automatic_mixed_precision`` is set, a fresh one is created.
 
     Returns
     -------
@@ -606,7 +638,12 @@ def train_epoch(
         device=pm.device,
     )
 
-    scaler = GradScaler("cuda") if automatic_mixed_precision else None
+    if automatic_mixed_precision:
+        amp_device_type = _amp_device_type(pm.device)
+        if scaler is None:
+            scaler = _build_grad_scaler(pm.device)
+
+    is_ddp = isinstance(pm.network, DDP)
 
     for batch_idx, data in enumerate(dataloader):
         loss_info.update_timer("Dataloader")
@@ -616,23 +653,30 @@ def train_epoch(
 
         data = [d.to(pm.device, non_blocking=True) for d in data]
 
+        is_step_batch = (batch_idx + 1) % gradient_updates_per_optimizer_step == 0
+
+        # Under DDP, gradients only need to be all-reduced on the final backward
+        # pass of an accumulation window; skip the synchronization otherwise.
+        sync_ctx = (
+            pm.network.no_sync() if is_ddp and not is_step_batch else nullcontext()
+        )
+
         # Gradients are summed over the accumulated mini-batches, so divide each
         # loss by the number of accumulation steps to obtain the gradient of the
         # mean loss over the effective batch (an unbiased estimate that does not
         # grow with gradient_updates_per_optimizer_step).
-        if automatic_mixed_precision:
-            with autocast("cuda"):
-                result = pm.loss(data[0], *data[1:])
-            loss = result[0] if isinstance(result, tuple) else result
-            scaler.scale(loss / gradient_updates_per_optimizer_step).backward()
-        else:
-            result = pm.loss(data[0], *data[1:])
-            loss = result[0] if isinstance(result, tuple) else result
-            (loss / gradient_updates_per_optimizer_step).backward()
+        with sync_ctx:
+            if automatic_mixed_precision:
+                with autocast(amp_device_type):
+                    loss = pm.loss(data[0], *data[1:])
+                scaler.scale(loss / gradient_updates_per_optimizer_step).backward()
+            else:
+                loss = pm.loss(data[0], *data[1:])
+                (loss / gradient_updates_per_optimizer_step).backward()
 
         loss_info.cache_loss(loss=loss, n=len(data[0]))
 
-        if (batch_idx + 1) % gradient_updates_per_optimizer_step == 0:
+        if is_step_batch:
             if automatic_mixed_precision:
                 scaler.step(pm.optimizer)
                 scaler.update()
@@ -700,8 +744,7 @@ def test_epoch(
         for batch_idx, data in enumerate(dataloader):
             loss_info.update_timer()
             data = [d.to(pm.device, non_blocking=True) for d in data]
-            result = pm.loss(data[0], *data[1:])
-            loss = result[0] if isinstance(result, tuple) else result
+            loss = pm.loss(data[0], *data[1:])
             loss_info.cache_loss(loss, len(data[0]))
             if (batch_idx + 1) % gradient_updates_per_optimizer_step == 0:
                 loss_info.update()

@@ -252,9 +252,9 @@ if __name__ == '__main__':
 
 def test_dense_residual_net_layer_norm():
     """
-    With norm="LayerNorm" every glasflow BatchNorm1d must be swapped for a
-    LayerNorm (same features and eps), and the net must run on a batch of one,
-    which BatchNorm rejects in training mode.
+    With norm="LayerNorm" the residual blocks must contain LayerNorm layers
+    (default eps, as on the dingo-t1 branch) and no BatchNorm1d, and the net
+    must run on a batch of one, which BatchNorm rejects in training mode.
     """
     net = DenseResidualNet(
         input_dim=8, output_dim=4, hidden_dims=(16, 16), norm="LayerNorm")
@@ -262,7 +262,14 @@ def test_dense_residual_net_layer_norm():
     assert not any(isinstance(m, torch.nn.BatchNorm1d) for m in modules)
     layer_norms = [m for m in modules if isinstance(m, torch.nn.LayerNorm)]
     assert len(layer_norms) == 2 * 2  # two norms per residual block
-    assert all(m.normalized_shape == (16,) and m.eps == 1e-3 for m in layer_norms)
+    default_eps = torch.nn.LayerNorm(16).eps
+    assert all(
+        m.normalized_shape == (16,) and m.eps == default_eps for m in layer_norms
+    )
+    assert all(
+        k.startswith("blocks.") and ".layer_norm_layers." in k
+        for k in net.state_dict() if "norm" in k
+    )
     net.train()
     assert net(torch.randn(1, 8)).shape == (1, 4)
 

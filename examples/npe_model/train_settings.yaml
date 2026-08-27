@@ -100,9 +100,11 @@ training:
 local:
   device: cuda # Change this to 'cuda' for training on a GPU.
   num_workers: 32  # num_workers >0 does not work on Mac, see https://stackoverflow.com/questions/64772335/pytorch-w-parallelnative-cpp206
-  # num_gpus: 1  # Set to >1 to enable multi-GPU (DDP) training. batch_size above is the
-                 # total effective batch size; it is divided equally across GPUs.
+  # num_gpus: 1  # Set to >1 to enable multi-GPU (DDP) training. batch_size and num_workers
+                 # are totals; they are divided equally across GPUs. Requires
+                 # freeze_rb_layer: False in all stages and norm: LayerNorm is recommended.
                  # When using Condor, request_gpus in the submission file is set automatically.
+  # ddp_port: 12355  # Rendezvous port for DDP; use a different one per run on the same node.
   runtime_limits:
     max_time_per_run: 3600000
     max_epochs_per_run: 500

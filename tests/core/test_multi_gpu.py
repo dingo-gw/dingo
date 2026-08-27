@@ -8,6 +8,7 @@ Most tests run without a real GPU by:
 
 import os
 import warnings
+from datetime import timedelta
 
 import numpy as np
 import pytest
@@ -59,7 +60,12 @@ _TINY_FLOW_METADATA = {
 def _setup_gloo(rank: int, world_size: int, port: int):
     os.environ["MASTER_ADDR"] = "localhost"
     os.environ["MASTER_PORT"] = str(port)
-    dist.init_process_group(backend="gloo", rank=rank, world_size=world_size)
+    dist.init_process_group(
+        backend="gloo",
+        rank=rank,
+        world_size=world_size,
+        timeout=timedelta(seconds=60),
+    )
 
 
 def _cleanup():
@@ -309,6 +315,49 @@ def _worker_runtime_limits(rank, world_size, port, result_queue):
     _cleanup()
 
 
+def _run_workers(target, world_size, port):
+    """
+    Run one worker per rank; fail fast if any hangs or crashes.
+
+    Each worker puts a tuple ``(rank, *results)`` into the queue. Returns a
+    dict mapping rank to the tuple of results.
+    """
+    # Use "spawn" rather than the default "fork": autograd cannot be used in a
+    # forked child once the parent process has run a backward pass (which
+    # other tests in the session do).
+    ctx = mp.get_context("spawn")
+    result_queue = ctx.Queue()
+    processes = [
+        ctx.Process(
+            target=target,
+            args=(rank, world_size, port, result_queue),
+            daemon=True,
+        )
+        for rank in range(world_size)
+    ]
+    try:
+        for p in processes:
+            p.start()
+        # Drain the queue before joining: a child blocks on exit until its
+        # queued data has been consumed, and polling ``empty()`` after the
+        # join can race with data still in flight through the pipe.
+        results = {}
+        for _ in range(world_size):
+            item = result_queue.get(timeout=60)
+            results[item[0]] = tuple(item[1:])
+        for p in processes:
+            p.join(timeout=60)
+        for p in processes:
+            assert not p.is_alive(), "Distributed worker hung."
+            assert p.exitcode == 0, f"Worker failed with code {p.exitcode}"
+    finally:
+        for p in processes:
+            if p.is_alive():
+                p.terminate()
+    assert len(results) == world_size
+    return results
+
+
 @pytest.fixture()
 def free_port():
     """Find a free port for the gloo process group."""
@@ -324,27 +373,8 @@ class TestGlooDDP:
 
     def test_loss_info_aggregation(self, free_port):
         """Both ranks should observe the same averaged loss."""
-        result_queue = mp.Queue()
         world_size = 2
-        processes = [
-            mp.Process(
-                target=_worker_loss_info,
-                args=(rank, world_size, free_port, result_queue),
-            )
-            for rank in range(world_size)
-        ]
-        for p in processes:
-            p.start()
-        for p in processes:
-            p.join()
-            assert p.exitcode == 0, f"Worker process failed with code {p.exitcode}"
-
-        results = {}
-        while not result_queue.empty():
-            rank, avg, n_iter = result_queue.get()
-            results[rank] = (avg, n_iter)
-
-        assert len(results) == world_size
+        results = _run_workers(_worker_loss_info, world_size, free_port)
         # Both ranks should report the same number of iterations.
         assert results[0][1] == results[1][1] == 2
         # Losses are all-reduced, so every rank sees the same average: per step
@@ -354,50 +384,60 @@ class TestGlooDDP:
 
     def test_network_to_device_sets_rank(self, free_port):
         """Inside a process group, the device index becomes the rank."""
-        result_queue = mp.Queue()
         world_size = 2
-        processes = [
-            mp.Process(
-                target=_worker_network_to_device,
-                args=(rank, world_size, free_port, result_queue),
-            )
-            for rank in range(world_size)
-        ]
-        for p in processes:
-            p.start()
-        for p in processes:
-            p.join()
-            assert p.exitcode == 0
-
-        results = {}
-        while not result_queue.empty():
-            rank, pm_rank = result_queue.get()
-            results[rank] = pm_rank
-        assert results == {0: 0, 1: 1}
+        results = _run_workers(_worker_network_to_device, world_size, free_port)
+        assert results == {0: (0,), 1: (1,)}
 
     def test_runtime_limits_broadcast(self, free_port):
         """When rank 0 hits the epoch limit, rank 1 should also stop."""
-        result_queue = mp.Queue()
         world_size = 2
-        processes = [
-            mp.Process(
-                target=_worker_runtime_limits,
-                args=(rank, world_size, free_port, result_queue),
-            )
-            for rank in range(world_size)
-        ]
-        for p in processes:
-            p.start()
-        for p in processes:
-            p.join()
-            assert p.exitcode == 0
-
-        results = {}
-        while not result_queue.empty():
-            rank, exceeded = result_queue.get()
-            results[rank] = exceeded
-
-        assert len(results) == world_size
+        results = _run_workers(_worker_runtime_limits, world_size, free_port)
         # Both ranks must agree: limit is exceeded because rank 0 triggered it.
-        assert results[0] is True
-        assert results[1] is True
+        assert results[0] == (True,)
+        assert results[1] == (True,)
+
+    def test_no_sync_on_accumulation_steps(self, free_port):
+        """no_sync() wraps only the accumulation-only batches; weights stay in sync."""
+        world_size = 2
+        results = _run_workers(_worker_no_sync, world_size, free_port)
+        for n_iter, n_no_sync, _ in results.values():
+            assert n_iter == 2
+            # 4 batches, accumulate over 2: no_sync entered on batches 0 and 2.
+            assert n_no_sync == 2
+        assert results[0][2] == pytest.approx(results[1][2])
+
+
+def _worker_no_sync(rank, world_size, port, result_queue):
+    """
+    Worker checking that train_epoch skips the gradient all-reduce on
+    accumulation-only steps and synchronizes on the final one.
+    """
+    import types
+    from unittest import mock
+
+    from torch.utils.data import DataLoader
+
+    from dingo.core.posterior_models.base_model import train_epoch
+
+    _setup_gloo(rank, world_size, port)
+    torch.manual_seed(0)
+    net = DDP(nn.Linear(4, 1))
+    pm = types.SimpleNamespace(
+        network=net,
+        device=torch.device("cpu"),
+        rank=rank,
+        epoch=1,
+        optimizer=torch.optim.SGD(net.parameters(), lr=0.1),
+    )
+    pm.loss = lambda theta, *context: net(theta).mean()
+
+    # Different data per rank, so an un-synchronized step would diverge.
+    torch.manual_seed(rank)
+    dataset = TensorDataset(torch.randn(16, 4))
+    loader = DataLoader(dataset, batch_size=4)  # 4 batches, 2 optimizer steps
+
+    with mock.patch.object(net, "no_sync", wraps=net.no_sync) as no_sync:
+        _, n_iter = train_epoch(pm, loader, gradient_updates_per_optimizer_step=2)
+    weights = net.module.weight.detach().clone().flatten().tolist()
+    result_queue.put((rank, n_iter, no_sync.call_count, weights))
+    _cleanup()

@@ -35,7 +35,9 @@ There are certain caveats to DDP:
 - A single node with N GPUs connected by fast interconnect (tested on A100 and H100 nodes).
 - An NCCL-capable PyTorch build (the default for any CUDA-enabled installation).
 - When submitting via HTCondor, `request_gpus` is derived automatically from
-  `num_gpus` — no changes to the `condor:` block are needed.
+  `num_gpus` — no changes to the `condor:` block are needed. Cluster-specific
+  submit-file directives (e.g., full-node templates) can be passed through
+  verbatim via `condor: extra_submit_lines:`.
 
 ## Settings changes
 
@@ -63,8 +65,9 @@ training:
 # 8-GPU DDP — scale batch_size and lr by num_gpus
 local:
   device: cuda
-  num_workers: 32   # scale with num_gpus, e.g. 4–8 per GPU
+  num_workers: 32   # total across GPUs (= 4 per GPU); scale with num_gpus
   num_gpus: 8
+  # ddp_port: 12355  # change when running several DDP jobs on one node
 training:
   stage_0:
     batch_size: 32768   # = 4096 × 8
@@ -137,6 +140,11 @@ model:
 ```
 
 Checkpoints trained with the former `batch_norm: True` setting keep their `BatchNorm` layers when loaded.
+If a network with `BatchNorm` layers is trained on multiple GPUs, they are converted to `SyncBatchNorm`
+(with a warning), so that the batch statistics are still computed over the full effective batch.
+
+`LayerNorm` is only available for `base_transform_type: rq-coupling`. For `rq-autoregressive` transforms
+it would break the causal structure of the MADE layers, so `BatchNorm` or `null` must be used there.
 
 ### Freezing layers
 
@@ -194,7 +202,8 @@ Sustained high values could indicate a load imbalance between GPUs.
 ### Guidelines for tuning `num_workers`
 
 - *Time Dataloader* should be clearly smaller than *Time Network*. If dataloader
-  time dominates, increase `num_workers` (aim for 4–8 per GPU).
+  time dominates, increase `num_workers`. Like `batch_size`, `num_workers` is the
+  total across all GPUs and is divided equally between them (aim for 4–8 per GPU).
 - *Time Network* being larger per step than single-GPU is expected; this is the
   all-reduce cost.
 - *Time Loss Aggregation* should be small relative to *Time Network*.

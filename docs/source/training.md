@@ -97,8 +97,10 @@ training:
 local:
   device: cuda  # Change this to 'cpu' for training without a GPU.
   num_workers: 6
-# num_gpus: 1   # Set to >1 to enable multi-GPU (DDP) training. When using
+# num_gpus: 1   # Set to >1 to enable multi-GPU (DDP) training. Requires
+                # freeze_rb_layer: False in all stages. When using
                 # dingo_train_condor, request_gpus is set automatically.
+# ddp_port: 12355  # Rendezvous port for DDP; change when running several jobs on one node.
 #  wandb:
 #    project: dingo
 #    group: my_project
@@ -165,10 +167,13 @@ device
 : `cpu` or `cuda`. Training on a GPU with CUDA is highly recommended.
 
 num_workers
-: Number of CPU worker processes to use for pre-processing training data before copying to the GPU. Data pre-processing (inluding decompression, projection to detectors, and noise generation) is quite expensive, so using 16 or 32 processes is recommended, otherwise this can become a bottleneck. We recommend monitoring the GPU utilization percentage as well as time spent on pre-processing (output during training) to fine-tune this number.
+: Number of CPU worker processes to use for pre-processing training data before copying to the GPU. Data pre-processing (inluding decompression, projection to detectors, and noise generation) is quite expensive, so using 16 or 32 processes is recommended, otherwise this can become a bottleneck. We recommend monitoring the GPU utilization percentage as well as time spent on pre-processing (output during training) to fine-tune this number. When training on multiple GPUs, this is the total number of workers; it is divided equally across the GPUs.
 
 num_gpus
 : (Optional, default 1) Number of GPUs to use for training. Setting this to more than 1 enables data-parallel multi-GPU training (PyTorch DDP). The `batch_size` specified in each training stage is the total effective batch size; it is divided equally across GPUs. When using `dingo_train_condor`, the HTCondor `request_gpus` directive is set automatically from this value. See [](#multi-gpu-training) for details.
+
+ddp_port
+: (Optional, default 12355) Port used for the rendezvous of the DDP processes. When running several multi-GPU jobs on the same node, choose a different port for each to avoid collisions.
 
 wandb
 : Settings for [Weights & Biases](https://wandb.ai/site). If you have an account, you can use this to track your training progress and compare different runs.
@@ -186,7 +191,7 @@ local_cache_path
 : When training on a cluster and loading waveforms during training (i.e., `leave_waveforms_on_disk=True`), the waveform dataset should be copied to the disk storage of the local node at the beginning of training. This prevents unexpected long data loading times during training due to network traffic. Usually, paths for local storage are `tmp` or `dev/shm`. When submitting the job with `condor`, `request_disk: 50GB` should be included in the `condor` settings with the requested disk space larger than the size of the waveform dataset used for training.
 
 condor
-: Settings for [HTCondor](https://htcondor.readthedocs.io/en/latest/index.html). The condor script will (re)submit itself according to these options. Available keys are `bid`, `num_cpus`, `memory_cpus`, `memory_gpus`, `request_disk`, and `requirements`. The number of requested GPUs (`request_gpus`) is derived automatically from `num_gpus` above and does not need to be specified here.
+: Settings for [HTCondor](https://htcondor.readthedocs.io/en/latest/index.html). The condor script will (re)submit itself according to these options. Available keys are `bid`, `num_cpus`, `memory_cpus`, `memory_gpus`, `request_disk`, `requirements`, and `extra_submit_lines` (a list of additional lines written verbatim to the submission file, e.g., for cluster-specific templates). The number of requested GPUs (`request_gpus`) is derived automatically from `num_gpus` above and does not need to be specified here.
 
 ## Multi-GPU training
 
@@ -207,7 +212,7 @@ Set `num_gpus` in the `local` section of your settings file:
 local:
   device: cuda
   num_gpus: 4
-  num_workers: 8   # Recommended: num_workers per GPU, e.g. 2–8
+  num_workers: 32  # Total across all GPUs, e.g. 4–8 per GPU
   ...
 ```
 
@@ -275,8 +280,14 @@ local:
 ```
 
 ```{note}
-On clusters with full-node GPU allocations (e.g., MPI-IS), requesting 6 or more
-GPUs automatically applies the appropriate FullNode HTCondor template.
+On clusters with full-node GPU allocations (e.g., MPI-IS), the required HTCondor
+template can be passed through with `extra_submit_lines`, e.g.,
+
+```yaml
+  condor:
+    extra_submit_lines:
+      - "use template : FullNode"
+```
 ```
 
 ### Requirements

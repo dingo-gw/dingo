@@ -53,16 +53,15 @@ def create_submission_file(
         lines.append(f"requirements = {requirements}\n")
 
     if "num_gpus" in condor_settings:
-        num_gpus = condor_settings["num_gpus"]
-        lines.append(f"request_gpus = {num_gpus}\n")
-        # Cluster-specific full-node templates (MPI-IS).
-        if num_gpus == 8:
-            lines.append("use template : FullNode\n")
-        elif num_gpus >= 6:
-            lines.append(f"use template : FullNode({num_gpus})\n")
+        lines.append(f'request_gpus = {condor_settings["num_gpus"]}\n')
 
     if "arguments" in condor_settings:
         lines.append(f'arguments = "{condor_settings["arguments"]}"\n')
+
+    # Cluster-specific directives (e.g., "use template : FullNode" on MPI-IS
+    # nodes) are passed through verbatim.
+    for line in condor_settings.get("extra_submit_lines", []):
+        lines.append(f"{line}\n")
 
     lines.append("\n")
     lines.append(f'error = {join(train_dir, "info.err")}\n')

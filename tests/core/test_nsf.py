@@ -256,8 +256,19 @@ def test_model_builder_for_nsf_with_rb_embedding_net(data_setup_nsf_small):
         model(d.y, d.x, d.x)
 
 
-@pytest.mark.parametrize("base_transform_type", ["rq-coupling", "rq-autoregressive"])
-def test_nsf_layer_norm(base_transform_type):
+def _layer_norm_kwargs(base_transform_type):
+    return {
+        "hidden_dim": 16,
+        "num_transform_blocks": 2,
+        "activation": "elu",
+        "dropout_probability": 0.0,
+        "norm": "LayerNorm",
+        "num_bins": 4,
+        "base_transform_type": base_transform_type,
+    }
+
+
+def test_nsf_layer_norm():
     """
     With norm="LayerNorm" the flow must contain LayerNorm layers and no
     BatchNorm1d, and evaluate the log_prob on a batch of one, which BatchNorm
@@ -268,18 +279,24 @@ def test_nsf_layer_norm(base_transform_type):
         input_dim=3,
         context_dim=5,
         num_flow_steps=2,
-        base_transform_kwargs={
-            "hidden_dim": 16,
-            "num_transform_blocks": 2,
-            "activation": "elu",
-            "dropout_probability": 0.0,
-            "norm": "LayerNorm",
-            "num_bins": 4,
-            "base_transform_type": base_transform_type,
-        },
+        base_transform_kwargs=_layer_norm_kwargs("rq-coupling"),
     )
     modules = list(flow.modules())
     assert not any(isinstance(m, torch.nn.BatchNorm1d) for m in modules)
     assert any(isinstance(m, torch.nn.LayerNorm) for m in modules)
     flow.train()
     assert flow.log_prob(torch.randn(1, 3), context=torch.randn(1, 5)).shape == (1,)
+
+
+def test_nsf_layer_norm_rejects_autoregressive():
+    """
+    LayerNorm mixes information across the feature axis, which violates the
+    causal structure imposed by the MADE layers of the autoregressive transform.
+    """
+    with pytest.raises(ValueError, match="autoregressive"):
+        create_nsf_model(
+            input_dim=3,
+            context_dim=5,
+            num_flow_steps=2,
+            base_transform_kwargs=_layer_norm_kwargs("rq-autoregressive"),
+        )

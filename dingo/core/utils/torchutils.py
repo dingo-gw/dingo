@@ -51,17 +51,26 @@ def document_gpus(target_dir: str) -> None:
 
 def set_seed_based_on_rank(rank: int) -> None:
     """
-    Set NumPy and Torch seeds for a DDP worker process based on *rank* so that
-    each process draws different random samples.
+    Set Torch, NumPy and bilby seeds for a DDP worker process based on *rank* so
+    that each process draws different random samples.
+
+    With ``num_workers > 0`` the DataLoader workers re-seed NumPy and bilby from
+    the (rank-dependent) torch seed via :func:`fix_random_seeds`. With
+    ``num_workers = 0`` the data is generated in the main process of each rank,
+    so NumPy and bilby (which draws the extrinsic parameters) must be seeded
+    here as well, otherwise every GPU would see the same extrinsic parameters.
     """
     initial_torch_seed = torch.initial_seed()
     torch.manual_seed(initial_torch_seed + rank)
     if torch.cuda.is_available():
         torch.cuda.manual_seed(initial_torch_seed + rank)
-        torch.backends.cudnn.deterministic = True
-    # NumPy expects seeds in [0, 2**32).
-    reduced_seed = int(initial_torch_seed) % (2**32 - 1)
-    np.random.seed(reduced_seed + rank)
+    # NumPy and bilby expect seeds in [0, 2**32).
+    reduced_seed = (int(initial_torch_seed) + rank) % (2**32 - 1)
+    np.random.seed(reduced_seed)
+    try:
+        bilby.core.utils.random.seed(reduced_seed)
+    except AttributeError:  # In case using an old version of Bilby.
+        pass
 
 
 def setup_ddp(rank: int, world_size: int, port: int = 12355) -> None:
@@ -102,20 +111,22 @@ def cleanup_ddp() -> None:
     print("Destroyed process group.")
 
 
-def replace_BatchNorm_with_LayerNorm(network: nn.Module) -> nn.Module:
-    """
-    Replace every ``nn.BatchNorm1d`` in ``network`` (in place) with an
-    ``nn.LayerNorm`` over the same number of features and the same eps.
+def contains_BatchNorm(network: nn.Module) -> bool:
+    """Return True if *network* contains any BatchNorm layer."""
+    return any(
+        isinstance(m, nn.modules.batchnorm._BatchNorm) for m in network.modules()
+    )
 
-    LayerNorm normalizes each sample independently, so unlike BatchNorm it needs
-    no cross-GPU statistics synchronization under DDP.
+
+def replace_BatchNorm_with_SyncBatchNorm(network: nn.Module) -> nn.Module:
     """
-    for name, child in network.named_children():
-        if isinstance(child, nn.BatchNorm1d):
-            setattr(network, name, nn.LayerNorm(child.num_features, eps=child.eps))
-        else:
-            replace_BatchNorm_with_LayerNorm(child)
-    return network
+    Replace all BatchNorm layers with SyncBatchNorm for DDP training, so that
+    the batch statistics are computed over the full effective batch rather than
+    the per-GPU shard. Note that this synchronization stalls the forward pass
+    at every normalization layer; LayerNorm needs no synchronization and is
+    therefore preferable for multi-GPU training.
+    """
+    return nn.SyncBatchNorm.convert_sync_batchnorm(network)
 
 
 def print_number_of_model_parameters(network: nn.Module) -> None:
@@ -365,7 +376,7 @@ def build_train_and_test_loaders(
             train_dataset,
             batch_size=batch_size,
             sampler=train_sampler,
-            pin_memory=False,
+            pin_memory=True,
             num_workers=num_workers,
             worker_init_fn=fix_random_seeds,
             persistent_workers=persistent_workers,
@@ -374,7 +385,7 @@ def build_train_and_test_loaders(
             test_dataset,
             batch_size=batch_size,
             sampler=test_sampler,
-            pin_memory=False,
+            pin_memory=True,
             num_workers=num_workers,
             worker_init_fn=fix_random_seeds,
             persistent_workers=persistent_workers,

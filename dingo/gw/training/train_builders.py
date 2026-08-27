@@ -99,7 +99,7 @@ def set_train_transforms(
     # Build detector objects
     ifo_list = InterferometerList(data_settings["detectors"])
     ifo_names = [ifo.name for ifo in ifo_list]
-    
+
     # By passing the wfd domain when instantiating the noise dataset, this ensures the
     # domains will match. In particular, it truncates the ASD dataset beyond the new
     # f_max, and sets it to 1 below f_min.
@@ -183,9 +183,7 @@ def set_train_transforms(
             standardization_dict,
         )
     )
-    transforms.append(
-        RepackageStrainsAndASDS(ifo_names, first_index=domain.min_idx)
-    )
+    transforms.append(RepackageStrainsAndASDS(ifo_names, first_index=domain.min_idx))
     if "random_strain_cropping" in data_settings:
         transforms.append(
             CropMaskStrainRandom(domain, **data_settings["random_strain_cropping"])
@@ -234,6 +232,7 @@ def build_svd_for_embedding_network(
     num_training_samples : int
     num_validation_samples : int
     num_workers : int
+        Ignored: the data loader always uses num_workers=0, see below.
     batch_size : int
     out_dir : str
         SVD performance diagnostics are saved here.
@@ -288,6 +287,8 @@ def build_svd_for_embedding_network(
     }
     parameters = pd.DataFrame()
 
+    # num_workers is pinned to 0: worker processes corrupt the BLAS state and
+    # make scipy's SVD segfault (see PR #349 / issue #338).
     loader = DataLoader(
         wfd,
         batch_size=batch_size,

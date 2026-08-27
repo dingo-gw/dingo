@@ -1,12 +1,11 @@
 import argparse
-import ctypes
 import os
 import queue
 import shutil
 import textwrap
 import time
+import warnings
 from copy import deepcopy
-from multiprocessing import Value
 from typing import Optional, Tuple
 
 import numpy as np
@@ -29,7 +28,9 @@ from dingo.core.utils import (
 )
 from dingo.core.utils.torchutils import (
     cleanup_ddp,
+    contains_BatchNorm,
     document_gpus,
+    replace_BatchNorm_with_SyncBatchNorm,
     set_seed_based_on_rank,
     setup_ddp,
 )
@@ -229,6 +230,7 @@ def initialize_stage(
     stage : dict
         Settings specific to current stage of training
     num_workers : int
+        Total number of DataLoader workers; under DDP divided across the GPUs.
     world_size : int, optional
         Total number of DDP processes (GPUs).
     rank : int, optional
@@ -254,7 +256,8 @@ def initialize_stage(
         print_output=print_output,
     )
 
-    # Convert total batch size to per-GPU batch size for DDP.
+    # Convert total batch size and total number of workers to per-GPU values for
+    # DDP. Each GPU process runs its own DataLoader.
     if world_size is not None and world_size > 1:
         total_batch_size = stage["batch_size"]
         if total_batch_size % world_size != 0:
@@ -263,14 +266,17 @@ def initialize_stage(
                 f"the number of GPUs {world_size}."
             )
         batch_size_per_gpu = total_batch_size // world_size
+        # Round up so that num_workers > 0 never silently becomes 0.
+        num_workers_per_gpu = -(-num_workers // world_size)
     else:
         batch_size_per_gpu = stage["batch_size"]
+        num_workers_per_gpu = num_workers
 
     train_loader, test_loader, train_sampler = build_train_and_test_loaders(
         dataset=wfd,
         train_fraction=train_settings["data"]["train_fraction"],
         batch_size=batch_size_per_gpu,
-        num_workers=num_workers,
+        num_workers=num_workers_per_gpu,
         world_size=world_size,
         rank=rank,
     )
@@ -311,7 +317,6 @@ def train_stages(
     wfd: WaveformDataset,
     train_dir: str,
     local_settings: dict,
-    global_epoch: ctypes.c_int = Value(ctypes.c_int, 1),
 ) -> Tuple[bool, bool]:
     """
     Train the network, iterating through the sequence of stages. Stages can change
@@ -324,8 +329,6 @@ def train_stages(
     train_dir : str
         Directory for saving checkpoints and train history.
     local_settings : dict
-    global_epoch : multiprocessing.Value
-        Shared epoch counter, updated each epoch and forwarded to ``pm.train``.
 
     Returns
     -------
@@ -412,7 +415,6 @@ def train_stages(
             ),
             automatic_mixed_precision=stage.get("automatic_mixed_precision", False),
             world_size=world_size if world_size is not None else 1,
-            global_epoch=global_epoch,
         )
 
         # if test_only, model should not be saved, and run is complete
@@ -533,16 +535,12 @@ def run_training(
     else:
         pm, wfd = prepare_training_resume(ckpt_file, local_settings, train_dir)
 
-    global_epoch = Value(ctypes.c_int, pm.epoch)
-    wfd.epoch = global_epoch
-
     with threadpool_limits(limits=1, user_api="blas"):
         complete, resume_flag = train_stages(
             pm=pm,
             wfd=wfd,
             train_dir=train_dir,
             local_settings=local_settings,
-            global_epoch=global_epoch,
         )
 
     return complete, resume_flag, pm.epoch
@@ -559,7 +557,6 @@ def run_training_ddp(
     ckpt_file: Optional[str],
     resume: bool,
     result_queue: mp.Queue,
-    global_epoch: ctypes.c_int,
 ) -> None:
     """
     Worker function executed by each DDP process.
@@ -582,10 +579,11 @@ def run_training_ddp(
     ckpt_file : str or None
     resume : bool
     result_queue : mp.Queue
-    global_epoch : multiprocessing.Value
     """
     try:
-        setup_ddp(rank, world_size)
+        # Use a different port for each experiment running on the same node to
+        # avoid collisions between their process groups.
+        setup_ddp(rank, world_size, port=local_settings.get("ddp_port", 12355))
         set_seed_based_on_rank(rank)
 
         if rank == 0:
@@ -642,10 +640,17 @@ def run_training_ddp(
                 except ImportError:
                     print("WandB is enabled but not installed.")
 
+        if contains_BatchNorm(pm.network):
+            if rank == 0:
+                warnings.warn(
+                    "The network contains BatchNorm layers, which are converted to "
+                    "SyncBatchNorm for multi-GPU training. SyncBatchNorm "
+                    "synchronizes the batch statistics across GPUs at every "
+                    "normalization layer, which slows down training. Consider "
+                    "setting norm: LayerNorm in the model settings instead."
+                )
+            pm.network = replace_BatchNorm_with_SyncBatchNorm(pm.network)
         pm.network = DDP(pm.network, device_ids=[rank])
-
-        global_epoch.value = pm.epoch
-        wfd.epoch = global_epoch
 
         with threadpool_limits(limits=1, user_api="blas"):
             complete, resume_flag = train_stages(
@@ -653,7 +658,6 @@ def run_training_ddp(
                 wfd=wfd,
                 train_dir=train_dir,
                 local_settings=local_settings,
-                global_epoch=global_epoch,
             )
 
         if complete and local_settings.get("wandb", False) and rank == 0:
@@ -730,7 +734,6 @@ def run_multi_gpu_training(
             leave_waveforms_on_disk=local_settings.get("leave_waveforms_on_disk", True),
         )
 
-    global_epoch = Value(ctypes.c_int, 0)
     result_queue = mp.Queue()
     processes = []
 
@@ -748,7 +751,6 @@ def run_multi_gpu_training(
                 ckpt_file,
                 resume,
                 result_queue,
-                global_epoch,
             ),
         )
         p.start()
@@ -832,6 +834,9 @@ def _prepare_wfd_and_initial_weights(
     ):
         batch_size = train_settings["training"]["stage_0"]["batch_size"]
         print("\nBuilding SVD for initialization of embedding network.")
+        # num_workers is deliberately not passed: the SVD data loader always uses
+        # num_workers=0, since worker processes corrupt the BLAS state and make
+        # scipy's SVD segfault (see PR #349 / issue #338).
         initial_weights["V_rb_list"] = build_svd_for_embedding_network(
             wfd=wfd,
             data_settings=train_settings["data"],

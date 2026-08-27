@@ -12,6 +12,7 @@ from glasflow.nflows import distributions, flows, transforms
 import glasflow.nflows.nn.nets as nflows_nets
 from dingo.core.utils import torchutils
 from dingo.core.nn.enets import create_enet_with_projection_layer_and_dense_resnet
+from dingo.core.nn.resnet import DenseResidualNet, check_norm_option
 from typing import Union, Callable, Tuple, Optional
 
 
@@ -96,10 +97,7 @@ def create_base_transform(
     """
 
     activation_fn = torchutils.get_activation_function_from_string(activation)
-    if norm not in ("BatchNorm", "LayerNorm", None):
-        raise ValueError(
-            f"norm must be 'BatchNorm', 'LayerNorm' or None, got {norm!r}."
-        )
+    check_norm_option(norm)
 
     if base_transform_type == "rq-coupling":
         if param_dim == 1:
@@ -108,9 +106,23 @@ def create_base_transform(
             mask = nflows.utils.create_alternating_binary_mask(
                 param_dim, even=(i % 2 == 0)
             )
-        transform = transforms.PiecewiseRationalQuadraticCouplingTransform(
-            mask=mask,
-            transform_net_create_fn=(
+        # If possible (no layer norm), use the nflows version of the ResidualNet. This
+        # is for backwards compatibility, since our DenseResidualNet has different
+        # sub-nn.Modules.
+        if norm == "LayerNorm":
+            transform_net_create_fn = (
+                lambda in_features, out_features: DenseResidualNet(
+                    input_dim=in_features,
+                    output_dim=out_features,
+                    hidden_dims=(hidden_dim,) * num_transform_blocks,
+                    context_features=context_dim,
+                    activation=activation_fn,
+                    dropout=dropout_probability,
+                    norm=norm,
+                )
+            )
+        else:
+            transform_net_create_fn = (
                 lambda in_features, out_features: nflows_nets.ResidualNet(
                     in_features=in_features,
                     out_features=out_features,
@@ -119,9 +131,12 @@ def create_base_transform(
                     num_blocks=num_transform_blocks,
                     activation=activation_fn,
                     dropout_probability=dropout_probability,
-                    use_batch_norm=norm is not None,
+                    use_batch_norm=norm == "BatchNorm",
                 )
-            ),
+            )
+        return transforms.PiecewiseRationalQuadraticCouplingTransform(
+            mask=mask,
+            transform_net_create_fn=transform_net_create_fn,
             num_bins=num_bins,
             tails="linear",
             tail_bound=tail_bound,
@@ -129,7 +144,15 @@ def create_base_transform(
         )
 
     elif base_transform_type == "rq-autoregressive":
-        transform = transforms.MaskedPiecewiseRationalQuadraticAutoregressiveTransform(
+        if norm == "LayerNorm":
+            # The MADE layers impose a causal structure along the feature axis,
+            # which LayerNorm (normalizing across all features) would violate.
+            raise ValueError(
+                "norm='LayerNorm' is not supported for base_transform_type="
+                "'rq-autoregressive', since LayerNorm breaks the autoregressive "
+                "structure of the MADE layers. Use 'BatchNorm' or None instead."
+            )
+        return transforms.MaskedPiecewiseRationalQuadraticAutoregressiveTransform(
             features=param_dim,
             hidden_features=hidden_dim,
             context_features=context_dim,
@@ -141,15 +164,11 @@ def create_base_transform(
             random_mask=False,
             activation=activation_fn,
             dropout_probability=dropout_probability,
-            use_batch_norm=norm is not None,
+            use_batch_norm=norm == "BatchNorm",
         )
 
     else:
         raise ValueError
-
-    if norm == "LayerNorm":
-        torchutils.replace_BatchNorm_with_LayerNorm(transform)
-    return transform
 
 
 def create_transform(

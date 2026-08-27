@@ -140,18 +140,33 @@ def update_model_config(model_settings: dict):
     model_settings: dict
         Model settings to be updated.
     """
+
     # Networks trained before the `norm` option was introduced specify a boolean
     # `batch_norm` (occasionally the string "true") in the base transform and
-    # embedding settings. Convert every occurrence, at any nesting level.
-    def _convert_batch_norm(settings: dict):
-        if "batch_norm" in settings:
-            value = settings.pop("batch_norm")
-            settings["norm"] = "BatchNorm" if value in (True, "true", "True") else None
+    # embedding settings; networks from the dingo-t1 branch additionally specify
+    # a boolean `layer_norm`. Convert every occurrence, at any nesting level.
+    def _is_true(value) -> bool:
+        return value in (True, "true", "True")
+
+    def _convert_norm_flags(settings: dict):
+        if "batch_norm" in settings or "layer_norm" in settings:
+            batch_norm = _is_true(settings.pop("batch_norm", False))
+            layer_norm = _is_true(settings.pop("layer_norm", False))
+            if batch_norm and layer_norm:
+                raise ValueError(
+                    "Model settings specify both batch_norm and layer_norm."
+                )
+            if batch_norm:
+                settings["norm"] = "BatchNorm"
+            elif layer_norm:
+                settings["norm"] = "LayerNorm"
+            else:
+                settings["norm"] = None
         for value in settings.values():
             if isinstance(value, dict):
-                _convert_batch_norm(value)
+                _convert_norm_flags(value)
 
-    _convert_batch_norm(model_settings)
+    _convert_norm_flags(model_settings)
 
     if model_settings.get("type") == "nsf+embedding":
         model_settings["posterior_model_type"] = "normalizing_flow"
