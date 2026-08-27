@@ -1,11 +1,11 @@
 """Implementation of embedding networks."""
 
-from typing import Tuple, Callable, Union, List
+from typing import Tuple, Callable, Union, List, Optional
 import torch
 import numpy as np
 import torch.nn as nn
 from torch.nn import functional as F
-from glasflow.nflows.nn.nets.resnet import ResidualBlock
+from dingo.core.nn.resnet import DenseResidualNet
 from dingo.core.utils import torchutils
 
 
@@ -157,86 +157,6 @@ class LinearProjectionRB(nn.Module):
         return x
 
 
-class DenseResidualNet(nn.Module):
-    """
-    A nn.Module consisting of a sequence of dense residual blocks. This is
-    used to embed high dimensional input to a compressed output. Linear
-    resizing layers are used for resizing the input and output to match the
-    first and last hidden dimension, respectively.
-
-    Module specs
-    --------
-        input dimension:    (batch_size, input_dim)
-        output dimension:   (batch_size, output_dim)
-    """
-
-    def __init__(
-        self,
-        input_dim: int,
-        output_dim: int,
-        hidden_dims: Tuple,
-        activation: Callable = F.elu,
-        dropout: float = 0.0,
-        batch_norm: bool = True,
-        context_features: int = None,
-    ):
-        """
-        Parameters
-        ----------
-        input_dim : int
-            dimension of the input to this module
-        output_dim : int
-            output dimension of this module
-        hidden_dims : tuple
-            tuple with dimensions of hidden layers of this module
-        activation: callable
-            activation function used in residual blocks
-        dropout: float
-            dropout probability for residual blocks used for reqularization
-        batch_norm: bool
-            flag that specifies whether to use batch normalization
-        context_features: int
-            Number of additional context features, which are provided to the residual
-            blocks via gated linear units. If None, no additional context expected.
-        """
-
-        super(DenseResidualNet, self).__init__()
-        self.input_dim = input_dim
-        self.output_dim = output_dim
-        self.hidden_dims = hidden_dims
-        self.num_res_blocks = len(self.hidden_dims)
-
-        self.initial_layer = nn.Linear(self.input_dim, hidden_dims[0])
-        self.blocks = nn.ModuleList(
-            [
-                ResidualBlock(
-                    features=self.hidden_dims[n],
-                    context_features=context_features,
-                    activation=activation,
-                    dropout_probability=dropout,
-                    use_batch_norm=batch_norm,
-                )
-                for n in range(self.num_res_blocks)
-            ]
-        )
-        self.resize_layers = nn.ModuleList(
-            [
-                nn.Linear(self.hidden_dims[n - 1], self.hidden_dims[n])
-                if self.hidden_dims[n - 1] != self.hidden_dims[n]
-                else nn.Identity()
-                for n in range(1, self.num_res_blocks)
-            ]
-            + [nn.Linear(self.hidden_dims[-1], self.output_dim)]
-        )
-
-    def forward(self, x, context=None):
-        x = self.initial_layer(x)
-        for block, resize_layer in zip(self.blocks, self.resize_layers):
-            x = block(x, context=context)
-            x = resize_layer(x)
-        return x
-
-
 class ModuleMerger(nn.Module):
     """
     This is a wrapper used to process multiple different kinds of context
@@ -286,7 +206,7 @@ def create_enet_with_projection_layer_and_dense_resnet(
     svd: dict,
     activation: str = "elu",
     dropout: float = 0.0,
-    batch_norm: bool = True,
+    norm: Optional[str] = "BatchNorm",
     added_context: bool = False,
 ):
     """
@@ -339,8 +259,9 @@ def create_enet_with_projection_layer_and_dense_resnet(
         str that specifies activation function used in residual blocks
     :param dropout: float
         dropout probability for residual blocks used for reqularization
-    :param batch_norm: bool
-        flag that specifies whether to use batch normalization
+    :param norm: str or None
+        normalization used in the residual blocks: "BatchNorm", "LayerNorm" or
+        None
     :param added_context: bool
         if set to True, additional context z is concatenated to the embedded
         feature vector enet(x); note that in this case, the expected input is
@@ -355,7 +276,7 @@ def create_enet_with_projection_layer_and_dense_resnet(
         hidden_dims=hidden_dims,
         activation=activation_fn,
         dropout=dropout,
-        batch_norm=batch_norm,
+        norm=norm,
     )
     enet = nn.Sequential(module_1, module_2)
 
