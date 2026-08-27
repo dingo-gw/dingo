@@ -102,7 +102,8 @@ class WaveformGenerator:
             IMRPhenomXPHM). The two paths are mathematically equivalent:
             h_+(f; phi_c) is a trigonometric polynomial in phi_c of degree ell_max,
             so N equally-spaced samples determine it exactly.
-            Requires mode_list, which sets ell_max and hence N.
+            ell_max (and hence N) is taken from mode_list when given, otherwise
+            from the approximant's default mode content (DEFAULT_ELL_MAX).
         """
         if not isinstance(approximant, str):
             raise ValueError("approximant should be a string, but got", approximant)
@@ -1326,20 +1327,7 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
         generator = new_interface_get_waveform_generator(self.approximant_str)
         if isinstance(self.domain, UniformFrequencyDomain):
             # Generate FD modes in for frequencies [-f_max, ..., 0, ..., f_max].
-            # TODO: gwsignal reports generator.domain as a tuple, e.g. (None, 'time'),
-            # so this guard and the standard one below are currently never true. Both
-            # are left in place, but no gwsignal FD approximant reaches either.
-            if generator.domain == "freq" and self.use_dft_phase_decomposition:
-                # DFT approach: evaluate the summed FD polarizations on a grid
-                # of N phase offsets starting at the reference phase, then recover
-                # the m-components by inverting the grid with a DFT.
-                ell_max = self._get_ell_max()
-                hpc_fd_list, phi_c_offsets = (
-                    self._multi_phase_fd_pols_by_repeated_calls(parameters, ell_max)
-                )
-                return self._pol_m_from_multi_phase(hpc_fd_list, phi_c_offsets, ell_max)
-
-            elif generator.domain == "freq":
+            if generator.domain == "freq":
                 # Step 1: generate waveform modes in L0 frame in native domain of
                 # approximant (here: FD)
                 hlm_fd, iota = self.generate_FD_modes_LO(parameters)
