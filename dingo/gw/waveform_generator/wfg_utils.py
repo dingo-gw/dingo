@@ -313,9 +313,10 @@ def recover_pol_m_from_multi_phase(hpc_fd_list, phi_c_values, m_max):
     hpc_fd_list: list of dict
         List of {"h_plus": array, "h_cross": array} for each phi_c evaluation.
     phi_c_values: np.ndarray
-        Array of phi_c values at which the polarizations were evaluated.
+        Phase offsets, relative to the reference phase of the waveform, at which
+        the polarizations were evaluated.
     m_max: int
-        Maximum |m| value (= l_max).
+        Maximum |m| value (= l_max). len(phi_c_values) must be 2*m_max+1.
 
     Returns
     -------
