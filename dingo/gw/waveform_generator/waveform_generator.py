@@ -32,6 +32,15 @@ from dingo.gw.domains import (
 from dingo.gw.transforms.waveform_transforms import DecimateAll
 
 
+# Highest ell each approximant returns by default, used to size the DFT phase grid
+# when mode_list is not given (LAL exposes no API to query an approximant's mode content)
+DEFAULT_ELL_MAX = {
+    "IMRPhenomXPHM": 4,
+    "SEOBNRv5PHM": 4,
+    "NRSur7dq4": 4,
+}
+
+
 class WaveformGenerator:
     """Generate polarizations using LALSimulation routines in the specified domain for a
     single GW coalescence given a set of waveform parameters.
@@ -46,6 +55,7 @@ class WaveformGenerator:
         mode_list: List[Tuple] = None,
         transform=None,
         spin_conversion_phase=None,
+        use_dft_phase_decomposition: bool = False,
         **kwargs,
     ):
         """
@@ -81,6 +91,19 @@ class WaveformGenerator:
             which is expensive).
             By setting spin_conversion_phase != None, we impose the convention to always
             use phase = spin_conversion_phase when computing the cartesian spins.
+        use_dft_phase_decomposition : bool = False
+            If True, generate_hplus_hcross_m() obtains the m-components of the
+            polarizations by evaluating the summed polarizations at
+            N = 2 * ell_max + 1 equally-spaced values of the coalescence phase and
+            inverting with a DFT, rather than by generating the individual
+            inertial-frame modes. This avoids materializing, and independently
+            conditioning and FFT-ing, all N_modes mode arrays, and is faster for
+            models that expose a direct polarization projection (SEOBNRv5PHM,
+            IMRPhenomXPHM). The two paths are mathematically equivalent:
+            h_+(f; phi_c) is a trigonometric polynomial in phi_c of degree ell_max,
+            so N equally-spaced samples determine it exactly.
+            ell_max (and hence N) is taken from mode_list when given, otherwise
+            from the approximant's default mode content (DEFAULT_ELL_MAX).
         """
         if not isinstance(approximant, str):
             raise ValueError("approximant should be a string, but got", approximant)
@@ -107,6 +130,8 @@ class WaveformGenerator:
         self.transform = transform
         self._spin_conversion_phase = None
         self.spin_conversion_phase = spin_conversion_phase
+        self.mode_list = mode_list
+        self.use_dft_phase_decomposition = use_dft_phase_decomposition
 
     @property
     def domain(self):
@@ -153,8 +178,68 @@ class WaveformGenerator:
             )
         self._spin_conversion_phase = value
 
+    def _get_ell_max(self):
+        """
+        Highest ell in the waveform, which sizes the DFT phase grid at
+        N = 2 * ell_max + 1.
+
+        Taken from mode_list when it is set, otherwise from the approximant's known
+        default mode content. An approximant with no known default raises an error.
+        """
+        if self.mode_list is not None:
+            return max(ell for ell, _ in self.mode_list)
+        try:
+            return DEFAULT_ELL_MAX[self.approximant_str]
+        except KeyError:
+            raise ValueError(
+                f"No default ell_max known for {self.approximant_str}, needed to "
+                f"size the DFT phase grid. Pass mode_list to the WaveformGenerator, "
+                f"add the approximant to DEFAULT_ELL_MAX, or set "
+                f"use_dft_phase_decomposition = False."
+            ) from None
+
+    def _pol_m_from_multi_phase(self, hpc_fd_list, phi_c_offsets, ell_max):
+        """Invert the phase grid to m-components and project onto the domain."""
+        pol_m = wfg_utils.recover_pol_m_from_multi_phase(
+            hpc_fd_list, phi_c_offsets, ell_max
+        )
+        if self._domain_transform is not None:
+            return self._domain_transform(pol_m)
+        return pol_m
+
+    def _multi_phase_fd_pols_by_repeated_calls(self, parameters, ell_max):
+        """
+        Evaluate the FD polarizations on the phase grid, one waveform call per point.
+
+        Used for models whose polarization routine is cheaper than their
+        individual-mode routine but for which we do not share dynamics across phases
+        (e.g. IMRPhenomXPHM).
+
+        post-processing is switched off: self.transform is not part of the
+        m-decomposition, and the domain transform belongs on the recovered
+        components -- applying it here would decimate again in
+        _pol_m_from_multi_phase.
+
+        Returns the polarizations and the grid of phase offsets they were evaluated
+        at, relative to the reference phase.
+        """
+        phi_c_offsets = np.linspace(0, 2 * np.pi, 2 * ell_max + 1, endpoint=False)
+        phase_ref = parameters["phase"]
+        hpc_fd_list = [
+            self.generate_hplus_hcross(
+                {**parameters, "phase": phase_ref + phi_c},
+                catch_waveform_errors=False,
+                apply_postprocessing=False,
+            )
+            for phi_c in phi_c_offsets
+        ]
+        return hpc_fd_list, phi_c_offsets
+
     def generate_hplus_hcross(
-        self, parameters: Dict[str, float], catch_waveform_errors=True
+        self,
+        parameters: Dict[str, float],
+        catch_waveform_errors=True,
+        apply_postprocessing=True,
     ) -> Dict[str, np.ndarray]:
         """Generate GW polarizations (h_plus, h_cross).
 
@@ -195,6 +280,14 @@ class WaveformGenerator:
 
         catch_waveform_errors: bool
             Whether to catch lalsimulation errors
+        apply_postprocessing: bool
+            Whether to apply the domain transform (decimation onto a
+            MultibandedFrequencyDomain) and self.transform to the polarizations.
+            Set to False to get the raw polarizations on the generation domain.
+            generate_hplus_hcross_m() uses this when it builds its phase grid, so
+            that the domain transform is applied once to the recovered
+            m-components rather than to each grid point, and so that self.transform
+            -- which the m-decomposition does not apply -- stays out of the DFT.
 
         Returns
         -------
@@ -245,6 +338,9 @@ class WaveformGenerator:
                     wf_dict = {"h_plus": pol_nan, "h_cross": pol_nan}
                 else:
                     raise
+
+        if not apply_postprocessing:
+            return wf_dict
 
         if self._domain_transform is not None:
             wf_dict = self._domain_transform(wf_dict)
@@ -724,7 +820,20 @@ class WaveformGenerator:
 
         if isinstance(self.domain, UniformFrequencyDomain):
             # Generate FD modes in for frequencies [-f_max, ..., 0, ..., f_max].
-            if LS.SimInspiralImplementedFDApproximants(self.approximant):
+            if (
+                LS.SimInspiralImplementedFDApproximants(self.approximant)
+                and self.use_dft_phase_decomposition
+            ):
+                # DFT approach: evaluate the summed FD polarizations on a grid
+                # of N phase offsets starting at the reference phase, then recover
+                # the m-components by inverting the grid with a DFT.
+                ell_max = self._get_ell_max()
+                hpc_fd_list, phi_c_offsets = (
+                    self._multi_phase_fd_pols_by_repeated_calls(parameters, ell_max)
+                )
+                return self._pol_m_from_multi_phase(hpc_fd_list, phi_c_offsets, ell_max)
+
+            elif LS.SimInspiralImplementedFDApproximants(self.approximant):
                 # Step 1: generate waveform modes in L0 frame in native domain of
                 # approximant (here: FD)
                 hlm_fd, iota = self.generate_FD_modes_LO(parameters)
@@ -924,6 +1033,13 @@ class WaveformGenerator:
         return pol_dict
 
 
+def _strip_gwsignal_units(parameters_gwsignal):
+    """Strip astropy units from a gwsignal parameter dict, returning plain floats."""
+    return {
+        k: v.value if hasattr(v, "value") else v for k, v in parameters_gwsignal.items()
+    }
+
+
 class NewInterfaceWaveformGenerator(WaveformGenerator):
     """Generate polarizations using GWSignal routines in the specified domain for a
     single GW coalescence given a set of waveform parameters.
@@ -946,8 +1062,6 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
         globals()[
             "new_interface_get_waveform_generator"
         ] = gwsignal_get_waveform_generator
-
-        self.mode_list = kwargs.get("mode_list", None)
 
         allowed_extra_kwargs = {
             "postadiabatic",
@@ -1225,7 +1339,22 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
                 self.approximant_str == "SEOBNRv5PHM"
                 or self.approximant_str == "SEOBNRv5HM"
             ):
-                # Step 1: generate waveform modes in L0 frame in native domain of
+                if (
+                    self.use_dft_phase_decomposition
+                    and self.approximant_str == "SEOBNRv5PHM"
+                ):
+                    # Optimized path: the EOB dynamics are solved once, then
+                    # the cached co-precessing modes are projected onto the
+                    # polarizations at each of N equally-spaced phi_c values, and
+                    # the m-components recovered by DFT inversion.
+                    hpc_fd_list, ell_max, phi_c_offsets = (
+                        self._generate_multi_phase_fd_pols(parameters)
+                    )
+                    return self._pol_m_from_multi_phase(
+                        hpc_fd_list, phi_c_offsets, ell_max
+                    )
+
+                # Step 1: generate waveform modes in L0 frame in native domain
                 # approximant (here: TD), applying standard conditioning
                 hlm_td, iota = self.generate_TD_modes_L0_conditioned_extra_time(
                     parameters
@@ -1426,6 +1555,71 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
                 hlms_lal[key] = hlm_lal
 
         return hlms_lal, parameters_gwsignal["inclination"].value
+
+    def _generate_multi_phase_fd_pols(
+        self,
+        parameters: Dict[str, float],
+    ) -> tuple:
+        """
+        Generate FD polarizations at an equally-spaced grid of phi_c values
+        for a DFT-based phase decomposition.
+
+        Parameters
+        ----------
+        parameters: dict
+            Parameter dictionary.
+
+        Returns
+        -------
+        hpc_fd_list: list of dict
+            List of {"h_plus": array, "h_cross": array} on domain frequencies
+            [0, f_max], one per phi_c value.
+        ell_max: int
+            Maximum |m| value used to build the phi_c grid.
+        phi_c_values: np.ndarray
+            The equally-spaced phi_c grid that was used.
+        """
+        from pyseobnr.generate_waveform import GenerateWaveform
+
+        # Convert DINGO parameters to gwsignal format, then strip units
+        parameters_gwsignal = self._convert_parameters(
+            {**parameters, "f_ref": self.f_ref}
+        )
+        pyseobnr_params = _strip_gwsignal_units(parameters_gwsignal)
+
+        # Set pyseobnr-specific keys
+        pyseobnr_params["approximant"] = self.approximant_str
+        pyseobnr_params["f_ref"] = pyseobnr_params.pop("f22_ref", self.f_ref)
+
+        # Pass frequency domain parameters from DINGO's domain
+        pyseobnr_params["deltaF"] = self.domain.delta_f
+        pyseobnr_params["f_max"] = self.domain.f_max
+
+        # Forward SEOBNRv5-specific kwargs
+        for k, v in self.extra_wf_kwargs.items():
+            pyseobnr_params[k] = v
+
+        gen_wf = GenerateWaveform(pyseobnr_params)
+
+        # mode_list, when set, is also what is forwarded to pyseobnr as ModeArray,
+        # so the two agree by construction. Otherwise this is the tabulated default,
+        # verified against the model's own mode content below.
+        ell_max = self._get_ell_max()
+        phi_c_offsets = np.linspace(0, 2 * np.pi, 2 * ell_max + 1, endpoint=False)
+        hpc_fd_list = gen_wf.generate_multi_phase_fd_polarizations(phi_c_offsets)
+
+        # gen_wf.model does not exist until the dynamics have been solved, so this
+        # is the first point at which the model's actual mode content can be
+        # checked. A grid shorter than 2 * ell_max + 1 would alias the m-components
+        # onto each other and corrupt the result without any visible error.
+        ell_max_model = gen_wf.model.max_ell_returned
+        if ell_max_model > ell_max:
+            raise ValueError(
+                f"The DFT phase grid was built for ell_max = {ell_max}, but the "
+                f"model returned modes up to ell = {ell_max_model}. Pass mode_list "
+                f"to the WaveformGenerator so that the grid is sized correctly."
+            )
+        return hpc_fd_list, ell_max, phi_c_offsets
 
     def generate_TD_waveform(self, parameters_gwsignal: Dict) -> Dict[str, np.ndarray]:
         """
