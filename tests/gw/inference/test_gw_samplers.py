@@ -17,8 +17,7 @@ from dingo.gw.inference.gw_samplers import (
     check_detector_update,
     check_frequency_updates,
     _validate_detectors_transformer,
-    _validate_maximum_frequency,
-    _validate_minimum_frequency,
+    _validate_frequency_bound,
 )
 from dingo.gw.transforms import (
     StrainTokenization,
@@ -52,103 +51,109 @@ def domain():
     return UniformFrequencyDomain(f_min=20.0, f_max=1024.0, delta_f=0.25)
 
 
-@pytest.mark.parametrize(
-    "validate, valid_change, beyond_bound",
-    [
-        (_validate_minimum_frequency, 40.0, 10.0),  # raise f_min; below hard f_min
-        (_validate_maximum_frequency, 512.0, 2048.0),  # lower f_max; above hard f_max
-    ],
-)
-def test_frequency_validator_no_op_when_unchanged(
-    domain, validate, valid_change, beyond_bound
-):
-    # Value equal to the domain bound is a no-op and is allowed even without cropping.
-    bound = domain.f_min if validate is _validate_minimum_frequency else domain.f_max
-    assert validate(bound, DETECTORS, domain, None) is None
+def _crop_data_settings(**crop):
+    return {"detectors": DETECTORS, "random_strain_cropping": crop}
+
+
+@pytest.mark.parametrize("bound", ["minimum_frequency", "maximum_frequency"])
+def test_frequency_bound_no_op_when_unchanged(domain, bound):
+    """Domain values always pass, even without any frequency flexibility."""
+    value = domain.f_min if bound == "minimum_frequency" else domain.f_max
+    _validate_frequency_bound(value, bound, domain, {"detectors": DETECTORS})
 
 
 @pytest.mark.parametrize(
-    "validate, valid_change, beyond_bound",
-    [
-        (_validate_minimum_frequency, 40.0, 10.0),
-        (_validate_maximum_frequency, 512.0, 2048.0),
-    ],
+    "bound, invalid",
+    [("minimum_frequency", 10.0), ("maximum_frequency", 2048.0)],
 )
-def test_frequency_validator_expands_float_to_all_detectors(
-    domain, validate, valid_change, beyond_bound
-):
-    # A float applies to every detector; a valid change passes with cropping on.
-    # The cap/floor must be given explicitly, else it defaults to the domain bound.
-    crop = {"cropping_probability": 0.5, "f_min_upper": 100.0, "f_max_lower": 400.0}
-    assert validate(valid_change, DETECTORS, domain, crop) is None
-
-
-@pytest.mark.parametrize(
-    "validate, valid_change, beyond_bound",
-    [
-        (_validate_minimum_frequency, 40.0, 10.0),
-        (_validate_maximum_frequency, 512.0, 2048.0),
-    ],
-)
-def test_frequency_validator_rejects_value_beyond_hard_bound(
-    domain, validate, valid_change, beyond_bound
-):
-    crop = {"cropping_probability": 0.5}
+def test_frequency_bound_rejects_value_beyond_hard_bound(domain, bound, invalid):
+    settings = _crop_data_settings(cropping_probability=0.8)
     with pytest.raises(ValueError, match="domain.f_"):
-        validate(beyond_bound, DETECTORS, domain, crop)
+        _validate_frequency_bound(invalid, bound, domain, settings)
 
 
 @pytest.mark.parametrize(
-    "validate, valid_change",
-    [(_validate_minimum_frequency, 40.0), (_validate_maximum_frequency, 512.0)],
+    "bound, changed",
+    [("minimum_frequency", 40.0), ("maximum_frequency", 512.0)],
 )
-def test_frequency_validator_rejects_detector_key_mismatch(
-    domain, validate, valid_change
-):
-    crop = {"cropping_probability": 0.5}
-    with pytest.raises(ValueError, match="exactly detectors"):
-        validate({"H1": valid_change}, DETECTORS, domain, crop)
+def test_frequency_bound_rejects_change_without_flexibility(domain, bound, changed):
+    with pytest.raises(ValueError, match="not trained with variable"):
+        _validate_frequency_bound(changed, bound, domain, {"detectors": DETECTORS})
 
 
 @pytest.mark.parametrize(
-    "validate, valid_change",
-    [(_validate_minimum_frequency, 40.0), (_validate_maximum_frequency, 512.0)],
+    "bound, changed",
+    [("minimum_frequency", 40.0), ("maximum_frequency", 512.0)],
 )
-def test_frequency_validator_rejects_change_when_cropping_disabled(
-    domain, validate, valid_change
-):
-    # No crop settings at all.
+def test_frequency_bound_rejects_change_when_cropping_disabled(domain, bound, changed):
+    settings = _crop_data_settings(cropping_probability=0.0)
     with pytest.raises(ValueError, match="[Cc]ropping"):
-        validate(valid_change, DETECTORS, domain, None)
-    # Crop settings present but probability zero.
-    with pytest.raises(ValueError, match="[Cc]ropping"):
-        validate(valid_change, DETECTORS, domain, {"cropping_probability": 0.0})
+        _validate_frequency_bound(changed, bound, domain, settings)
 
 
-def test_validate_minimum_frequency_rejects_value_above_cap(domain):
-    crop = {"cropping_probability": 0.5, "f_min_upper": 60.0}
-    assert _validate_minimum_frequency(50.0, DETECTORS, domain, crop) is None
+def test_frequency_bound_unknown_detector_key_raises(domain):
+    settings = _crop_data_settings(cropping_probability=0.8, f_min_upper=64.0)
+    with pytest.raises(ValueError, match="not.*trained with"):
+        _validate_frequency_bound({"K1": 40.0}, "minimum_frequency", domain, settings)
+
+
+def test_frequency_bound_rejects_value_above_cropping_cap(domain):
+    settings = _crop_data_settings(cropping_probability=0.8, f_min_upper=64.0)
+    _validate_frequency_bound(50.0, "minimum_frequency", domain, settings)
     with pytest.raises(ValueError, match="upper bound"):
-        _validate_minimum_frequency(80.0, DETECTORS, domain, crop)
+        _validate_frequency_bound(80.0, "minimum_frequency", domain, settings)
 
 
-def test_validate_maximum_frequency_rejects_value_below_floor(domain):
-    crop = {"cropping_probability": 0.5, "f_max_lower": 400.0}
-    assert _validate_maximum_frequency(500.0, DETECTORS, domain, crop) is None
+def test_frequency_bound_rejects_value_below_cropping_floor(domain):
+    settings = _crop_data_settings(cropping_probability=0.8, f_max_lower=400.0)
+    _validate_frequency_bound(500.0, "maximum_frequency", domain, settings)
     with pytest.raises(ValueError, match="lower bound"):
-        _validate_maximum_frequency(300.0, DETECTORS, domain, crop)
+        _validate_frequency_bound(300.0, "maximum_frequency", domain, settings)
 
 
-def test_validate_minimum_frequency_rejects_differing_values_when_not_independent(
-    domain,
-):
-    crop = {
-        "cropping_probability": 0.5,
-        "independent_detectors": False,
-        "f_min_upper": 100.0,
-    }
+def test_frequency_bound_absent_cropping_cap_rejects_any_change(domain):
+    """No f_min_upper in the settings means the lower side was never cropped."""
+    settings = _crop_data_settings(cropping_probability=0.8, f_max_lower=400.0)
+    with pytest.raises(ValueError, match="upper bound"):
+        _validate_frequency_bound(40.0, "minimum_frequency", domain, settings)
+
+
+def test_frequency_bound_rejects_differing_values_when_not_independent(domain):
+    settings = _crop_data_settings(
+        cropping_probability=0.8, f_min_upper=64.0, independent_detectors=False
+    )
     with pytest.raises(ValueError, match="[Ii]ndependent"):
-        _validate_minimum_frequency({"H1": 40.0, "L1": 50.0}, DETECTORS, domain, crop)
+        _validate_frequency_bound(
+            {"H1": 40.0, "L1": 50.0}, "minimum_frequency", domain, settings
+        )
+
+
+def test_frequency_bound_partial_dict_not_independent_raises(domain):
+    """A partial dict changing one detector implies unequal bounds."""
+    settings = _crop_data_settings(
+        cropping_probability=0.8, f_min_upper=64.0, independent_detectors=False
+    )
+    with pytest.raises(ValueError, match="[Ii]ndependent"):
+        _validate_frequency_bound({"H1": 40.0}, "minimum_frequency", domain, settings)
+
+
+def test_frequency_bound_edges_absent_key_rejects_change(domain):
+    """mask_frequency_edges without f_max_lower means lower cuts were never drawn."""
+    settings = {
+        "detectors": DETECTORS,
+        "tokenization": {"mask_frequency_edges": {"f_min_upper": 80.0}},
+    }
+    with pytest.raises(ValueError, match="f_max_lower"):
+        _validate_frequency_bound(40.0, "minimum_frequency", domain, settings)
+
+
+def test_frequency_bound_random_tokens_only_warns(domain):
+    settings = {
+        "detectors": DETECTORS,
+        "tokenization": {"mask_random_tokens": {"p_mask": 0.4, "max_num_tokens": 10}},
+    }
+    with pytest.warns(UserWarning, match="mask_random_tokens"):
+        _validate_frequency_bound(40.0, "minimum_frequency", domain, settings)
 
 
 def test_check_frequency_updates_accepts_valid_and_rejects_invalid():
@@ -748,3 +753,52 @@ def test_detectors_setter_validates_against_model(gw_sampler):
     # so the API path is guarded, not only dingo_pipe.
     with pytest.raises(ValueError, match="do not match"):
         gw_sampler.detectors = ["H1"]
+
+
+# --- check_frequency_updates with raw values ---
+
+
+def _flexible_meta():
+    meta = _make_metadata(["H1", "L1", "V1"])
+    meta["train_settings"]["data"]["tokenization"] = {
+        "mask_frequency_edges": {
+            "p_mask": 0.25,
+            "f_max_lower": 180.0,
+            "f_min_upper": 80.0,
+            "p_same_all_detectors": 0.7,
+        }
+    }
+    meta["dataset_settings"] = {
+        "domain": {
+            "type": "UniformFrequencyDomain",
+            "f_min": 20.0,
+            "f_max": 1024.0,
+            "delta_f": 0.25,
+        }
+    }
+    return meta
+
+
+def test_check_frequency_updates_partial_dict_over_subset():
+    """A dict constrains only the detectors it names."""
+    check_frequency_updates(_flexible_meta(), f_min={"H1": 30.0}, f_max=448.0)
+
+
+def test_check_frequency_updates_unknown_detector_key_raises():
+    with pytest.raises(ValueError, match="not.*trained with"):
+        check_frequency_updates(_flexible_meta(), f_min={"K1": 30.0})
+
+
+def test_check_frequency_updates_out_of_envelope_raises():
+    with pytest.raises(ValueError, match="f_max_lower"):
+        check_frequency_updates(_flexible_meta(), f_min={"H1": 200.0})
+
+
+def test_check_frequency_updates_unchanged_value_allowed_without_flexibility():
+    """dingo_pipe always passes the model values; an inflexible model must accept
+    them (only a *changed* range requires flexibility)."""
+    meta = _flexible_meta()
+    del meta["train_settings"]["data"]["tokenization"]
+    check_frequency_updates(meta, f_min=20.0, f_max=1024.0)
+    with pytest.raises(ValueError, match="not trained with variable"):
+        check_frequency_updates(meta, f_min=30.0)
