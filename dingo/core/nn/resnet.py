@@ -1,5 +1,7 @@
-"""Dense residual network supporting layer normalization and multi-dimensional
-(e.g., token-batched) inputs, used by the transformer tokenizer."""
+"""Dense residual networks with GLU context gating, supporting layer normalization
+and multi-dimensional (e.g., token-batched) inputs. Used by the transformer
+tokenizer, as the NSF coupling conditioner when layer_norm=True, and by the
+continuous-flow (FMPE) networks."""
 
 from typing import Callable, Optional, Tuple
 
@@ -105,10 +107,10 @@ class DenseResidualNet(nn.Module):
     Compared to glasflow.nflows.nn.nets.ResidualNet, which the residual blocks here are
     based on, this implementation differs in two important ways:
 
-    1. **Context conditioning**: glasflow's ResidualNet concatenates the context vector
-       with the input once at the start of the network. Here, context is injected into
-       every residual block via a gated linear unit (GLU), giving the network repeated
-       access to the conditioning information at each layer.
+    1. **Context conditioning**: glasflow's ResidualNet both concatenates the context
+       to the input of the initial layer and injects it into every residual block via
+       a gated linear unit (GLU). This implementation keeps the per-block GLU
+       injection but omits the input concatenation.
 
     2. **Normalization and input shape**: glasflow's ResidualNet only supports batch
        normalization and 2D [batch, features] inputs. This implementation adds layer
@@ -116,8 +118,10 @@ class DenseResidualNet(nn.Module):
        dimensions (e.g., [batch, tokens, features]), as needed by the transformer
        tokenizer.
 
-    Because of difference (1), the two classes are not interchangeable: a checkpoint
-    trained with glasflow's ResidualNet cannot be loaded into DenseResidualNet.
+    Because of difference (1) — and differently named layers — the two classes are
+    not state-dict compatible: a checkpoint trained with glasflow's ResidualNet
+    cannot be loaded into DenseResidualNet (the residual blocks themselves are
+    compatible).
 
     Module specs
     --------
@@ -162,6 +166,13 @@ class DenseResidualNet(nn.Module):
         self.output_dim = output_dim
         self.hidden_dims = hidden_dims
         self.num_res_blocks = len(self.hidden_dims)
+        # Read by nflows' piecewise coupling transforms (duck-typed, hasattr): when
+        # this attribute exists, the conditioner's spline widths/heights are divided
+        # by sqrt(hidden_features). Removing it changes the flow, and networks
+        # trained with it (e.g. the published Dingo-T1 network) give wrong
+        # posteriors without it. Requires a single hidden width.
+        if all(d == self.hidden_dims[0] for d in self.hidden_dims):
+            self.hidden_features = self.hidden_dims[0]
 
         self.initial_layer = nn.Linear(self.input_dim, hidden_dims[0])
         self.blocks = nn.ModuleList(

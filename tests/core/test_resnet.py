@@ -93,3 +93,16 @@ def test_context_glu_does_not_mix_across_tokens():
     assert torch.allclose(out_reference[:, 0, :], out_modified[:, 0, :])
     assert torch.allclose(out_reference[:, 2, :], out_modified[:, 2, :])
     assert not torch.allclose(out_reference[:, 1, :], out_modified[:, 1, :])
+
+
+def test_dense_residual_net_exposes_hidden_features_for_uniform_widths():
+    """nflows' coupling transforms scale spline parameters by sqrt(hidden_features)
+    iff the conditioner has the attribute; removing it changes trained flows."""
+    from torch.nn import functional as F
+    from dingo.core.nn.resnet import DenseResidualNet
+
+    net = DenseResidualNet(4, 6, (8, 8), activation=F.relu)
+    assert net.hidden_features == 8
+    assert not hasattr(
+        DenseResidualNet(4, 6, (8, 16), activation=F.relu), "hidden_features"
+    )

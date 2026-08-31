@@ -116,25 +116,25 @@ def create_base_transform(
             )
 
         if layer_norm:
-            # DenseResidualNet supports layer_norm and injects context via GLU gating
-            # in each residual block, rather than concatenating it to the input once.
-            _hidden_dims = tuple([hidden_dim] * num_transform_blocks)
-            _ctx = context_dim
+            # DenseResidualNet supports layer_norm. Unlike glasflow's ResidualNet it
+            # does not concatenate the context to the initial layer's input; context
+            # enters only via the per-block GLU gating (see its docstring).
             transform_net_create_fn = lambda in_f, out_f: DenseResidualNet(
                 input_dim=in_f,
                 output_dim=out_f,
-                hidden_dims=_hidden_dims,
+                hidden_dims=(hidden_dim,) * num_transform_blocks,
                 activation=activation_fn,
                 dropout=dropout_probability,
                 batch_norm=batch_norm,
                 layer_norm=True,
-                context_features=_ctx,
+                context_features=context_dim,
             )
         else:
-            # glasflow's ResidualNet is kept here for backward compatibility: it
-            # concatenates context with the input rather than using GLU gating, so the
-            # two are architecturally incompatible and old checkpoints cannot be loaded
-            # into DenseResidualNet. See DenseResidualNet docstring for details.
+            # glasflow's ResidualNet is kept here for backward compatibility. Both
+            # nets GLU-gate the context in every residual block, but ResidualNet
+            # additionally concatenates it to the initial layer's input and names its
+            # layers differently, so old checkpoints cannot be loaded into
+            # DenseResidualNet. See the DenseResidualNet docstring for details.
             transform_net_create_fn = (
                 lambda in_features, out_features: nflows_nets.ResidualNet(
                     in_features=in_features,
