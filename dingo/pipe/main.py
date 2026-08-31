@@ -27,6 +27,7 @@ from .parser import create_parser
 from .utils import dict_to_string
 
 from ..gw.domains.build_domain import build_domain_from_model_metadata
+from ..gw.gwutils import add_defaults_for_missing_detectors
 from dingo.core.posterior_models.build_model import build_model_from_kwargs
 from ..gw.inference.gw_samplers import check_frequency_updates, check_detector_update
 from ..gw.injection import Injection
@@ -80,17 +81,11 @@ def fill_in_arguments_from_model(args, perform_arg_checks=True):
 
     data_settings = model_metadata["train_settings"]["data"]
 
-    # With a transformer model trained with mask_detectors or mask_random_tokens, the
-    # detector list at inference time may differ from the training list. Override it
-    # from the command-line args so the rest of the pipeline uses the right detectors.
-    detectors = data_settings["detectors"]
-    tok = data_settings.get("tokenization", {})
-    flexible_detectors = "mask_detectors" in tok or "mask_random_tokens" in tok
-    if flexible_detectors:
-        if args.detectors is not None:
-            detectors = [d.strip("'") for d in args.detectors]
-        elif args.channel_dict is not None:
-            detectors = list(convert_string_to_dict(args.channel_dict).keys())
+    # The analyzed detectors may be a subset of the training detectors (for models
+    # trained with detector masking). Default them from the channel dict when not
+    # given explicitly; check_detector_update() decides compatibility below.
+    if args.detectors is None and args.channel_dict is not None:
+        args.detectors = list(convert_string_to_dict(args.channel_dict).keys())
 
     # In dingo_pipe, we download and prepare data based on the model frequency range.
     # This is because different maximum frequencies for different detectors would
@@ -102,7 +97,7 @@ def fill_in_arguments_from_model(args, perform_arg_checks=True):
         "duration": domain.duration,
         "minimum_frequency": domain.f_min,
         "maximum_frequency": domain.f_max,
-        "detectors": detectors,
+        "detectors": data_settings["detectors"],
         "waveform_approximant": model_metadata["dataset_settings"][
             "waveform_generator"
         ]["approximant"],
@@ -151,6 +146,19 @@ def fill_in_arguments_from_model(args, perform_arg_checks=True):
                     raise NotImplementedError(
                         "Cannot change waveform approximant during importance sampling."
                     )  # TODO: Implement this. Also no error if passed explicitly as an update.
+                if k == "detectors":
+                    # A detector subset is applied at inference (absent detectors'
+                    # tokens are never built). Validate against the training
+                    # configuration and keep the user's choice, in training order.
+                    check_detector_update(
+                        model_metadata=model_metadata, detectors=args_v
+                    )
+                    logger.info(
+                        f"Analyzing detectors {args_v}; model was trained with {v}."
+                    )
+                    # Ensure same detector order as model config.
+                    setattr(args, k, [d for d in v if d in args_v])
+                    continue  # Do not update args to the model value.
                 if k in ["minimum_frequency", "maximum_frequency"]:
                     logger.info(
                         f"Strain-cropping: Plan to update network {k} from {v} to"
@@ -167,28 +175,32 @@ def fill_in_arguments_from_model(args, perform_arg_checks=True):
 
         setattr(args, k, v)
 
-    frequency_input = Input([], [], print_msg=False)
-    # Frequency validation always uses the model's full detector list; the flexible
-    # detector subset only affects which data blocks are loaded at inference time.
-    frequency_input.detectors = data_settings["detectors"]
-    frequency_input.sampling_frequency = args.sampling_frequency
-    frequency_input.minimum_frequency = args.minimum_frequency
-    frequency_input.maximum_frequency = args.maximum_frequency
-    check_frequency_updates(
-        model_metadata,
-        frequency_input.minimum_frequency_dict,
-        frequency_input.maximum_frequency_dict,
-    )
-    if flexible_detectors:
-        check_detector_update(model_metadata=model_metadata, detectors=detectors)
-    else:
-        if set(detectors) != set(data_settings["detectors"]):
-            raise ValueError(
-                f"Model not trained with tokenization.mask_detectors or "
-                f"tokenization.mask_random_tokens. Model cannot handle updating the "
-                f"detectors from {data_settings['detectors']} to {detectors} at "
-                f"inference time."
-            )
+    # Validate the requested frequency ranges. A float applies to all analyzed
+    # detectors; a dict constrains only the detectors it names. Fill the model
+    # range in for analyzed detectors missing from a dict, so that downstream
+    # bilby_pipe parsing (which requires every detector) succeeds.
+    def parse_frequency(value, key):
+        """Parse an ini frequency entry exactly as bilby_pipe's Input setter does:
+        a float if possible, otherwise a per-detector dict (with "None" -> None)."""
+        if value is None:
+            return None
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return convert_string_to_dict(value, key)
+
+    f_min = parse_frequency(args.minimum_frequency, "minimum-frequency")
+    f_max = parse_frequency(args.maximum_frequency, "maximum-frequency")
+    check_frequency_updates(model_metadata, f_min, f_max)
+    analyzed_detectors = [d.strip("'") for d in args.detectors]
+    if isinstance(f_min, dict):
+        args.minimum_frequency = str(
+            add_defaults_for_missing_detectors(f_min, domain.f_min, analyzed_detectors)
+        )
+    if isinstance(f_max, dict):
+        args.maximum_frequency = str(
+            add_defaults_for_missing_detectors(f_max, domain.f_max, analyzed_detectors)
+        )
 
     # TODO: Also check consistency between model and init_model settings.
 
@@ -216,11 +228,7 @@ def fill_in_arguments_from_model(args, perform_arg_checks=True):
         importance_sampling_updates = {
             k.replace("-", "_"): v for k, v in importance_sampling_updates.items()
         }
-    return (
-        {**changed_args, **importance_sampling_updates},
-        model_args,
-        flexible_detectors,
-    )
+    return {**changed_args, **importance_sampling_updates}, model_args
 
 
 class MainInput(BilbyMainInput):
@@ -646,9 +654,7 @@ def main():
     parser = create_parser(top_level=True)
     args, unknown_args = parse_args(get_command_line_arguments(), parser)
 
-    importance_sampling_updates, model_args, flexible_detectors = (
-        fill_in_arguments_from_model(args)
-    )
+    importance_sampling_updates, model_args = fill_in_arguments_from_model(args)
     inputs = MainInput(args, unknown_args, importance_sampling_updates)
     write_complete_config_file(parser, args, inputs)
 
