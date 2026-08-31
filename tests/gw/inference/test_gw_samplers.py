@@ -608,18 +608,6 @@ def test_validate_event_not_subset_raises():
         _validate_detectors_transformer(["H1", "V1"], ["H1", "L1"], HL_SETTINGS)
 
 
-def test_validate_missing_p_mask_012_raises():
-    settings = {"p_mask_hlv": {"H1": 0.5, "L1": 0.5}}
-    with pytest.raises(ValueError, match="p_mask_012_detectors"):
-        _validate_detectors_transformer(["H1", "L1"], ["H1", "L1"], settings)
-
-
-def test_validate_missing_p_mask_hlv_raises():
-    settings = {"p_mask_012_detectors": [0.6, 0.4]}
-    with pytest.raises(ValueError, match="p_mask_hlv"):
-        _validate_detectors_transformer(["H1", "L1"], ["H1", "L1"], settings)
-
-
 def test_validate_p_mask_zero_for_count_raises():
     # p_mask_012_detectors[0] = 0 means keeping all 2 active is not allowed.
     settings = {
@@ -630,22 +618,44 @@ def test_validate_p_mask_zero_for_count_raises():
         _validate_detectors_transformer(["H1", "L1"], ["H1", "L1"], settings)
 
 
-def test_validate_p_mask_hlv_zero_for_detector_raises():
+def test_validate_absent_detector_never_masked_raises():
+    # p_mask_hlv[H1] = 0: H1 was never masked in training, so it must be present.
     settings = {
         "p_mask_012_detectors": [0.6, 0.4],
         "p_mask_hlv": {"H1": 0.0, "L1": 1.0},
     }
-    with pytest.raises(ValueError, match="p_mask_hlv"):
+    with pytest.raises(ValueError, match="never masked"):
+        _validate_detectors_transformer(["L1"], ["H1", "L1"], settings)
+
+
+def test_validate_present_detector_with_zero_mask_probability_allowed():
+    # The always-kept detector being present is the in-distribution case.
+    settings = {
+        "p_mask_012_detectors": [0.6, 0.4],
+        "p_mask_hlv": {"H1": 0.0, "L1": 1.0},
+    }
+    _validate_detectors_transformer(["H1"], ["H1", "L1"], settings)
+
+
+def test_validate_missing_p_mask_keys_impose_no_constraint():
+    # Absent keys mean MaskDetectors defaulted to uniform probabilities.
+    _validate_detectors_transformer(["H1"], ["H1", "L1"], {})
+
+
+def test_validate_more_absent_detectors_than_p_mask_allows_raises():
+    # A length-1 p_mask_012_detectors allows masking 0 detectors only.
+    settings = {"p_mask_012_detectors": [1.0]}
+    with pytest.raises(ValueError, match="not allowing"):
         _validate_detectors_transformer(["H1"], ["H1", "L1"], settings)
 
 
-def test_validate_detector_not_in_p_mask_hlv_raises():
+def test_validate_absent_detector_missing_from_p_mask_hlv_raises():
     settings = {
         "p_mask_012_detectors": [0.6, 0.3, 0.1],
-        "p_mask_hlv": {"H1": 0.5, "L1": 0.5},  # V1 missing
+        "p_mask_hlv": {"H1": 0.5, "L1": 0.5},  # V1 missing -> treated as never masked
     }
-    with pytest.raises(ValueError, match="not included in p_mask_hlv"):
-        _validate_detectors_transformer(["V1"], ["H1", "L1", "V1"], settings)
+    with pytest.raises(ValueError, match="never masked"):
+        _validate_detectors_transformer(["H1", "L1"], ["H1", "L1", "V1"], settings)
 
 
 # --- check_detector_update ---
@@ -719,3 +729,22 @@ def test_run_sampler_list_gets_batch_dim_added():
     assert result[0].shape == (1, 86, 48)
     assert result[1].shape == (1, 86, 3)
     assert result[2].shape == (1, 86)
+
+
+def test_check_tokenized_without_masking_requires_exact_match():
+    meta = _make_metadata(["H1", "L1"])
+    meta["train_settings"]["data"]["tokenization"] = {"token_size": 16}
+    with pytest.raises(ValueError, match="do not match"):
+        check_detector_update(meta, ["H1"])
+
+
+def test_event_metadata_round_trips_detectors(gw_sampler):
+    gw_sampler.event_metadata = {"time_event": 0.0, "detectors": ["H1", "L1"]}
+    assert gw_sampler.event_metadata["detectors"] == ["H1", "L1"]
+
+
+def test_detectors_setter_validates_against_model(gw_sampler):
+    # Non-tokenized model: a detector subset must be rejected in the setter itself,
+    # so the API path is guarded, not only dingo_pipe.
+    with pytest.raises(ValueError, match="do not match"):
+        gw_sampler.detectors = ["H1"]

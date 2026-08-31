@@ -84,6 +84,7 @@ class GWSamplerMixin(object):
 
     @detectors.setter
     def detectors(self: _GWMixinProtocol, value: list[str]):
+        check_detector_update(self.base_model_metadata, value)
         self._detectors = value
         self._initialize_transforms()
 
@@ -256,6 +257,7 @@ class GWSamplerMixin(object):
             metadata = {}
         metadata["minimum_frequency"] = self.minimum_frequency
         metadata["maximum_frequency"] = self.maximum_frequency
+        metadata["detectors"] = self.detectors
         return metadata
 
     @event_metadata.setter
@@ -900,11 +902,16 @@ def check_frequency_updates(
 def _validate_detectors_transformer(
     detectors_event: list[str],
     detectors_network: list[str],
-    mask_detector_settings: dict | None,
+    mask_detector_settings: dict,
 ):
     """
-    Validate that a given set of event detectors is compatible with a transformer network
+    Validate that the event detectors are compatible with a transformer network
     trained with detector masking.
+
+    The event detectors must be a subset of the training detectors, and every
+    *absent* training detector must have been maskable in training. Keys missing
+    from ``mask_detector_settings`` impose no constraint, since ``MaskDetectors``
+    then defaulted to uniform probabilities.
 
     Parameters
     ----------
@@ -912,55 +919,42 @@ def _validate_detectors_transformer(
         Detectors present in the event data.
     detectors_network : list[str]
         Detectors the network was trained with.
-    mask_detector_settings : dict or None
-        The ``tokenization.mask_detectors`` sub-dict from the network's train settings.
-        Must contain ``p_mask_012_detectors`` and ``p_mask_hlv``.
+    mask_detector_settings : dict
+        The ``tokenization.mask_detectors`` sub-dict from the train settings.
 
     Raises
     ------
     ValueError
-        If the event detectors are not a subset of the training detectors, or if the
-        training probabilities do not allow the event's detector count or specific
-        detectors.
+        If the detector configuration is incompatible with the network.
     """
     if not set(detectors_event).issubset(set(detectors_network)):
         raise ValueError(
-            f"Event has detectors {detectors_event} but model was only trained with "
-            f"detectors {detectors_network}."
+            f"Event has detectors {detectors_event} but model was only trained "
+            f"with detectors {detectors_network}."
         )
+    absent = set(detectors_network) - set(detectors_event)
 
-    num_detectors = len(detectors_event)
-    num_network_detectors = len(detectors_network)
-    if "p_mask_012_detectors" not in mask_detector_settings:
-        raise ValueError(
-            "Adapting detectors at inference time requires p_mask_012_detectors to be "
-            "set in tokenization.mask_detectors."
-        )
-    p_mask_012 = mask_detector_settings["p_mask_012_detectors"]
-    # p_mask_012[k] = probability of masking k detectors out of num_network_detectors.
-    # The number of masked detectors equals num_network_detectors - num_detectors.
-    num_masked = num_network_detectors - num_detectors
-    if p_mask_012[num_masked] == 0.0:
+    p_mask_012 = mask_detector_settings.get("p_mask_012_detectors")
+    # p_mask_012[k] = probability of masking k detectors during training.
+    if p_mask_012 is not None and (
+        len(absent) >= len(p_mask_012) or p_mask_012[len(absent)] == 0.0
+    ):
         raise ValueError(
             f"Event has detectors {detectors_event}, but model was trained with "
-            f"p_mask_012_detectors={p_mask_012}, not allowing {num_detectors} active "
-            f"detectors."
+            f"p_mask_012_detectors={p_mask_012}, not allowing "
+            f"{len(detectors_event)} active detectors."
         )
 
-    if "p_mask_hlv" not in mask_detector_settings:
-        raise ValueError(
-            "Adapting detectors at inference time requires p_mask_hlv to be set in "
-            "tokenization.mask_detectors."
-        )
-    p_mask_hlv = mask_detector_settings["p_mask_hlv"]
-    for det in detectors_event:
-        if det not in p_mask_hlv:
-            raise ValueError(f"Detector {det} not included in p_mask_hlv={p_mask_hlv}.")
-        if p_mask_hlv[det] == 0.0:
-            raise ValueError(
-                f"Probability of keeping detector {det} is 0 in "
-                f"p_mask_hlv={p_mask_hlv}."
-            )
+    p_mask_hlv = mask_detector_settings.get("p_mask_hlv")
+    # p_mask_hlv[det] = probability that det is masked; zero means det was always
+    # present in training, so it must also be present in the event.
+    if p_mask_hlv is not None:
+        for det in absent:
+            if p_mask_hlv.get(det, 0.0) == 0.0:
+                raise ValueError(
+                    f"Detector {det} was never masked in training "
+                    f"(p_mask_hlv={p_mask_hlv}); cannot drop it at inference."
+                )
 
 
 def check_detector_update(
@@ -989,20 +983,24 @@ def check_detector_update(
         If the detector configuration is incompatible with the model.
     """
     detectors_network = model_metadata["train_settings"]["data"]["detectors"]
-    if "tokenization" in model_metadata["train_settings"]["data"]:
-        tok = model_metadata["train_settings"]["data"]["tokenization"]
-        if "mask_detectors" in tok:
-            _validate_detectors_transformer(
-                detectors_event=detectors,
-                detectors_network=detectors_network,
-                mask_detector_settings=tok["mask_detectors"],
-            )
-        elif "mask_random_tokens" in tok:
-            # Token-level masking does not constrain which detectors are present.
-            pass
-    else:
-        if set(detectors) != set(detectors_network):
-            raise ValueError(
-                f"Detectors {detectors} of event do not match detectors "
-                f"{detectors_network} from model."
-            )
+    if not set(detectors).issubset(set(detectors_network)):
+        raise ValueError(
+            f"Event has detectors {detectors} but model was only trained with "
+            f"detectors {detectors_network}."
+        )
+    tok = model_metadata["train_settings"]["data"].get("tokenization", {})
+    if "mask_detectors" in tok:
+        _validate_detectors_transformer(
+            detectors_event=detectors,
+            detectors_network=detectors_network,
+            mask_detector_settings=tok["mask_detectors"],
+        )
+    elif "mask_random_tokens" in tok:
+        # Token-level masking does not constrain which detectors are present.
+        pass
+    elif set(detectors) != set(detectors_network):
+        # Without detector masking (tokenized or not), an exact match is required.
+        raise ValueError(
+            f"Detectors {detectors} of event do not match detectors "
+            f"{detectors_network} from model."
+        )
