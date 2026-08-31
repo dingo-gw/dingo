@@ -18,7 +18,10 @@ import dingo.core.utils.trainutils
 import json
 from collections import OrderedDict
 from typing import Optional
-from dingo.core.utils.backward_compatibility import update_model_config
+from dingo.core.utils.backward_compatibility import (
+    update_data_config,
+    update_model_config,
+)
 from dingo.core.utils.misc import get_version
 
 from dingo.core.utils.trainutils import EarlyStopping
@@ -333,6 +336,7 @@ class BasePosteriorModel(ABC):
         self.epoch = d["epoch"]
 
         self.metadata = d["metadata"]
+        update_data_config(self.metadata)  # Backward compat
 
         if "context" in d:
             self.context = d["context"]

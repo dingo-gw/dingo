@@ -4,6 +4,7 @@ from dingo.core.posterior_models.normalizing_flow import NormalizingFlowPosterio
 from dingo.core.posterior_models.score_matching import ScoreDiffusionPosteriorModel
 from dingo.core.utils.backward_compatibility import (
     torch_load_with_fallback,
+    update_data_config,
     update_model_config,
     check_minimum_version,
 )
@@ -55,6 +56,7 @@ def build_model_from_kwargs(
         ]
     else:
         update_model_config(settings["train_settings"]["model"])  # Backward compat
+        update_data_config(settings)
         posterior_model_type = settings["train_settings"]["model"][
             "posterior_model_type"
         ]

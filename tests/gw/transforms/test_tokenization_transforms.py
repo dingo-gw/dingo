@@ -1228,3 +1228,20 @@ def test_MaskTokensForFrequencyRangeUpdate_psd_notch_preserves_existing_mask():
     )(out)
 
     assert out["token_mask"][0], "Pre-masked token must remain masked"
+
+
+def test_dingo_t1_settings_build_mask_transforms():
+    """Tokenization settings converted from the dingo-t1 schema are accepted by the
+    mask transforms as keyword arguments, as set_train_transforms passes them."""
+    from dingo.core.utils.backward_compatibility import update_data_config
+    from tests.core.test_utils import dingo_t1_settings
+
+    settings = dingo_t1_settings()
+    update_data_config(settings)
+    tok = settings["train_settings"]["data"]["tokenization"]
+    domain = UniformFrequencyDomain(f_min=20.0, f_max=1024.0, delta_f=0.125)
+    MaskDetectors(**tok["mask_detectors"], print_output=False)
+    MaskFrequencyEdges(domain=domain, **tok["mask_frequency_edges"], print_output=False)
+    MaskFrequencyInterval(
+        domain=domain, **tok["mask_frequency_interval"], print_output=False
+    )
