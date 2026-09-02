@@ -8,8 +8,8 @@ from dingo.gw.transforms import (
     StrainTokenization,
     MaskRandomTokens,
     MaskDetectors,
-    MaskFrequencyEdges,
-    MaskFrequencyInterval,
+    MaskFrequencyRange,
+    MaskFrequencyNotches,
     MaskTokensForFrequencyRangeUpdate,
     DETECTOR_DICT,
 )
@@ -532,12 +532,12 @@ def test_MaskDetectors_two_of_three():
 
 
 # ---------------------------------------------------------------------------
-# MaskFrequencyEdges tests
+# MaskFrequencyRange tests
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize("setup", SETUPS)
-def test_MaskFrequencyEdges(request, setup):
+def test_MaskFrequencyRange(request, setup):
     domain, num_tokens_per_block, num_blocks, sample = request.getfixturevalue(setup)
 
     token_transformation = StrainTokenization(
@@ -547,16 +547,16 @@ def test_MaskFrequencyEdges(request, setup):
     )
     mask_dict = {
         "p_mask": 0.2,
-        "f_max_lower": 100.0,
-        "f_min_upper": 800.0,
+        "f_min_upper": 100.0,
+        "f_max_lower": 800.0,
         "p_lower_upper_both": [0.4, 0.4, 0.2],
         "p_same_all_detectors": 0.7,
     }
-    mask_transformation = MaskFrequencyEdges(
+    mask_transformation = MaskFrequencyRange(
         domain=domain,
         p_mask=mask_dict["p_mask"],
-        f_max_lower=mask_dict["f_max_lower"],
         f_min_upper=mask_dict["f_min_upper"],
+        f_max_lower=mask_dict["f_max_lower"],
         p_lower_upper_both=mask_dict["p_lower_upper_both"],
         p_same_all_detectors=mask_dict["p_same_all_detectors"],
         print_output=False,
@@ -564,14 +564,14 @@ def test_MaskFrequencyEdges(request, setup):
     out = token_transformation(sample)
     out = mask_transformation(out)
 
-    # Masked tokens must be at the lower end (f_min < f_max_lower) or
-    # upper end (f_max > f_min_upper) of the frequency range.
+    # Masked tokens must be at the lower end (f_min < f_min_upper) or
+    # upper end (f_max > f_max_lower) of the frequency range.
     dropped_f_mins = out["position"][..., 0][out["token_mask"]]
     dropped_f_maxs = out["position"][..., 1][out["token_mask"]]
     assert np.all(
         np.logical_or(
-            dropped_f_mins < mask_dict["f_max_lower"],
-            dropped_f_maxs > mask_dict["f_min_upper"],
+            dropped_f_mins < mask_dict["f_min_upper"],
+            dropped_f_maxs > mask_dict["f_max_lower"],
         )
     )
 
@@ -583,10 +583,10 @@ def test_MaskFrequencyEdges(request, setup):
 
         # Check p_lower_upper_both
         mask_lower = (
-            out["position"][..., :num_tokens_per_block, 0] <= mask_dict["f_max_lower"]
+            out["position"][..., :num_tokens_per_block, 0] <= mask_dict["f_min_upper"]
         )
         mask_upper = (
-            out["position"][..., :num_tokens_per_block, 1] >= mask_dict["f_min_upper"]
+            out["position"][..., :num_tokens_per_block, 1] >= mask_dict["f_max_lower"]
         )
         lower_blocks = []
         upper_blocks = []
@@ -660,19 +660,19 @@ def test_MaskFrequencyEdges(request, setup):
         assert np.all(num_tokens_masked_lower[1:] <= num_tokens_masked_lower[:-1])
         assert np.all(num_tokens_masked_upper[1:] >= num_tokens_masked_upper[:-1])
 
-    # Check that we never mask all tokens when f_max_lower > f_min_upper
+    # Check that we never mask all tokens when f_min_upper > f_max_lower
     mask_dict_overlap = {
         "p_mask": 1.0,
-        "f_max_lower": 900.0,
-        "f_min_upper": 100.0,
+        "f_min_upper": 900.0,
+        "f_max_lower": 100.0,
         "p_lower_upper_both": [0.1, 0.1, 0.8],
         "p_same_all_detectors": 0.7,
     }
-    mask_transformation_overlap = MaskFrequencyEdges(
+    mask_transformation_overlap = MaskFrequencyRange(
         domain=domain,
         p_mask=mask_dict_overlap["p_mask"],
-        f_max_lower=mask_dict_overlap["f_max_lower"],
         f_min_upper=mask_dict_overlap["f_min_upper"],
+        f_max_lower=mask_dict_overlap["f_max_lower"],
         p_lower_upper_both=mask_dict_overlap["p_lower_upper_both"],
         p_same_all_detectors=mask_dict_overlap["p_same_all_detectors"],
         print_output=False,
@@ -686,31 +686,31 @@ def test_MaskFrequencyEdges(request, setup):
     dropped_f_maxs = out["position"][..., 1][out["token_mask"]]
     assert np.all(
         np.logical_or(
-            dropped_f_mins < mask_dict_overlap["f_max_lower"],
-            dropped_f_maxs > mask_dict_overlap["f_min_upper"],
+            dropped_f_mins < mask_dict_overlap["f_min_upper"],
+            dropped_f_maxs > mask_dict_overlap["f_max_lower"],
         )
     )
 
 
-def test_MaskFrequencyEdges_p_mask_zero():
+def test_MaskFrequencyRange_p_mask_zero():
     """With p_mask=0 no tokens should ever be masked."""
     domain = make_ufd()
     sample = make_sample(domain, batch_size=100)
     out = StrainTokenization(domain, num_tokens_per_block=40, print_output=False)(
         sample
     )
-    out = MaskFrequencyEdges(
+    out = MaskFrequencyRange(
         domain=domain,
         p_mask=0.0,
-        f_max_lower=100.0,
-        f_min_upper=800.0,
+        f_min_upper=100.0,
+        f_max_lower=800.0,
         p_same_all_detectors=0.5,
         print_output=False,
     )(out)
     assert not out["token_mask"].any()
 
 
-def test_MaskFrequencyEdges_preserves_existing_mask():
+def test_MaskFrequencyRange_preserves_existing_mask():
     """Pre-existing True entries in token_mask must remain True after the transform."""
     domain = make_ufd()
     sample = make_sample(domain, batch_size=100)
@@ -718,26 +718,26 @@ def test_MaskFrequencyEdges_preserves_existing_mask():
         sample
     )
     out["token_mask"][:, 0] = True
-    out = MaskFrequencyEdges(
+    out = MaskFrequencyRange(
         domain=domain,
         p_mask=0.0,
-        f_max_lower=100.0,
-        f_min_upper=800.0,
+        f_min_upper=100.0,
+        f_max_lower=800.0,
         p_same_all_detectors=0.5,
         print_output=False,
     )(out)
     assert np.all(out["token_mask"][:, 0])
 
 
-def test_MaskFrequencyEdges_p_lower_upper_both_not_summing_to_one():
+def test_MaskFrequencyRange_p_lower_upper_both_not_summing_to_one():
     """p_lower_upper_both that does not sum to 1 raises ValueError."""
     domain = make_ufd()
     with pytest.raises(ValueError, match="does not sum to 1"):
-        MaskFrequencyEdges(
+        MaskFrequencyRange(
             domain=domain,
             p_mask=0.2,
-            f_max_lower=100.0,
-            f_min_upper=800.0,
+            f_min_upper=100.0,
+            f_max_lower=800.0,
             p_same_all_detectors=0.5,
             p_lower_upper_both=[0.3, 0.3, 0.3],
             print_output=False,
@@ -745,12 +745,12 @@ def test_MaskFrequencyEdges_p_lower_upper_both_not_summing_to_one():
 
 
 # ---------------------------------------------------------------------------
-# MaskFrequencyInterval tests
+# MaskFrequencyNotches tests
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize("setup", SETUPS)
-def test_MaskFrequencyInterval(request, setup):
+def test_MaskFrequencyNotches(request, setup):
     domain, num_tokens_per_block, num_blocks, sample = request.getfixturevalue(setup)
 
     token_transformation = StrainTokenization(
@@ -764,7 +764,7 @@ def test_MaskFrequencyInterval(request, setup):
         "f_max": 500.0,
         "max_width": 100.0,
     }
-    mask_transformation = MaskFrequencyInterval(
+    mask_transformation = MaskFrequencyNotches(
         domain=domain,
         p_per_detector=mask_dict["p_per_detector"],
         f_min=mask_dict["f_min"],
@@ -856,14 +856,14 @@ def test_MaskFrequencyInterval(request, setup):
                 assert np.isclose(np.mean(non_zero), non_zero, atol=5, rtol=5).all()
 
 
-def test_MaskFrequencyInterval_p_per_detector_zero():
+def test_MaskFrequencyNotches_p_per_detector_zero():
     """With p_per_detector=0 no tokens should ever be masked."""
     domain = make_ufd()
     sample = make_sample(domain, batch_size=100)
     out = StrainTokenization(domain, num_tokens_per_block=40, print_output=False)(
         sample
     )
-    out = MaskFrequencyInterval(
+    out = MaskFrequencyNotches(
         domain=domain,
         p_per_detector=0.0,
         f_min=100.0,
@@ -874,7 +874,7 @@ def test_MaskFrequencyInterval_p_per_detector_zero():
     assert not out["token_mask"].any()
 
 
-def test_MaskFrequencyInterval_preserves_existing_mask():
+def test_MaskFrequencyNotches_preserves_existing_mask():
     """Pre-existing True entries in token_mask must remain True after the transform."""
     domain = make_ufd()
     sample = make_sample(domain, batch_size=100)
@@ -882,7 +882,7 @@ def test_MaskFrequencyInterval_preserves_existing_mask():
         sample
     )
     out["token_mask"][:, 0] = True
-    out = MaskFrequencyInterval(
+    out = MaskFrequencyNotches(
         domain=domain,
         p_per_detector=0.0,
         f_min=100.0,
@@ -1241,15 +1241,15 @@ def test_dingo_t1_settings_build_mask_transforms():
     tok = settings["train_settings"]["data"]["tokenization"]
     domain = UniformFrequencyDomain(f_min=20.0, f_max=1024.0, delta_f=0.125)
     MaskDetectors(**tok["mask_detectors"], print_output=False)
-    MaskFrequencyEdges(domain=domain, **tok["mask_frequency_edges"], print_output=False)
-    MaskFrequencyInterval(
-        domain=domain, **tok["mask_frequency_interval"], print_output=False
+    MaskFrequencyRange(domain=domain, **tok["mask_frequency_range"], print_output=False)
+    MaskFrequencyNotches(
+        domain=domain, **tok["mask_frequency_notches"], print_output=False
     )
 
 
 def test_strain_tokenization_non_dyadic_delta_f():
     """T = 6 s gives delta_f = 1/6, not exactly representable; the padded-bin count
-    must come from integer arithmetic."""
+    must come from integer arithmetic (float division truncated here)."""
     # f_max = 256 with delta_f = 1/6: the old float expression gave 6 padded bins
     # where 7 are needed, so the reshape in __call__ crashed.
     domain = UniformFrequencyDomain(f_min=20.0, f_max=256.0, delta_f=1.0 / 6.0)
@@ -1266,7 +1266,7 @@ def test_strain_tokenization_non_dyadic_delta_f():
     assert out["waveform"].shape == (2 * n_tokens, 3 * 16)
 
 
-def test_mask_frequency_interval_non_dyadic_delta_f():
+def test_mask_frequency_notches_non_dyadic_delta_f():
     """The upper-edge draw must not assume equal candidate counts per row, which
     float rounding breaks for delta_f = 1/12."""
     domain = UniformFrequencyDomain(f_min=20.0, f_max=100.0, delta_f=1.0 / 12.0)
@@ -1278,7 +1278,7 @@ def test_mask_frequency_interval_non_dyadic_delta_f():
     }
     sample = tok(sample)
     np.random.seed(0)
-    transform = MaskFrequencyInterval(
+    transform = MaskFrequencyNotches(
         domain=domain,
         p_per_detector=1.0,
         f_min=20.0,

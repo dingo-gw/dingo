@@ -97,10 +97,10 @@ class GWSamplerMixin(object):
         )
 
     @property
-    def mask_frequency_edges_settings(self: SamplerProtocol):
+    def mask_frequency_range_settings(self: SamplerProtocol):
         tok = self.base_model_metadata["train_settings"]["data"].get("tokenization")
         if tok is not None:
-            return tok.get("mask_frequency_edges")
+            return tok.get("mask_frequency_range")
         return None
 
     @property
@@ -390,7 +390,7 @@ class GWSampler(GWSamplerMixin, Sampler):
                         detectors=self.detectors,
                         minimum_frequency=self.minimum_frequency,
                         maximum_frequency=self.maximum_frequency,
-                        mask_frequency_edges_settings=self.mask_frequency_edges_settings,
+                        mask_frequency_range_settings=self.mask_frequency_range_settings,
                         psd_notch_dict=self.psd_notch_dict,
                     )
                 )
@@ -606,7 +606,7 @@ def _validate_frequency_bound(
     constraining only the detectors it names; keys must be detectors the model was
     trained with. Values equal to the domain bound are always allowed. A changed
     value requires frequency flexibility from training: ``random_strain_cropping``
-    and/or ``tokenization.mask_frequency_edges`` are validated against their
+    and/or ``tokenization.mask_frequency_range`` are validated against their
     envelopes; a model with only ``tokenization.mask_random_tokens`` passes with a
     warning, since the contiguous masking pattern differs from the random training
     distribution.
@@ -655,9 +655,9 @@ def _validate_frequency_bound(
 
     crop_settings = data_settings.get("random_strain_cropping")
     tok = data_settings.get("tokenization") or {}
-    edges_settings = tok.get("mask_frequency_edges")
+    range_settings = tok.get("mask_frequency_range")
 
-    if crop_settings is None and edges_settings is None:
+    if crop_settings is None and range_settings is None:
         if "mask_random_tokens" in tok:
             warnings.warn(
                 f"Updating {bound} relies on mask_random_tokens training only; the "
@@ -668,7 +668,7 @@ def _validate_frequency_bound(
             return
         raise ValueError(
             f"Model was not trained with variable frequency ranges "
-            f"(no random_strain_cropping, mask_frequency_edges, or "
+            f"(no random_strain_cropping, mask_frequency_range, or "
             f"mask_random_tokens). Cannot update {bound}."
         )
 
@@ -682,40 +682,24 @@ def _validate_frequency_bound(
                     f"Independent frequencies per detector not enabled. All "
                     f"frequencies must match, got {bound} = {value}."
                 )
-        # Training envelope: f_min was cropped up to f_min_upper, f_max down to
-        # f_max_lower; an absent key means that side was never cropped.
-        key = "f_min_upper" if minimum else "f_max_lower"
-        cap = crop_settings.get(key, domain_value)
+
+    # Training envelopes, in shared vocabulary: f_min may be raised up to
+    # f_min_upper, f_max lowered down to f_max_lower; an absent key means that
+    # side was never cropped / cut in training.
+    key = "f_min_upper" if minimum else "f_max_lower"
+    for settings, source in (
+        (crop_settings, "random_strain_cropping"),
+        (range_settings, "tokenization.mask_frequency_range"),
+    ):
+        if settings is None:
+            continue
+        cap = settings.get(key, domain_value)
         caps = cap if isinstance(cap, dict) else {d: cap for d in model_detectors}
         for det, v in changed.items():
-            if minimum and v > caps[det]:
+            if (minimum and v > caps[det]) or (not minimum and v < caps[det]):
                 raise ValueError(
-                    f"Requested {bound} for {det} ({v} Hz) greater than upper "
-                    f"bound of {caps[det]} Hz from random_strain_cropping."
-                )
-            if not minimum and v < caps[det]:
-                raise ValueError(
-                    f"Requested {bound} for {det} ({v} Hz) less than lower "
-                    f"bound of {caps[det]} Hz from random_strain_cropping."
-                )
-
-    if edges_settings is not None:
-        # Training envelope: lower cuts were drawn up to f_max_lower, upper cuts
-        # down to f_min_upper; an absent key means that side was never cut.
-        key = "f_max_lower" if minimum else "f_min_upper"
-        cap = edges_settings.get(key, domain_value)
-        for det, v in changed.items():
-            if minimum and v > cap:
-                raise ValueError(
-                    f"Requested {bound} for {det} ({v} Hz) exceeds the upper "
-                    f"bound f_max_lower={cap} Hz from mask_frequency_edges. The "
-                    f"model was not trained for this frequency range."
-                )
-            if not minimum and v < cap:
-                raise ValueError(
-                    f"Requested {bound} for {det} ({v} Hz) is below the lower "
-                    f"bound f_min_upper={cap} Hz from mask_frequency_edges. The "
-                    f"model was not trained for this frequency range."
+                    f"Requested {bound} for {det} ({v} Hz) is outside the "
+                    f"training envelope ({key}={cap} Hz from {source})."
                 )
 
 

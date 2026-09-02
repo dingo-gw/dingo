@@ -205,22 +205,24 @@ def update_data_config(settings: dict):
         old = tok.pop("drop_frequency_range")
         if "f_cut" in old:
             f_cut = old["f_cut"]
-            edges = {
+            frequency_range = {
                 "p_mask": f_cut.get("p_cut", 0.2),
                 "p_same_all_detectors": f_cut.get("p_same_cut_all_detectors", 0.2),
                 "p_lower_upper_both": f_cut.get("p_lower_upper_both", [0.4, 0.4, 0.2]),
             }
-            # dingo-t1 defaulted absent bounds to the domain edges; without a domain
-            # here they stay absent, and MaskFrequencyEdges then fails loudly.
+            # The bound names are deliberately swapped: mask_frequency_range uses
+            # random_strain_cropping's convention (f_min_upper = cap on f_min,
+            # f_max_lower = floor on f_max), the mirror image of dingo-t1's cut
+            # names. Absent bounds stay absent (that side was never cut).
             for new, old_key in (
-                ("f_max_lower", "f_max_lower_cut"),
-                ("f_min_upper", "f_min_upper_cut"),
+                ("f_min_upper", "f_max_lower_cut"),
+                ("f_max_lower", "f_min_upper_cut"),
             ):
                 if old_key in f_cut:
-                    edges[new] = f_cut[old_key]
-            tok["mask_frequency_edges"] = edges
+                    frequency_range[new] = f_cut[old_key]
+            tok["mask_frequency_range"] = frequency_range
         if "mask_interval" in old:
-            tok["mask_frequency_interval"] = {
+            tok["mask_frequency_notches"] = {
                 "p_per_detector": 0.2,
                 **old["mask_interval"],
             }

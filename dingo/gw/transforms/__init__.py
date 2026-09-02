@@ -10,8 +10,8 @@ from .tokenization_transforms import (
     StrainTokenization,
     MaskRandomTokens,
     MaskDetectors,
-    MaskFrequencyEdges,
-    MaskFrequencyInterval,
+    MaskFrequencyRange,
+    MaskFrequencyNotches,
     MaskTokensForFrequencyRangeUpdate,
     DETECTOR_DICT,
 )

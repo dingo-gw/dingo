@@ -100,21 +100,21 @@ def test_frequency_bound_unknown_detector_key_raises(domain):
 def test_frequency_bound_rejects_value_above_cropping_cap(domain):
     settings = _crop_data_settings(cropping_probability=0.8, f_min_upper=64.0)
     _validate_frequency_bound(50.0, "minimum_frequency", domain, settings)
-    with pytest.raises(ValueError, match="upper bound"):
+    with pytest.raises(ValueError, match="f_min_upper"):
         _validate_frequency_bound(80.0, "minimum_frequency", domain, settings)
 
 
 def test_frequency_bound_rejects_value_below_cropping_floor(domain):
     settings = _crop_data_settings(cropping_probability=0.8, f_max_lower=400.0)
     _validate_frequency_bound(500.0, "maximum_frequency", domain, settings)
-    with pytest.raises(ValueError, match="lower bound"):
+    with pytest.raises(ValueError, match="f_max_lower"):
         _validate_frequency_bound(300.0, "maximum_frequency", domain, settings)
 
 
 def test_frequency_bound_absent_cropping_cap_rejects_any_change(domain):
     """No f_min_upper in the settings means the lower side was never cropped."""
     settings = _crop_data_settings(cropping_probability=0.8, f_max_lower=400.0)
-    with pytest.raises(ValueError, match="upper bound"):
+    with pytest.raises(ValueError, match="f_min_upper"):
         _validate_frequency_bound(40.0, "minimum_frequency", domain, settings)
 
 
@@ -137,13 +137,13 @@ def test_frequency_bound_partial_dict_not_independent_raises(domain):
         _validate_frequency_bound({"H1": 40.0}, "minimum_frequency", domain, settings)
 
 
-def test_frequency_bound_edges_absent_key_rejects_change(domain):
-    """mask_frequency_edges without f_max_lower means lower cuts were never drawn."""
+def test_frequency_bound_range_absent_key_rejects_change(domain):
+    """mask_frequency_range without f_min_upper means lower cuts were never drawn."""
     settings = {
         "detectors": DETECTORS,
-        "tokenization": {"mask_frequency_edges": {"f_min_upper": 80.0}},
+        "tokenization": {"mask_frequency_range": {"f_max_lower": 80.0}},
     }
-    with pytest.raises(ValueError, match="f_max_lower"):
+    with pytest.raises(ValueError, match="f_min_upper"):
         _validate_frequency_bound(40.0, "minimum_frequency", domain, settings)
 
 
@@ -761,10 +761,10 @@ def test_detectors_setter_validates_against_model(gw_sampler):
 def _flexible_meta():
     meta = _make_metadata(["H1", "L1", "V1"])
     meta["train_settings"]["data"]["tokenization"] = {
-        "mask_frequency_edges": {
+        "mask_frequency_range": {
             "p_mask": 0.25,
-            "f_max_lower": 180.0,
-            "f_min_upper": 80.0,
+            "f_min_upper": 180.0,
+            "f_max_lower": 80.0,
             "p_same_all_detectors": 0.7,
         }
     }
@@ -790,7 +790,7 @@ def test_check_frequency_updates_unknown_detector_key_raises():
 
 
 def test_check_frequency_updates_out_of_envelope_raises():
-    with pytest.raises(ValueError, match="f_max_lower"):
+    with pytest.raises(ValueError, match="f_min_upper"):
         check_frequency_updates(_flexible_meta(), f_min={"H1": 200.0})
 
 
@@ -802,3 +802,4 @@ def test_check_frequency_updates_unchanged_value_allowed_without_flexibility():
     check_frequency_updates(meta, f_min=20.0, f_max=1024.0)
     with pytest.raises(ValueError, match="not trained with variable"):
         check_frequency_updates(meta, f_min=30.0)
+

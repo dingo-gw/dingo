@@ -102,7 +102,6 @@ class StrainTokenization:
                 self.f_max_per_token[-1] + self.num_bins_per_token * last_delta_f
             )
             self.f_max_per_token = np.append(self.f_max_per_token, f_max_pad)
-            # Integer arithmetic: float division truncates for non-dyadic delta_f.
             self.num_padded_f_bins = (
                 num_tokens_per_block * self.num_bins_per_token - num_f
             )
@@ -455,7 +454,7 @@ class MaskDetectors(object):
         return input_sample
 
 
-class MaskFrequencyEdges(object):
+class MaskFrequencyRange(object):
     """
     Randomly mask tokens at the lower and/or upper frequency edges so that the network
     learns that f_min and f_max of the frequency range can vary.
@@ -464,7 +463,7 @@ class MaskFrequencyEdges(object):
     * Decides whether to apply masking to each element of the batch based on p_mask.
     * Decides whether to treat the detectors individually or apply the same mask to all detectors.
     * Decides whether to mask the upper or lower frequency end or both (potentially per detector).
-    * Samples a boundary from [f_min, f_max_lower] and/or [f_min_upper, f_max] in UFD (potentially per detector).
+    * Samples a boundary from [f_min, f_min_upper] and/or [f_max_lower, f_max] in UFD (potentially per detector).
     * Converts frequency values to tokens and creates a token mask removing the lower and/or upper
       frequency range (potentially per detector).
     """
@@ -473,8 +472,8 @@ class MaskFrequencyEdges(object):
         self,
         domain: UniformFrequencyDomain | MultibandedFrequencyDomain,
         p_mask: float,
-        f_max_lower: float,
         f_min_upper: float,
+        f_max_lower: float,
         p_same_all_detectors: float,
         p_lower_upper_both: Optional[list] = None,
         print_output: bool = True,
@@ -486,12 +485,12 @@ class MaskFrequencyEdges(object):
             Domain corresponding to the data being transformed.
         p_mask: float
             Probability of applying a mask to each element of the batch.
-        f_max_lower: float
-            Upper boundary of the lower masking region. The lower boundary is sampled from
-            [f_min, f_max_lower] in UFD.
         f_min_upper: float
+            Upper boundary of the lower masking region. The lower boundary is sampled from
+            [f_min, f_min_upper] in UFD.
+        f_max_lower: float
             Lower boundary of the upper masking region. The upper boundary is sampled from
-            [f_min_upper, f_max] in UFD.
+            [f_max_lower, f_max] in UFD.
         p_same_all_detectors: float
             Probability of applying the same mask to all detectors.
         p_lower_upper_both: list[float]
@@ -503,10 +502,10 @@ class MaskFrequencyEdges(object):
 
         self.domain = domain
         self.p_mask = p_mask
-        self.f_max_lower = f_max_lower
         self.f_min_upper = f_min_upper
+        self.f_max_lower = f_max_lower
         self.prevent_zero_information = (
-            True if self.f_max_lower >= self.f_min_upper else False
+            True if self.f_min_upper >= self.f_max_lower else False
         )
         self.p_same_all_detectors = p_same_all_detectors
         if p_lower_upper_both is None:
@@ -518,16 +517,16 @@ class MaskFrequencyEdges(object):
             )
         if print_output:
             print(
-                f"Transform MaskFrequencyEdges activated: \n"
+                f"Transform MaskFrequencyRange activated: \n"
                 f"    - Probability of masking: {self.p_mask}\n"
-                f"    - Lower boundary sampled from [{self.domain.f_min}, {self.f_max_lower}]\n"
-                f"    - Upper boundary sampled from [{self.f_min_upper}, {self.domain.f_max}]\n"
+                f"    - Lower boundary sampled from [{self.domain.f_min}, {self.f_min_upper}]\n"
+                f"    - Upper boundary sampled from [{self.f_max_lower}, {self.domain.f_max}]\n"
                 f"    - Probability to apply the same mask on all detectors: {self.p_same_all_detectors} "
             )
             if self.prevent_zero_information:
                 print(
-                    f"\n    - Preventing zero information is activated since [{self.domain.f_min}, {self.f_max_lower}]"
-                    f"overlaps with [{self.f_min_upper}, {self.domain.f_max}] "
+                    f"\n    - Preventing zero information is activated since [{self.domain.f_min}, {self.f_min_upper}]"
+                    f"overlaps with [{self.f_max_lower}, {self.domain.f_max}] "
                 )
 
     def __call__(self, input_sample: dict) -> dict:
@@ -559,7 +558,7 @@ class MaskFrequencyEdges(object):
         # - Decide whether to apply masking for each sample
         # - Decide whether to treat the detectors individually or apply the same mask to all detectors
         # - Decide whether to mask upper or lower range or both (potentially for each detector)
-        # - Sample boundary from [f_min, f_max_lower] and/or [f_min_upper, f_max]
+        # - Sample boundary from [f_min, f_min_upper] and/or [f_max_lower, f_max]
         #   in uniform frequency domain (potentially for each detector)
         # - Convert frequency values to token mask
 
@@ -613,7 +612,7 @@ class MaskFrequencyEdges(object):
                 ~same_cut_all_detectors[..., None] * ones_vec,
             )
         )
-        # Sample boundary from [f_min, f_max_lower] and/or [f_min_upper, f_max] in UFD for each detector
+        # Sample boundary from [f_min, f_min_upper] and/or [f_max_lower, f_max] in UFD for each detector
         if isinstance(self.domain, UniformFrequencyDomain):
             f_values_base_domain = self.domain.sample_frequencies[
                 self.domain.frequency_mask
@@ -627,7 +626,7 @@ class MaskFrequencyEdges(object):
         f_lower_separate = np.where(
             mask_lower_separate_combined,
             np.random.choice(
-                f_values_base_domain[f_values_base_domain <= self.f_max_lower],
+                f_values_base_domain[f_values_base_domain <= self.f_min_upper],
                 replace=True,
                 size=batch_block_size,
             ),
@@ -636,7 +635,7 @@ class MaskFrequencyEdges(object):
         f_upper_separate = np.where(
             mask_upper_separate_combined,
             np.random.choice(
-                f_values_base_domain[f_values_base_domain >= self.f_min_upper],
+                f_values_base_domain[f_values_base_domain >= self.f_max_lower],
                 replace=True,
                 size=batch_block_size,
             ),
@@ -709,11 +708,11 @@ class MaskFrequencyEdges(object):
         mask_upper_combined = np.logical_and.reduce(
             (mask_upper_same, apply_cut, same_cut_all_detectors)
         )
-        # Sample boundary from [f_min, f_max_lower] and/or [f_min_upper, f_max] in UFD
+        # Sample boundary from [f_min, f_min_upper] and/or [f_max_lower, f_max] in UFD
         f_lower_same = np.where(
             mask_lower_combined,
             np.random.choice(
-                f_values_base_domain[f_values_base_domain <= self.f_max_lower],
+                f_values_base_domain[f_values_base_domain <= self.f_min_upper],
                 replace=True,
                 size=batch_size,
             ),
@@ -722,7 +721,7 @@ class MaskFrequencyEdges(object):
         f_upper_same = np.where(
             mask_upper_combined,
             np.random.choice(
-                f_values_base_domain[f_values_base_domain >= self.f_min_upper],
+                f_values_base_domain[f_values_base_domain >= self.f_max_lower],
                 replace=True,
                 size=batch_size,
             ),
@@ -788,12 +787,12 @@ class MaskFrequencyEdges(object):
         return input_sample
 
 
-class MaskFrequencyInterval(object):
+class MaskFrequencyNotches(object):
     """
-    Randomly mask tokens corresponding to a contiguous frequency interval per detector.
+    Randomly mask tokens corresponding to a contiguous frequency notch per detector.
 
     This transform does the following things:
-    * Decides whether to mask a frequency interval per detector based on p_per_detector.
+    * Decides whether to mask a frequency notch per detector based on p_per_detector.
     * Samples f_lower from [f_min, f_max - max_width].
     * Samples f_upper from [f_lower, f_lower + max_width].
     * Converts f_lower and f_upper to tokens and creates a token mask removing all tokens in [f_lower, f_upper].
@@ -803,9 +802,9 @@ class MaskFrequencyInterval(object):
         self,
         domain: UniformFrequencyDomain | MultibandedFrequencyDomain,
         p_per_detector: float,
-        f_min: float,
-        f_max: float,
         max_width: float,
+        f_min: Optional[float] = None,
+        f_max: Optional[float] = None,
         print_output: bool = True,
     ):
         """
@@ -814,31 +813,30 @@ class MaskFrequencyInterval(object):
         domain: UniformFrequencyDomain | MultibandedFrequencyDomain
             Domain corresponding to the data being transformed.
         p_per_detector: float
-            Probability of masking a frequency interval independently per detector.
-        f_min: float
-            Minimal frequency value of the interval within which tokens can be masked.
-        f_max: float
-            Maximal frequency value of the interval within which tokens can be masked.
+            Probability of masking a frequency notch independently per detector.
         max_width: float
-            Maximal width of the masked frequency interval.
+            Maximal width of the masked frequency notch.
+        f_min: Optional[float]
+            Minimal frequency value of the notch within which tokens can be masked.
+            Defaults to the domain f_min; explicit values are clamped to the domain.
+        f_max: Optional[float]
+            Maximal frequency value of the notch within which tokens can be masked.
+            Defaults to the domain f_max; explicit values are clamped to the domain.
         print_output: bool
             Whether to write print statements to the console.
         """
         self.domain = domain
         self.p_per_detector = p_per_detector
-        self.interval_f_min = f_min if domain.f_min < f_min else domain.f_min
-        self.interval_f_max = f_max if domain.f_max > f_max else domain.f_max
-        interval_width = self.interval_f_max - self.interval_f_min
-        self.interval_max_width = (
-            max_width if max_width < interval_width else interval_width
-        )
+        self.notch_f_min = domain.f_min if f_min is None else max(f_min, domain.f_min)
+        self.notch_f_max = domain.f_max if f_max is None else min(f_max, domain.f_max)
+        self.notch_max_width = min(max_width, self.notch_f_max - self.notch_f_min)
         if print_output:
             print(
-                f"Transform MaskFrequencyInterval activated:\n"
-                f"    - Probability of masking an interval per detector: {self.p_per_detector}\n"
-                f"    - Interval range sampled from [{self.interval_f_min}, {self.interval_f_max}]\n"
-                f"    - Maximal width of interval: {self.interval_max_width}, but the effective interval can be larger "
-                f"if {self.interval_f_min} or {self.interval_f_max} fall in the middle of a token."
+                f"Transform MaskFrequencyNotches activated:\n"
+                f"    - Probability of masking an notch per detector: {self.p_per_detector}\n"
+                f"    - Notch range sampled from [{self.notch_f_min}, {self.notch_f_max}]\n"
+                f"    - Maximal width of notch: {self.notch_max_width}, but the effective notch can be larger "
+                f"if {self.notch_f_min} or {self.notch_f_max} fall in the middle of a token."
             )
 
     def __call__(self, input_sample: dict) -> dict:
@@ -865,7 +863,7 @@ class MaskFrequencyInterval(object):
         num_detectors = len(np.unique(detector_indices))
         num_tokens_per_detector = num_tokens // num_detectors
 
-        # Mask frequency interval per detector:
+        # Mask frequency notch per detector:
         # - Decide whether to apply a mask for each detector
         # - Sample f_lower and f_upper from the base domain frequencies
         # - Mask all tokens whose frequency range overlaps [f_lower, f_upper]
@@ -875,8 +873,8 @@ class MaskFrequencyInterval(object):
             if detector_indices.shape[:-1] != ()
             else [1, num_detectors]
         )
-        # Decide whether to mask a frequency interval for each detector
-        mask_interval = np.random.choice(
+        # Decide whether to mask a frequency notch for each detector
+        apply_notch = np.random.choice(
             [True, False],
             p=[self.p_per_detector, 1 - self.p_per_detector],
             size=batch_block_size,
@@ -893,27 +891,27 @@ class MaskFrequencyInterval(object):
             ]
         else:
             raise ValueError(f"Unknown domain type: {self.domain}")
-        # f_lower from [interval_f_min, interval_f_max - interval_max_width]
+        # f_lower from [notch_f_min, notch_f_max - notch_max_width]
         mask_f_vals_lower = np.logical_and(
-            self.interval_f_min <= f_values_base_domain,
-            f_values_base_domain <= self.interval_f_max - self.interval_max_width,
+            self.notch_f_min <= f_values_base_domain,
+            f_values_base_domain <= self.notch_f_max - self.notch_max_width,
         )
         possible_f_vals_lower = f_values_base_domain[mask_f_vals_lower]
         f_lower_full = np.random.choice(
             possible_f_vals_lower, replace=True, size=batch_block_size
         )
-        f_lower = np.where(mask_interval, f_lower_full, np.inf)
+        f_lower = np.where(apply_notch, f_lower_full, np.inf)
 
-        # f_upper from [f_lower, f_lower + interval_max_width]: draw a number of
+        # f_upper from [f_lower, f_lower + notch_max_width]: draw a number of
         # grid steps rather than collecting per-row candidate arrays, whose counts
         # differ by one for non-dyadic delta_f (float rounding) and cannot be stacked.
         delta_f = f_values_base_domain[1] - f_values_base_domain[0]
-        n_steps = int(np.floor(self.interval_max_width / delta_f + 1e-9))
+        n_steps = int(np.floor(self.notch_max_width / delta_f + 1e-9))
         f_upper_no_mask = (
             f_lower_full
             + np.random.randint(0, n_steps + 1, size=batch_block_size) * delta_f
         )
-        f_upper = np.where(mask_interval, f_upper_no_mask, -1.0)
+        f_upper = np.where(apply_notch, f_upper_no_mask, -1.0)
 
         # Construct mask: f_lower <= f_max_per_token AND f_upper >= f_min_per_token
         f_mins = input_sample["position"][..., 0]
@@ -958,7 +956,7 @@ class MaskTokensForFrequencyRangeUpdate(object):
         detectors: list[str],
         minimum_frequency: Optional[float | dict] = None,
         maximum_frequency: Optional[float | dict] = None,
-        mask_frequency_edges_settings: Optional[dict] = None,
+        mask_frequency_range_settings: Optional[dict] = None,
         psd_notch_dict: Optional[dict] = None,
         print_output: bool = True,
     ):
@@ -975,9 +973,9 @@ class MaskTokensForFrequencyRangeUpdate(object):
         maximum_frequency: float | dict | None
             New upper frequency bound. Float applies to all detectors; dict specifies
             per-detector values. Detectors missing from the dict use domain.f_max.
-        mask_frequency_edges_settings: dict | None
-            Training settings for MaskFrequencyEdges (e.g. ``p_mask``, ``f_max_lower``,
-            ``f_min_upper``). When provided, the first call to :meth:`__call__` checks
+        mask_frequency_range_settings: dict | None
+            Training settings for MaskFrequencyRange (e.g. ``p_mask``, ``f_min_upper``,
+            ``f_max_lower``). When provided, the first call to :meth:`__call__` checks
             whether the inference-time masking is out of distribution relative to training
             and prints a warning when it is.
         psd_notch_dict: dict | None
@@ -999,7 +997,7 @@ class MaskTokensForFrequencyRangeUpdate(object):
             detectors=detectors,
         )
         self.psd_notch_dict = psd_notch_dict
-        self._mask_frequency_edges_settings = mask_frequency_edges_settings
+        self._mask_frequency_range_settings = mask_frequency_range_settings
         self._distribution_checked = False
         self.print_output = print_output
         if print_output:
@@ -1130,10 +1128,10 @@ class MaskTokensForFrequencyRangeUpdate(object):
 
         Called once on the first forward pass so the actual token structure is available.
         Counts how many tokens are masked per detector and compares to the maximum the
-        model could have seen during training (derived from ``f_max_lower`` / ``f_min_upper``
-        in mask_frequency_edges_settings).
+        model could have seen during training (derived from ``f_min_upper`` / ``f_max_lower``
+        in mask_frequency_range_settings).
         """
-        if self._mask_frequency_edges_settings is None:
+        if self._mask_frequency_range_settings is None:
             return
 
         # Reduce to a single (unbatched) example for reporting.
@@ -1153,10 +1151,10 @@ class MaskTokensForFrequencyRangeUpdate(object):
         n_newly_masked = int(np.sum(first_new & ~first_existing))
 
         # Maximum tokens maskable during training from each side.
-        f_max_lower = self._mask_frequency_edges_settings.get("f_max_lower", np.inf)
-        f_min_upper = self._mask_frequency_edges_settings.get("f_min_upper", -np.inf)
-        n_train_max_fmin = int(np.sum(f_min_per_token < f_max_lower))
-        n_train_max_fmax = int(np.sum(f_max_per_token > f_min_upper))
+        f_min_upper = self._mask_frequency_range_settings.get("f_min_upper", np.inf)
+        f_max_lower = self._mask_frequency_range_settings.get("f_max_lower", -np.inf)
+        n_train_max_fmin = int(np.sum(f_min_per_token < f_min_upper))
+        n_train_max_fmax = int(np.sum(f_max_per_token > f_max_lower))
         n_train_max_per_detector = n_train_max_fmin + n_train_max_fmax
         n_train_max_total = n_train_max_per_detector * num_detectors
 

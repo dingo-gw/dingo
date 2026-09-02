@@ -105,7 +105,7 @@ maximum-frequency = {H1: 1024, L1: 1024, V1: 512}
 ```
 
 Detectors absent from the dict fall back to the model's training range.  The
-model must have been trained with `mask_frequency_edges` augmentation for a
+model must have been trained with `mask_frequency_range` augmentation for a
 non-default range to be in-distribution; an out-of-distribution warning is
 printed otherwise.
 

@@ -25,8 +25,8 @@ from dingo.gw.transforms import (
     StrainTokenization,
     MaskRandomTokens,
     MaskDetectors,
-    MaskFrequencyEdges,
-    MaskFrequencyInterval,
+    MaskFrequencyRange,
+    MaskFrequencyNotches,
 )
 from dingo.gw.noise.asd_dataset import ASDDataset
 from dingo.gw.prior import default_inference_parameters
@@ -195,13 +195,13 @@ def set_train_transforms(wfd, data_settings, asd_dataset_path, omit_transforms=N
             transforms.append(MaskRandomTokens(**tok["mask_random_tokens"]))
         if "mask_detectors" in tok:
             transforms.append(MaskDetectors(**tok["mask_detectors"]))
-        if "mask_frequency_edges" in tok:
+        if "mask_frequency_range" in tok:
             transforms.append(
-                MaskFrequencyEdges(domain=domain, **tok["mask_frequency_edges"])
+                MaskFrequencyRange(domain=domain, **tok["mask_frequency_range"])
             )
-        if "mask_frequency_interval" in tok:
+        if "mask_frequency_notches" in tok:
             transforms.append(
-                MaskFrequencyInterval(domain=domain, **tok["mask_frequency_interval"])
+                MaskFrequencyNotches(domain=domain, **tok["mask_frequency_notches"])
             )
 
     selected_keys = ["inference_parameters", "waveform"]

@@ -195,14 +195,14 @@ DINGO_T1_TOKENIZATION_CONVERTED = {
         "p_mask_012_detectors": [0.6, 0.3, 0.1],
         "p_mask_hlv": {"H1": 0.3, "L1": 0.3, "V1": 0.4},
     },
-    "mask_frequency_edges": {
+    "mask_frequency_range": {
         "p_mask": 0.25,
         "p_same_all_detectors": 0.7,
         "p_lower_upper_both": [0.1, 0.7, 0.2],
-        "f_max_lower": 180.0,
-        "f_min_upper": 80.0,
+        "f_min_upper": 180.0,
+        "f_max_lower": 80.0,
     },
-    "mask_frequency_interval": {
+    "mask_frequency_notches": {
         "p_per_detector": 0.1,
         "f_min": 20.0,
         "f_max": 1800.0,
@@ -241,12 +241,12 @@ def test_update_data_config_fills_dingo_t1_constant_defaults():
         update_data_config({"train_settings": {"data": data_settings}})
     assert data_settings["tokenization"] == {
         "num_tokens_per_block": 40,
-        "mask_frequency_edges": {
+        "mask_frequency_range": {
             "p_mask": 0.2,
             "p_same_all_detectors": 0.2,
             "p_lower_upper_both": [0.4, 0.4, 0.2],
         },
-        "mask_frequency_interval": {"p_per_detector": 0.2, "max_width": 5.0},
+        "mask_frequency_notches": {"p_per_detector": 0.2, "max_width": 5.0},
         "mask_random_tokens": {"p_mask": 0.4, "max_num_tokens": 40},
     }
 

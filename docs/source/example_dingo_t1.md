@@ -76,11 +76,11 @@ The key difference from the NPE model is the `tokenization` block inside
 ```yaml
 tokenization:
   token_size: 16              # number of frequency bins per token
-  mask_frequency_edges:       # enables inference-time f_min / f_max updates
+  mask_frequency_range:       # enables inference-time f_min / f_max updates
     p_mask: 0.2
-    f_max_lower: 100.0        # tokens below this can be masked from the bottom
-    f_min_upper: 800.0        # tokens above this can be masked from the top
-  mask_frequency_interval:    # enables inference-time interior masking (notching)
+    f_min_upper: 100.0        # tokens below this can be masked from the bottom
+    f_max_lower: 800.0        # tokens above this can be masked from the top
+  mask_frequency_notches:    # enables inference-time interior masking (notching)
     p_per_detector: 0.3
     f_min: 100.0
     f_max: 800.0
@@ -91,17 +91,17 @@ tokenization:
     p_mask_hlv: {H1: 0.5, L1: 0.5, V1: 0.5}
 ```
 
-`mask_frequency_edges` trains the network to handle a variable lower and upper
-frequency cutoff per detector.  `mask_frequency_interval` trains it to handle
+`mask_frequency_range` trains the network to handle a variable lower and upper
+frequency cutoff per detector.  `mask_frequency_notches` trains it to handle
 masked interior intervals (used for PSD notching at inference time).
 `mask_detectors` trains it to cope with missing detectors.  All three
 augmentations are optional and independent of each other.
 
 ```{important}
-The ranges set by `f_max_lower` and `f_min_upper` in `mask_frequency_edges` define
+The ranges set by `f_min_upper` and `f_max_lower` in `mask_frequency_range` define
 the *in-distribution* envelope for inference-time frequency updates.  Requesting a
 frequency range outside this envelope will raise an out-of-distribution warning.
-PSD notching via `mask_frequency_interval` does not produce a warning because the
+PSD notching via `mask_frequency_notches` does not produce a warning because the
 masking is already encoded in the ASD.
 ```
 
@@ -132,9 +132,9 @@ minimum-frequency = {H1: 30, L1: 30, V1: 40}
 maximum-frequency = {H1: 1024, L1: 1024, V1: 512}
 ```
 
-The network must have been trained with `mask_frequency_edges` for a non-default
+The network must have been trained with `mask_frequency_range` for a non-default
 value to be in-distribution.  If the requested range falls outside the training
-envelope (set by `f_max_lower` / `f_min_upper`) a warning is printed but
+envelope (set by `f_min_upper` / `f_max_lower`) a warning is printed but
 inference proceeds.
 
 

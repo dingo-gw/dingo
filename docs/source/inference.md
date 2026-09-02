@@ -25,7 +25,7 @@ Restraining is not required when setting these properties:
 
 `minimum_frequency` / `maximum_frequency`
 : Restrict the frequency band per detector.  Accepts a single float (all detectors) or a `{det: value}` dict.  
-The model must have been trained with `mask_frequency_edges` or sufficient `mask_random_tokens` augmentation for a non-default range to be in-distribution.
+The model must have been trained with `mask_frequency_range` or sufficient `mask_random_tokens` augmentation for a non-default range to be in-distribution.
 
 `psd_notch_dict`
 : Mask tokens that overlap one or more interior frequency intervals.  Accepts a `{det: [f_lo, f_hi]}` dict (single interval) 
