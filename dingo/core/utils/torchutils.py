@@ -129,6 +129,32 @@ def replace_BatchNorm_with_SyncBatchNorm(network: nn.Module) -> nn.Module:
     return nn.SyncBatchNorm.convert_sync_batchnorm(network)
 
 
+def get_ddp_module(network: nn.Module) -> Optional[DDP]:
+    """Return the DDP wrapper inside *network* (looking through a ``torch.compile``
+    wrapper), or ``None`` if the network is not DDP-wrapped."""
+    while True:
+        if isinstance(network, DDP):
+            return network
+        if hasattr(network, "_orig_mod"):  # torch.compile OptimizedModule
+            network = network._orig_mod
+        else:
+            return None
+
+
+def unwrap_network(network: nn.Module) -> nn.Module:
+    """Strip ``torch.compile`` and DDP wrappers, returning the bare network.
+
+    Used to save checkpoints whose state-dict keys carry no wrapper prefixes, so
+    they load on any number of GPUs with or without compilation."""
+    while True:
+        if isinstance(network, DDP):
+            network = network.module
+        elif hasattr(network, "_orig_mod"):  # torch.compile OptimizedModule
+            network = network._orig_mod
+        else:
+            return network
+
+
 def print_number_of_model_parameters(network: nn.Module) -> None:
     """
     Print the number of fixed and learnable parameters of *network*.

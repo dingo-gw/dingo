@@ -16,6 +16,7 @@ from threadpoolctl import threadpool_limits
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader, DistributedSampler
 
+from dingo.core.nn.compile_utils import compile_network
 from dingo.core.posterior_models.base_model import BasePosteriorModel
 from dingo.core.posterior_models.build_model import (
     autocomplete_model_kwargs,
@@ -535,6 +536,11 @@ def run_training(
     else:
         pm, wfd = prepare_training_resume(ckpt_file, local_settings, train_dir)
 
+    if local_settings.get("torch_compile", False):
+        pm.network = compile_network(
+            pm.network, cache_dir=local_settings.get("torch_compile_cache_dir")
+        )
+
     with threadpool_limits(limits=1, user_api="blas"):
         complete, resume_flag = train_stages(
             pm=pm,
@@ -651,6 +657,15 @@ def run_training_ddp(
                 )
             pm.network = replace_BatchNorm_with_SyncBatchNorm(pm.network)
         pm.network = DDP(pm.network, device_ids=[rank])
+
+        # Compile after the DDP wrap so the gradient all-reduce keeps overlapping
+        # with the backward pass (torch.compile splits the graph at DDP buckets).
+        if local_settings.get("torch_compile", False):
+            pm.network = compile_network(
+                pm.network,
+                rank=rank,
+                cache_dir=local_settings.get("torch_compile_cache_dir"),
+            )
 
         with threadpool_limits(limits=1, user_api="blas"):
             complete, resume_flag = train_stages(

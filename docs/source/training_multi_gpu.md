@@ -146,6 +146,50 @@ If a network with `BatchNorm` layers is trained on multiple GPUs, they are conve
 `LayerNorm` is only available for `base_transform_type: rq-coupling`. For `rq-autoregressive` transforms
 it would break the causal structure of the MADE layers, so `BatchNorm` or `null` must be used there.
 
+### Compiling the network (`torch_compile`)
+
+The neural spline flow launches tens of thousands of small CUDA kernels per step, so on a
+modern GPU the step is bound by kernel-launch overhead rather than by arithmetic (GPU
+utilization plateaus well below 100% even at large batch sizes). Setting `torch_compile: true`
+in the `local` section wraps the network with
+[`torch.compile`](https://pytorch.org/docs/stable/generated/torch.compile.html), which fuses
+these kernels. The gain depends on how launch-bound the network is: for the `npe_model` example
+network (30 flow steps, `hidden_dim` 1024) trained on a 10M-waveform dataset at a per-GPU batch
+size of 4096 (A100), the training step is 1.22× faster on one GPU and 1.14× faster on four GPUs;
+with `hidden_dim` 512 it is 1.4× / 1.35×. Peak GPU memory drops by about 20%. The speedup is
+independent of `num_gpus` and larger at smaller per-GPU batch sizes.
+
+```yaml
+local:
+  torch_compile: true                    # default: false
+  torch_compile_cache_dir: /scratch/tmp  # optional; see note below
+```
+
+Notes:
+
+- Compilation requires a `glasflow` whose rational-quadratic spline is written with static
+  shapes (the released version uses data-dependent indexing, which breaks the compiled graph
+  and makes `torch.compile` a net slowdown). Until the rewrite is merged upstream, install
+  ```
+  pip install git+https://github.com/nihargupte-ph/glasflow@compile-friendly-rqs
+  ```
+  Dingo raises an error if `torch_compile: true` is set without it. The rewrite is numerically
+  identical, so checkpoints are interchangeable.
+- Compilation is slow: 4–12 minutes per graph for a production-size network, and the network
+  is compiled once per distinct batch shape and mode. In practice that is four compilations in
+  the first epoch (the training graph, the smaller last batch of the epoch, and the same two
+  for the test epoch), i.e. 10–40 minutes of overhead per run, plus a recompilation at every
+  stage boundary that changes which parameters are trainable. The compiled steps that follow
+  are the fast ones, so `torch_compile` pays off for trainings of tens of epochs or more, not
+  for short runs.
+- Under DDP each rank compiles into its own on-disk Inductor/Triton cache. That cache must live
+  on **node-local** disk. If the system temp directory is a shared network filesystem, set
+  `torch_compile_cache_dir` to a node-local path (e.g. the HTCondor scratch directory);
+  otherwise a just-compiled kernel can be unloadable on another rank and the run hangs on an
+  NCCL timeout.
+- Once the network step is faster, the dataloader can become the bottleneck: watch
+  `Time Dataloader` in the log and raise `num_workers` if needed.
+
 ### Freezing layers
 
 It is currently not possible to set `freeze_rb_layer: True` in DDP. The reason is that when starting the separate 

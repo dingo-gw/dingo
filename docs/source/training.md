@@ -101,6 +101,7 @@ local:
                 # freeze_rb_layer: False in all stages. When using
                 # dingo_train_condor, request_gpus is set automatically.
 # ddp_port: 12355  # Rendezvous port for DDP; change when running several jobs on one node.
+# torch_compile: False  # Fuse the network kernels with torch.compile; see the multi-GPU guide.
 #  wandb:
 #    project: dingo
 #    group: my_project
