@@ -195,6 +195,8 @@ class GWSamplerMixin(object):
         metadata["minimum_frequency"] = self.minimum_frequency
         metadata["maximum_frequency"] = self.maximum_frequency
         metadata["detectors"] = self.detectors
+        if self.psd_notch_dict is not None:
+            metadata["psd_notch_dict"] = self.psd_notch_dict
         return metadata
 
     @event_metadata.setter
@@ -209,6 +211,8 @@ class GWSamplerMixin(object):
                 self.minimum_frequency = value.pop("minimum_frequency")
             if "maximum_frequency" in value:
                 self.maximum_frequency = value.pop("maximum_frequency")
+            if "psd_notch_dict" in value:
+                self.psd_notch_dict = value.pop("psd_notch_dict")
         self._event_metadata = value
 
     def _build_domain(self: Sampler):

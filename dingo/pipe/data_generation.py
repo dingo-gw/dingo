@@ -23,7 +23,7 @@ from dingo.core.posterior_models.build_model import build_model_from_kwargs
 from dingo.gw.data.event_dataset import EventDataset
 from dingo.gw.domains import UniformFrequencyDomain, build_domain_from_model_metadata
 from dingo.gw.injection import Injection
-from dingo.gw.gwutils import parse_psd_notch_dict
+from dingo.gw.gwutils import detect_asd_notches, parse_psd_notch_dict
 from dingo.gw.noise.asd_dataset import HIGH_ASD_VALUE
 from dingo.pipe.parser import create_parser
 
@@ -419,6 +419,14 @@ class DataGenerationInput(BilbyDataGenerationInput):
             data["waveform"][ifo.name] = strain
             data["asds"][ifo.name] = asd
 
+        # Detect notches from the final stored ASDs (covers both the ini flag,
+        # already applied above, and ASDs notched upstream, e.g. by Asimov), and
+        # record them so that sampling reads them from the event file. The key is
+        # omitted when there are none, keeping metadata comparisons clean.
+        detected_notches = detect_asd_notches(data["asds"], domain)
+        if detected_notches is not None:
+            logger.info(f"PSD notches recorded in event metadata: {detected_notches}")
+
         # Data conditioning settings.
         settings = {
             "time_event": self.trigger_time,
@@ -431,6 +439,8 @@ class DataGenerationInput(BilbyDataGenerationInput):
             "minimum_frequency": self.minimum_frequency_dict,
             "maximum_frequency": self.maximum_frequency_dict,
         }
+        if detected_notches is not None:
+            settings["psd_notch_dict"] = detected_notches
 
         for k in [
             "psd_duration",

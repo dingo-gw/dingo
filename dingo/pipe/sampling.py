@@ -14,7 +14,6 @@ from bilby_pipe.utils import (
 
 from dingo.core.posterior_models.build_model import build_model_from_kwargs
 from dingo.gw.data.event_dataset import EventDataset
-from dingo.gw.gwutils import detect_asd_notches, parse_psd_notch_dict
 from dingo.gw.inference.gw_samplers import GWSampler, GWSamplerGNPE
 from dingo.gw.inference.inference_utils import prepare_log_prob
 from dingo.pipe.default_settings import DENSITY_RECOVERY_SETTINGS
@@ -64,16 +63,12 @@ class SamplingInput(Input):
         # self.sampler_kwargs = args.sampler_kwargs
         # self.sampling_seed = args.sampling_seed
 
-        # Frequencies
+        # Frequencies and notches travel in the event file settings and reach the
+        # sampler via event_metadata. The commented lines mirror bilby_pipe's
+        # input class, from which this one was adapted.
         # self.sampling_frequency = args.sampling_frequency
-        self.minimum_frequency = args.minimum_frequency
-        self.maximum_frequency = args.maximum_frequency
-        if args.psd_notch_dict is not None:
-            self.psd_notch_dict = parse_psd_notch_dict(
-                convert_string_to_dict(args.psd_notch_dict)
-            )
-        else:
-            self.psd_notch_dict = None
+        # self.minimum_frequency = args.minimum_frequency
+        # self.maximum_frequency = args.maximum_frequency
         # self.reference_frequency = args.reference_frequency
 
         # # Waveform, source model and likelihood
@@ -144,22 +139,6 @@ class SamplingInput(Input):
 
         self.dingo_sampler.context = self.context
         self.dingo_sampler.event_metadata = self.event_metadata
-        if self.minimum_frequency is not None:
-            self.dingo_sampler.minimum_frequency = self.minimum_frequency_dict
-        if self.maximum_frequency is not None:
-            self.dingo_sampler.maximum_frequency = self.maximum_frequency_dict
-
-        # PSD notch masking: explicit ini flag takes priority; otherwise auto-detect
-        # from the stored ASD (covers both the standard and Asimov paths).
-        if self.psd_notch_dict is not None:
-            psd_notch = self.psd_notch_dict
-        else:
-            psd_notch = detect_asd_notches(
-                self.context["asds"], self.dingo_sampler.domain
-            )
-        if psd_notch is not None:
-            logger.info(f"PSD notch detected/configured: {psd_notch}")
-            self.dingo_sampler.psd_notch_dict = psd_notch
 
     @property
     def density_recovery_settings(self):

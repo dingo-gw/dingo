@@ -803,3 +803,15 @@ def test_check_frequency_updates_unchanged_value_allowed_without_flexibility():
     with pytest.raises(ValueError, match="not trained with variable"):
         check_frequency_updates(meta, f_min=30.0)
 
+
+def test_event_metadata_round_trips_psd_notch_dict(gw_sampler):
+    gw_sampler.event_metadata = {
+        "time_event": 0.0,
+        "psd_notch_dict": {"H1": [[60.0, 61.0]]},
+    }
+    assert gw_sampler.event_metadata["psd_notch_dict"] == {"H1": [[60.0, 61.0]]}
+
+
+def test_event_metadata_omits_psd_notch_dict_when_absent(gw_sampler):
+    gw_sampler.event_metadata = {"time_event": 0.0}
+    assert "psd_notch_dict" not in gw_sampler.event_metadata
