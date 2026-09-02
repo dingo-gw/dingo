@@ -106,13 +106,13 @@ maximum-frequency = {H1: 1024, L1: 1024, V1: 512}
 
 Detectors absent from the dict fall back to the model's training range.  The
 model must have been trained with `mask_frequency_range` augmentation for a
-non-default range to be in-distribution; an out-of-distribution warning is
-printed otherwise.
+non-default range to be in-distribution; otherwise an error is raised.
 
+(psd-notching)=
 ### PSD notching
 
 For transformer-based models, specific frequency intervals can be suppressed
-(notched) to exclude spectral artefacts such as power-line harmonics.  Two
+(notched) to exclude spectral artifacts such as power-line harmonics.  Two
 equivalent paths produce the same result:
 
 **Standard path** — set `psd-notch-dict` in the ini file:
@@ -123,14 +123,15 @@ psd-notch-dict = {H1: [[59.0, 61.0], [119.0, 121.0]], L1: [59.0, 61.0]}
 ```
 
 dingo_pipe sets the ASD to `HIGH_ASD_VALUE = 1` in the specified bins during
-data generation and saves the modified ASD to the event HDF5.  At sampling
-time the notched regions are auto-detected from the stored ASD, and the
-overlapping tokens are masked before the network forward pass.
+data generation, saves the modified ASD to the event HDF5, and records the
+notched intervals in the event metadata.  At sampling time the tokens
+overlapping these intervals are masked before the network forward pass.
 
-**Asimov / pre-notched path** — leave `psd-notch-dict` commented out.  If the
-ASD has already been set to 1 in the notch regions by an external tool (e.g.
-the Asimov pipeline) before dingo_pipe runs, the notched regions are
-auto-detected automatically.  No ini flag is needed.
+**Pre-notched path** — leave `psd-notch-dict` commented out.  If the ASD has
+already been set to 1 in the notch regions before dingo_pipe runs, the notched
+intervals are detected from the stored ASD at the end of data generation and
+recorded in the event metadata.  (The Asimov integration passes its notch dict
+through `psd-notch-dict`.)
 
 In both paths the importance-sampling likelihood contribution from notched bins
 is negligible because ASD = 1 ≫ real noise level (~10⁻²³ 1/√Hz), so the

@@ -18,22 +18,6 @@ which inherits from it.
 
 This is instantiated based on a `PosteriorModel`. To draw samples, the `context` property must first be set to the data to be analyzed. For gravitational waves this should be a dictionary with the following keys:
 
-### Inference-time frequency options (transformer models)
-
-For transformer-based (Dingo-T1) models, several properties of `GWSampler` can be set *after* construction.
-Restraining is not required when setting these properties:
-
-`minimum_frequency` / `maximum_frequency`
-: Restrict the frequency band per detector.  Accepts a single float (all detectors) or a `{det: value}` dict.  
-The model must have been trained with `mask_frequency_range` or sufficient `mask_random_tokens` augmentation for a non-default range to be in-distribution.
-
-`psd_notch_dict`
-: Mask tokens that overlap one or more interior frequency intervals.  Accepts a `{det: [f_lo, f_hi]}` dict (single interval) 
-or `{det: [[f_lo1, f_hi1], ...]}` (multiple intervals). Either, this argument can be included in the `.ini` file 
-or the `psd_notch_dict` is detected automatically if a modified ASD dataset is specified where certain ASD values have been set to 1 (see [PSD notching](dingo_pipe.md#psd-notching) for details).
-
-These properties call `_initialize_transforms()` internally, so the transform chain is rebuilt immediately on assignment.  They can be set in any order and are independent of each other.
-
 waveform
 : (unwhitened) strain data in each detector
 
@@ -46,6 +30,23 @@ parameters (optional)
 Once this is set, the `run_sampler()` method draws the requested samples from the posterior conditioned on the context. It applies some post-processing (to de-standardize the data, and to correct for the rotation of the Earth between the network reference time and the event time), and then stores the result as a DataFrame in `GWSampler.samples`. The DataFrame contains columns for each inference parameter, as well as the log probability of the sample under the posterior model.
 
 The `GWSampler.metadata` attribute contains all settings that went into producing the samples, including training datasets, network training settings, event metadata (for real events) and possible injection parameters. Finally, the `to_samples_dataset()` method returns a `SamplesDataset` containing all results, including the samples, settings, and context. This can be saved easily as HDF5.
+
+
+### Inference-time frequency options (transformer models)
+
+For transformer-based (Dingo-T1) models, several properties of `GWSampler` can be set *after* construction.
+Retraining is not required when setting these properties:
+
+`minimum_frequency` / `maximum_frequency`
+: Restrict the frequency band per detector.  Accepts a single float (all detectors) or a `{det: value}` dict.  
+The model must have been trained with `mask_frequency_range` or sufficient `mask_random_tokens` augmentation for a non-default range to be in-distribution.
+
+`psd_notch_dict`
+: Mask tokens that overlap one or more interior frequency intervals.  Accepts a `{det: [f_lo, f_hi]}` dict (single interval) 
+or `{det: [[f_lo1, f_hi1], ...]}` (multiple intervals). Either, this argument can be included in the `.ini` file 
+or the `psd_notch_dict` is detected automatically if a modified ASD dataset is specified where certain ASD values have been set to 1 (see [PSD notching](dingo_pipe.md#psd-notching) for details).
+
+Assigning any of these properties rebuilds the transform chain immediately.  They can be set in any order and are independent of each other.
 
 
 ## Injections
