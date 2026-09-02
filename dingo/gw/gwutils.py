@@ -207,6 +207,9 @@ def detect_asd_notches(asd_dict: dict, domain) -> dict | None:
     """
     from dingo.gw.noise.asd_dataset import HIGH_ASD_VALUE
 
+    # Stored ASDs live on the base (uniform) domain; for a multibanded domain the
+    # indices below must therefore refer to the base grid.
+    domain = getattr(domain, "base_domain", domain)
     sample_freqs = domain.sample_frequencies  # length max_idx + 1
     min_idx = domain.min_idx
     notch_dict = {}
@@ -232,7 +235,11 @@ def detect_asd_notches(asd_dict: dict, domain) -> dict | None:
         intervals = []
         for s, e in zip(starts, ends):
             if s == 0:
-                continue  # skip edge-padding region at f_min
+                # A high run starting exactly at f_min is edge padding (ASDs built
+                # from an ASDDataset carry HIGH_ASD_VALUE below f_min, which can
+                # touch the boundary), not a notch. A genuine notch at f_min is
+                # indistinguishable from this; raise minimum_frequency instead.
+                continue
             f_lo = float(valid_freqs[s])
             f_hi = float(valid_freqs[e - 1])
             intervals.append([f_lo, f_hi])

@@ -1245,3 +1245,61 @@ def test_dingo_t1_settings_build_mask_transforms():
     MaskFrequencyInterval(
         domain=domain, **tok["mask_frequency_interval"], print_output=False
     )
+
+
+def test_strain_tokenization_non_dyadic_delta_f():
+    """T = 6 s gives delta_f = 1/6, not exactly representable; the padded-bin count
+    must come from integer arithmetic."""
+    # f_max = 256 with delta_f = 1/6: the old float expression gave 6 padded bins
+    # where 7 are needed, so the reshape in __call__ crashed.
+    domain = UniformFrequencyDomain(f_min=20.0, f_max=256.0, delta_f=1.0 / 6.0)
+    tok = StrainTokenization(domain=domain, token_size=16, print_output=False)
+    num_f = domain.frequency_mask_length
+    n_tokens = tok.num_tokens_per_detector
+    assert tok.num_padded_f_bins == n_tokens * 16 - num_f
+    assert tok.num_padded_f_bins == 7
+    sample = {
+        "waveform": np.random.default_rng(0).normal(size=(2, 3, num_f)),
+        "asds": {"H1": np.ones(2), "L1": np.ones(2)},
+    }
+    out = tok(sample)
+    assert out["waveform"].shape == (2 * n_tokens, 3 * 16)
+
+
+def test_mask_frequency_interval_non_dyadic_delta_f():
+    """The upper-edge draw must not assume equal candidate counts per row, which
+    float rounding breaks for delta_f = 1/12."""
+    domain = UniformFrequencyDomain(f_min=20.0, f_max=100.0, delta_f=1.0 / 12.0)
+    tok = StrainTokenization(domain=domain, token_size=16, print_output=False)
+    num_f = domain.frequency_mask_length
+    sample = {
+        "waveform": np.random.default_rng(0).normal(size=(8, 2, 3, num_f)),
+        "asds": {"H1": np.ones(2), "L1": np.ones(2)},
+    }
+    sample = tok(sample)
+    np.random.seed(0)
+    transform = MaskFrequencyInterval(
+        domain=domain,
+        p_per_detector=1.0,
+        f_min=20.0,
+        f_max=100.0,
+        max_width=5.0,
+        print_output=False,
+    )
+    out = transform(sample)
+    assert out["token_mask"].any()
+    assert not out["token_mask"].all()
+
+
+def test_detect_asd_notches_multibanded_uses_base_domain():
+    """Stored ASDs live on the base grid; MFD indices must not be used (this
+    returned wrong notch frequencies before)."""
+    base = UniformFrequencyDomain(f_min=20.0, f_max=100.0, delta_f=0.25)
+    mfd = MultibandedFrequencyDomain(
+        nodes=[20.0, 36.0, 100.0], delta_f_initial=0.25, base_domain=base
+    )
+    asd = np.full(len(base), 1e-23)
+    freqs = base.sample_frequencies
+    asd[(freqs >= 60.0) & (freqs <= 61.0)] = HIGH_ASD_VALUE
+    notches = detect_asd_notches({"H1": asd}, mfd)
+    assert notches == {"H1": [[60.0, 61.0]]}

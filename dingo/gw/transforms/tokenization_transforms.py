@@ -102,7 +102,10 @@ class StrainTokenization:
                 self.f_max_per_token[-1] + self.num_bins_per_token * last_delta_f
             )
             self.f_max_per_token = np.append(self.f_max_per_token, f_max_pad)
-            self.num_padded_f_bins = int((f_max_pad - freqs[-1]) / last_delta_f)
+            # Integer arithmetic: float division truncates for non-dyadic delta_f.
+            self.num_padded_f_bins = (
+                num_tokens_per_block * self.num_bins_per_token - num_f
+            )
 
         if not (
             num_tokens_per_block
@@ -901,38 +904,14 @@ class MaskFrequencyInterval(object):
         )
         f_lower = np.where(mask_interval, f_lower_full, np.inf)
 
-        # f_upper from [f_lower, f_lower + interval_max_width]
-        # Sampling f_upper depends on the f_lower sampled for each (batch, detector).
-        # np.apply_along_axis(np.argwhere, ...) requires that all (batch, detector)
-        # combinations produce the same number of valid upper frequencies.
-        # This is guaranteed: f_values_base_domain is always uniformly spaced (fixed delta_f),
-        # so any window [f_lower, f_lower + max_width] with f_lower on the grid contains
-        # exactly floor(max_width / delta_f) + 1 frequencies. For MFD we use the base domain,
-        # which is also a UFD, so the same argument holds.
-        mask_f_vals_upper = np.logical_and(
-            f_lower_full[:, :, np.newaxis]
-            <= f_values_base_domain[np.newaxis, np.newaxis, :],
-            f_values_base_domain[np.newaxis, np.newaxis, :]
-            <= f_lower_full[:, :, np.newaxis] + self.interval_max_width,
-        )
-        possible_indices_upper = np.stack(
-            [
-                np.apply_along_axis(
-                    np.argwhere, arr=mask_f_vals_upper[:, b, :], axis=-1
-                ).squeeze()
-                for b in range(num_detectors)
-            ],
-            axis=-2,
-        )
-        possible_f_vals_upper = f_values_base_domain[possible_indices_upper]
-        f_upper_no_mask = np.stack(
-            [
-                np.apply_along_axis(
-                    np.random.choice, arr=possible_f_vals_upper[..., b, :], axis=-1
-                )
-                for b in range(num_detectors)
-            ],
-            axis=-1,
+        # f_upper from [f_lower, f_lower + interval_max_width]: draw a number of
+        # grid steps rather than collecting per-row candidate arrays, whose counts
+        # differ by one for non-dyadic delta_f (float rounding) and cannot be stacked.
+        delta_f = f_values_base_domain[1] - f_values_base_domain[0]
+        n_steps = int(np.floor(self.interval_max_width / delta_f + 1e-9))
+        f_upper_no_mask = (
+            f_lower_full
+            + np.random.randint(0, n_steps + 1, size=batch_block_size) * delta_f
         )
         f_upper = np.where(mask_interval, f_upper_no_mask, -1.0)
 
