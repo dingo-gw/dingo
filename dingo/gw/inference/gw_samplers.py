@@ -352,10 +352,13 @@ class GWSampler(GWSamplerMixin, Sampler):
         #   * whiten and scale strain (since the inference network expects standardized
         #   data)
         transform_pre.append(WhitenAndScaleStrain(self.domain.noise_std))
-        if self.frequency_updates:
+        tok = self.metadata["train_settings"]["data"].get("tokenization")
+        if self.frequency_updates and not tok:
             # * update frequency range
-            # Needs to happen before RepackageStrainsAndASDs since we might need to apply
-            # detectors specific frequency updates.
+            # Needs to happen before RepackageStrainsAndASDs since we might need to
+            # apply detectors specific frequency updates. For tokenized models,
+            # we do not apply bin-level masking since it is inert ( every unmasked
+            # token lies fully inside the requested range).
             transform_pre.append(
                 MaskDataForFrequencyRangeUpdate(
                     domain=self.domain,
@@ -376,7 +379,6 @@ class GWSampler(GWSamplerMixin, Sampler):
             )
         )
 
-        tok = self.metadata["train_settings"]["data"].get("tokenization")
         if tok:
             # StrainTokenization operates on numpy arrays, so it must precede ToTorch.
             transform_pre.append(

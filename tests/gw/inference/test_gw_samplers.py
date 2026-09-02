@@ -815,3 +815,24 @@ def test_event_metadata_round_trips_psd_notch_dict(gw_sampler):
 def test_event_metadata_omits_psd_notch_dict_when_absent(gw_sampler):
     gw_sampler.event_metadata = {"time_event": 0.0}
     assert "psd_notch_dict" not in gw_sampler.event_metadata
+
+
+def test_frequency_update_chain_drops_bin_masking_for_tokenized():
+    """For tokenized models the bin-level zeroing is inert (every unmasked token
+    lies fully inside the requested range), so it is not built into the chain."""
+    domain = _make_domain()
+    stub = _make_sampler_stub(domain, tokenization_settings=TOK_SETTINGS)
+    stub._minimum_frequency = 30.0
+    stub._initialize_transforms()
+    names = [type(t).__name__ for t in stub.transform_pre.transforms]
+    assert "MaskDataForFrequencyRangeUpdate" not in names
+    assert "MaskTokensForFrequencyRangeUpdate" in names
+
+
+def test_frequency_update_chain_keeps_bin_masking_for_resnet():
+    domain = _make_domain()
+    stub = _make_sampler_stub(domain)
+    stub._minimum_frequency = 30.0
+    stub._initialize_transforms()
+    names = [type(t).__name__ for t in stub.transform_pre.transforms]
+    assert "MaskDataForFrequencyRangeUpdate" in names
