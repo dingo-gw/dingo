@@ -111,8 +111,8 @@ non-default range to be in-distribution; otherwise an error is raised.
 (psd-notching)=
 ### PSD notching
 
-For transformer-based models, specific frequency intervals can be suppressed
-(notched) to exclude spectral artifacts such as power-line harmonics.  Two
+Specific frequency intervals can be suppressed (notched) to exclude spectral
+artifacts such as power-line harmonics.  Two
 equivalent paths produce the same result:
 
 **Standard path** — set `psd-notch-dict` in the ini file:
@@ -130,15 +130,19 @@ overlapping these intervals are masked before the network forward pass.
 **Pre-notched path** — leave `psd-notch-dict` commented out.  If the ASD has
 already been set to 1 in the notch regions before dingo_pipe runs, the notched
 intervals are detected from the stored ASD at the end of data generation and
-recorded in the event metadata.  (The Asimov integration passes its notch dict
-through `psd-notch-dict`.)
+recorded in the event metadata.  Runs touching f_min or f_max are taken for PSD edge
+padding rather than notches (with a warning if wider than one bin); to exclude an
+edge band, move `minimum-frequency` / `maximum-frequency` instead.  (The Asimov
+integration passes its notch dict through `psd-notch-dict`.)
 
 In both paths the importance-sampling likelihood contribution from notched bins
 is negligible because ASD = 1 ≫ real noise level (~10⁻²³ 1/√Hz), so the
 noise-weighted inner product for those bins approaches zero.
 
 ```{note}
-PSD notching is only supported for tokenized (transformer) models.
+PSD notching is not restricted to tokenized models.  A ResNet-based model has no
+tokens to mask, so the notched bins reach it as zeros in the whitened strain and
+inverse ASD, which it never saw in training; a warning is issued.
 ```
 
 ## Sampling

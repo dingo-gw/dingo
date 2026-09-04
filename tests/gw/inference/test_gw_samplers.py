@@ -2,6 +2,8 @@
 correction, plus the transformer path (_initialize_transforms, _run_sampler, detector
 validation)."""
 
+import warnings
+
 import numpy as np
 import pytest
 import torch
@@ -16,8 +18,10 @@ from dingo.gw.inference.gw_samplers import (
     GWSampler,
     check_detector_update,
     check_frequency_updates,
+    check_psd_notches,
     _validate_detectors_transformer,
     _validate_frequency_bound,
+    _validate_psd_notches,
 )
 from dingo.gw.transforms import (
     StrainTokenization,
@@ -805,11 +809,85 @@ def test_check_frequency_updates_unchanged_value_allowed_without_flexibility():
 
 
 def test_event_metadata_round_trips_psd_notch_dict(gw_sampler):
-    gw_sampler.event_metadata = {
-        "time_event": 0.0,
-        "psd_notch_dict": {"H1": [[60.0, 61.0]]},
-    }
+    # The fixture model has no notch training: the setter warns but proceeds.
+    with pytest.warns(UserWarning, match="mask_frequency_notches"):
+        gw_sampler.event_metadata = {
+            "time_event": 0.0,
+            "psd_notch_dict": {"H1": [[60.0, 61.0]]},
+        }
     assert gw_sampler.event_metadata["psd_notch_dict"] == {"H1": [[60.0, 61.0]]}
+
+
+# ---------------------------------------------------------------------------
+# _validate_psd_notches / check_psd_notches
+# ---------------------------------------------------------------------------
+
+NOTCH_SETTINGS = {
+    "p_per_detector": 0.3,
+    "max_width": 4.0,
+    "f_min": 40.0,
+    "f_max": 500.0,
+}
+
+
+def _notch_data_settings(**tok):
+    return {"detectors": DETECTORS, "tokenization": tok}
+
+
+def test_psd_notches_inside_envelope_pass_silently(domain):
+    settings = _notch_data_settings(mask_frequency_notches=NOTCH_SETTINGS)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        _validate_psd_notches(
+            {"H1": [59.0, 61.0], "L1": [[59.0, 61.0], [119.0, 121.0]]}, domain, settings
+        )
+
+
+def test_psd_notches_unknown_detector_raises(domain):
+    settings = _notch_data_settings(mask_frequency_notches=NOTCH_SETTINGS)
+    with pytest.raises(ValueError, match="not.*trained with"):
+        _validate_psd_notches({"V1": [59.0, 61.0]}, domain, settings)
+
+
+@pytest.mark.parametrize(
+    "interval", [[20.0, 25.0], [1000.0, 1024.0], [10.0, 25.0], [61.0, 59.0]]
+)
+def test_psd_notches_edge_or_empty_interval_raises(domain, interval):
+    """A notch touching f_min / f_max would be dropped as edge padding at data
+    generation; an inverted interval is empty. Both are configuration errors."""
+    settings = _notch_data_settings(mask_frequency_notches=NOTCH_SETTINGS)
+    with pytest.raises(ValueError, match="touches the domain bounds|is empty"):
+        _validate_psd_notches({"H1": interval}, domain, settings)
+
+
+@pytest.mark.parametrize("interval", [[30.0, 32.0], [59.0, 64.5], [498.0, 502.0]])
+def test_psd_notches_outside_envelope_warn(domain, interval):
+    """Below the trained range, wider than max_width, above the trained range."""
+    settings = _notch_data_settings(mask_frequency_notches=NOTCH_SETTINGS)
+    with pytest.warns(UserWarning, match="training envelope"):
+        _validate_psd_notches({"H1": interval}, domain, settings)
+
+
+def test_psd_notches_without_notch_training_warn(domain):
+    with pytest.warns(UserWarning, match="not trained with mask_frequency_notches"):
+        _validate_psd_notches({"H1": [59.0, 61.0]}, domain, {"detectors": DETECTORS})
+    settings = _notch_data_settings(
+        mask_random_tokens={"p_mask": 0.4, "max_num_tokens": 10}
+    )
+    with pytest.warns(UserWarning, match="mask_random_tokens"):
+        _validate_psd_notches({"H1": [59.0, 61.0]}, domain, settings)
+
+
+def test_check_psd_notches_from_metadata():
+    meta = _flexible_meta()
+    meta["train_settings"]["data"]["tokenization"][
+        "mask_frequency_notches"
+    ] = NOTCH_SETTINGS
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        check_psd_notches(meta, {"H1": [[59.0, 61.0]]})
+    with pytest.raises(ValueError, match="touches the domain bounds"):
+        check_psd_notches(meta, {"H1": [[20.0, 25.0]]})
 
 
 def test_event_metadata_omits_psd_notch_dict_when_absent(gw_sampler):

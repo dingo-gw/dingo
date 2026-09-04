@@ -97,13 +97,6 @@ class GWSamplerMixin(object):
         )
 
     @property
-    def mask_frequency_range_settings(self: SamplerProtocol):
-        tok = self.base_model_metadata["train_settings"]["data"].get("tokenization")
-        if tok is not None:
-            return tok.get("mask_frequency_range")
-        return None
-
-    @property
     def minimum_frequency(self) -> float | dict[str, float]:
         if self._minimum_frequency is not None:
             return self._minimum_frequency
@@ -175,14 +168,9 @@ class GWSamplerMixin(object):
                 domain = self.domain
             else:
                 raise ValueError("psd_notch_dict requires a frequency domain.")
-            for det, notch in value.items():
-                ranges = [notch] if not isinstance(notch[0], (list, tuple)) else notch
-                for f_lo, f_hi in ranges:
-                    if f_lo < domain.f_min or f_hi > domain.f_max:
-                        raise ValueError(
-                            f"psd_notch_dict interval [{f_lo}, {f_hi}] for {det} "
-                            f"is outside domain [{domain.f_min}, {domain.f_max}]."
-                        )
+            _validate_psd_notches(
+                value, domain, self.base_model_metadata["train_settings"]["data"]
+            )
         self._psd_notch_dict = value
         self._initialize_transforms()
 
@@ -396,7 +384,6 @@ class GWSampler(GWSamplerMixin, Sampler):
                         detectors=self.detectors,
                         minimum_frequency=self.minimum_frequency,
                         maximum_frequency=self.maximum_frequency,
-                        mask_frequency_range_settings=self.mask_frequency_range_settings,
                         psd_notch_dict=self.psd_notch_dict,
                     )
                 )
@@ -728,6 +715,111 @@ def check_frequency_updates(
         _validate_frequency_bound(f_min, "minimum_frequency", domain, data_settings)
     if f_max is not None:
         _validate_frequency_bound(f_max, "maximum_frequency", domain, data_settings)
+
+
+def _validate_psd_notches(
+    psd_notch_dict: dict,
+    domain: UniformFrequencyDomain | MultibandedFrequencyDomain,
+    data_settings: dict,
+):
+    """
+    Validate PSD notch intervals against the domain and the model's training settings.
+
+    ``psd_notch_dict`` maps detectors to one ``[f_lo, f_hi]`` interval or a list of
+    them. Configuration errors raise: a detector the model was not trained with, an
+    empty interval, or an interval touching the domain bounds (at data generation a
+    high-ASD run at an edge is taken for PSD padding, see ``detect_asd_notches``, so
+    the frequency bound must be moved instead). A mismatch with the training
+    distribution only warns, since the likelihood stays exact and the network is
+    merely a worse proposal: no notch training (including non-tokenized models),
+    ``mask_random_tokens`` only, or an interval outside the
+    ``tokenization.mask_frequency_notches`` envelope (range and ``max_width``).
+
+    Parameters
+    ----------
+    psd_notch_dict : dict
+        ``{det: [f_lo, f_hi]}`` or ``{det: [[f_lo, f_hi], ...]}``.
+    domain : UniformFrequencyDomain or MultibandedFrequencyDomain
+        The model's base (uniform) domain.
+    data_settings : dict
+        ``train_settings["data"]`` of the model.
+
+    Raises
+    ------
+    ValueError
+        If the notches are incompatible with the model or the domain.
+    """
+    model_detectors = data_settings["detectors"]
+    unknown = set(psd_notch_dict) - set(model_detectors)
+    if unknown:
+        raise ValueError(
+            f"psd_notch_dict names detectors {sorted(unknown)} the model was not "
+            f"trained with (detectors: {model_detectors})."
+        )
+    intervals = []
+    for det, notch in psd_notch_dict.items():
+        ranges = [notch] if not isinstance(notch[0], (list, tuple)) else notch
+        for f_lo, f_hi in ranges:
+            if not f_lo <= f_hi:
+                raise ValueError(
+                    f"psd_notch_dict interval [{f_lo}, {f_hi}] for {det} is empty."
+                )
+            if f_lo <= domain.f_min or f_hi >= domain.f_max:
+                raise ValueError(
+                    f"psd_notch_dict interval [{f_lo}, {f_hi}] for {det} touches the "
+                    f"domain bounds [{domain.f_min}, {domain.f_max}]; move "
+                    f"minimum_frequency / maximum_frequency instead of notching an edge."
+                )
+            intervals.append((det, f_lo, f_hi))
+
+    tok = data_settings.get("tokenization") or {}
+    notch_settings = tok.get("mask_frequency_notches")
+    if notch_settings is None:
+        if "mask_random_tokens" in tok:
+            warnings.warn(
+                "psd_notch_dict relies on mask_random_tokens training only; the "
+                "contiguous masking pattern differs from the random training "
+                "distribution. Expect reduced importance-sampling efficiency and "
+                "check the effective sample size."
+            )
+        else:
+            warnings.warn(
+                "Model was not trained with mask_frequency_notches; the notched bins "
+                "are out of distribution for the network. The likelihood is exact, "
+                "so check the importance-sampling efficiency."
+            )
+        return
+
+    # Training envelope as MaskFrequencyNotches resolves it: an explicit range is
+    # clamped to the domain, and the width is capped by the range.
+    f_min = notch_settings.get("f_min")
+    f_max = notch_settings.get("f_max")
+    notch_f_min = domain.f_min if f_min is None else max(f_min, domain.f_min)
+    notch_f_max = domain.f_max if f_max is None else min(f_max, domain.f_max)
+    max_width = min(notch_settings["max_width"], notch_f_max - notch_f_min)
+    for det, f_lo, f_hi in intervals:
+        if f_lo < notch_f_min or f_hi > notch_f_max or f_hi - f_lo > max_width + 1e-9:
+            warnings.warn(
+                f"psd_notch_dict interval [{f_lo}, {f_hi}] for {det} is outside the "
+                f"training envelope (mask_frequency_notches: range "
+                f"[{notch_f_min}, {notch_f_max}] Hz, max_width {max_width} Hz). "
+                f"Expect reduced importance-sampling efficiency."
+            )
+
+
+def check_psd_notches(model_metadata: dict, psd_notch_dict: dict):
+    """
+    Validate PSD notch intervals against a model's metadata.
+
+    Thin metadata-level wrapper around ``_validate_psd_notches``, used by dingo_pipe
+    at DAG-build time; see there for the accepted forms and semantics.
+    """
+    domain = build_domain_from_model_metadata(model_metadata, base=True)
+    if not isinstance(domain, (UniformFrequencyDomain, MultibandedFrequencyDomain)):
+        raise ValueError("psd_notch_dict requires a frequency domain.")
+    _validate_psd_notches(
+        psd_notch_dict, domain, model_metadata["train_settings"]["data"]
+    )
 
 
 def _validate_detectors_transformer(

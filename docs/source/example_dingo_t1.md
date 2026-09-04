@@ -105,8 +105,9 @@ augmentations are optional and independent of each other.
 The ranges set by `f_min_upper` and `f_max_lower` in `mask_frequency_range` define
 the *in-distribution* envelope for inference-time frequency updates.  Requesting a
 frequency range outside this envelope raises an error.
-PSD notching via `mask_frequency_notches` does not produce a warning because the
-masking is already encoded in the ASD.
+A `psd-notch-dict` is checked against the `mask_frequency_notches` settings (range
+and `max_width`); a notch outside that envelope, or on a model trained without notch
+masking, produces a warning rather than an error, since the likelihood stays exact.
 ```
 
 
@@ -178,8 +179,9 @@ handles them correctly without any additional configuration.
 ```
 
 ```{note}
-PSD notching is only supported for tokenized (transformer) models.  The token
-masking has no effect on ResNet-based models.
+PSD notching is not restricted to tokenized models.  A ResNet-based model has no
+tokens to mask, so the notched bins reach it as zeros in the whitened strain and
+inverse ASD, which it never saw in training; a warning is issued.
 ```
 
 ```{eval-rst}

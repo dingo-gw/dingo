@@ -956,7 +956,6 @@ class MaskTokensForFrequencyRangeUpdate(object):
         detectors: list[str],
         minimum_frequency: Optional[float | dict] = None,
         maximum_frequency: Optional[float | dict] = None,
-        mask_frequency_range_settings: Optional[dict] = None,
         psd_notch_dict: Optional[dict] = None,
         print_output: bool = True,
     ):
@@ -973,11 +972,6 @@ class MaskTokensForFrequencyRangeUpdate(object):
         maximum_frequency: float | dict | None
             New upper frequency bound. Float applies to all detectors; dict specifies
             per-detector values. Detectors missing from the dict use domain.f_max.
-        mask_frequency_range_settings: dict | None
-            Training settings for MaskFrequencyRange (e.g. ``p_mask``, ``f_min_upper``,
-            ``f_max_lower``). When provided, the first call to :meth:`__call__` checks
-            whether the inference-time masking is out of distribution relative to training
-            and prints a warning when it is.
         psd_notch_dict: dict | None
             Per-detector interior frequency intervals to mask, e.g.
             ``{H1: [[50, 60]], L1: [[50, 60]]}``.  Each value is either a
@@ -997,8 +991,6 @@ class MaskTokensForFrequencyRangeUpdate(object):
             detectors=detectors,
         )
         self.psd_notch_dict = psd_notch_dict
-        self._mask_frequency_range_settings = mask_frequency_range_settings
-        self._distribution_checked = False
         self.print_output = print_output
         if print_output:
             print(
@@ -1109,62 +1101,8 @@ class MaskTokensForFrequencyRangeUpdate(object):
             if self.print_output:
                 print(f"Applied PSD notch masking: {self.psd_notch_dict}.")
 
-        if not self._distribution_checked and self.print_output:
-            self._distribution_checked = True
-            self._check_inference_masking_distribution(
-                mask, sample["token_mask"], sample["position"]
-            )
-
         sample["token_mask"] = np.logical_or(mask, sample["token_mask"])
         return sample
-
-    def _check_inference_masking_distribution(
-        self,
-        new_mask: np.ndarray,
-        existing_mask: np.ndarray,
-        position: np.ndarray,
-    ) -> None:
-        """Print token masking counts and warn if inference masking exceeds training maximum.
-
-        Called once on the first forward pass so the actual token structure is available.
-        Counts how many tokens are masked per detector and compares to the maximum the
-        model could have seen during training (derived from ``f_min_upper`` / ``f_max_lower``
-        in mask_frequency_range_settings).
-        """
-        if self._mask_frequency_range_settings is None:
-            return
-
-        # Reduce to a single (unbatched) example for reporting.
-        first_new = new_mask[0] if new_mask.ndim > 1 else new_mask
-        first_existing = existing_mask[0] if existing_mask.ndim > 1 else existing_mask
-        first_pos = position[0] if position.ndim > 2 else position
-
-        detector_indices = np.unique(first_pos[..., 2])
-        num_detectors = len(detector_indices)
-        n_total = first_new.shape[0]
-        n_tokens_per_detector = n_total // num_detectors
-
-        # Token f_min / f_max for one detector (shared grid).
-        f_min_per_token = first_pos[:n_tokens_per_detector, 0]
-        f_max_per_token = first_pos[:n_tokens_per_detector, 1]
-
-        n_newly_masked = int(np.sum(first_new & ~first_existing))
-
-        # Maximum tokens maskable during training from each side.
-        f_min_upper = self._mask_frequency_range_settings.get("f_min_upper", np.inf)
-        f_max_lower = self._mask_frequency_range_settings.get("f_max_lower", -np.inf)
-        n_train_max_fmin = int(np.sum(f_min_per_token < f_min_upper))
-        n_train_max_fmax = int(np.sum(f_max_per_token > f_max_lower))
-        n_train_max_per_detector = n_train_max_fmin + n_train_max_fmax
-        n_train_max_total = n_train_max_per_detector * num_detectors
-
-        if n_newly_masked > n_train_max_total:
-            print(
-                f"  WARNING: {n_newly_masked}/{n_total} tokens are masked by the "
-                f"inference frequency update, which exceeds the training maximum of "
-                f"{n_train_max_total} tokens ({n_train_max_per_detector} per detector). "
-                f"This frequency range update is out of distribution."
-            )
 
 
 def _check_mfd_node_compatibility(

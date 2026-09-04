@@ -1,4 +1,5 @@
 from typing import Optional
+import warnings
 import numpy as np
 from copy import deepcopy
 from scipy.signal.windows import tukey
@@ -189,8 +190,9 @@ def detect_asd_notches(asd_dict: dict, domain) -> dict | None:
     ``0.5 * HIGH_ASD_VALUE`` (= 0.5 for the current sentinel value of 1.0),
     which sits midway between real noise levels (~10⁻²³ 1/√Hz) and the notch
     sentinel, giving a robust detection margin in case of floating-point rounding.
-    Intervals starting at the first valid frequency bin (f_min) are skipped
-    because those can arise from normal edge-padding, not notching.
+    Runs touching the first or last valid bin (f_min, f_max) are skipped as edge
+    padding rather than notches; when such a run is wider than one bin the PSD does
+    not cover the model band, and a warning is issued.
 
     Parameters
     ----------
@@ -234,11 +236,22 @@ def detect_asd_notches(asd_dict: dict, domain) -> dict | None:
 
         intervals = []
         for s, e in zip(starts, ends):
-            if s == 0:
-                # A high run starting exactly at f_min is edge padding (ASDs built
-                # from an ASDDataset carry HIGH_ASD_VALUE below f_min, which can
-                # touch the boundary), not a notch. A genuine notch at f_min is
-                # indistinguishable from this; raise minimum_frequency instead.
+            if s == 0 or e == len(is_notched):
+                # A high run touching f_min or f_max is edge padding, not a notch:
+                # ASDs built from an ASDDataset carry HIGH_ASD_VALUE below f_min,
+                # and bilby fills frequencies beyond a PSD file's range with inf
+                # (LVK release PSDs end one bin short of f_max). A genuine notch at
+                # an edge is indistinguishable from this; move the frequency bound
+                # instead. Anything wider than one bin means the PSD does not
+                # cover the model band, which the user should hear about.
+                if e - s > 1:
+                    warnings.warn(
+                        f"ASD for {ifo} is non-physical over "
+                        f"[{valid_freqs[s]}, {valid_freqs[e - 1]}] Hz at the edge of "
+                        f"the model band [{domain.f_min}, {domain.f_max}] Hz; the PSD "
+                        f"probably does not cover it. Set minimum_frequency / "
+                        f"maximum_frequency to match."
+                    )
                 continue
             f_lo = float(valid_freqs[s])
             f_hi = float(valid_freqs[e - 1])

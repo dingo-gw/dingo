@@ -27,9 +27,13 @@ from .parser import create_parser
 from .utils import dict_to_string
 
 from ..gw.domains.build_domain import build_domain_from_model_metadata
-from ..gw.gwutils import add_defaults_for_missing_detectors
+from ..gw.gwutils import add_defaults_for_missing_detectors, parse_psd_notch_dict
 from dingo.core.posterior_models.build_model import build_model_from_kwargs
-from ..gw.inference.gw_samplers import check_frequency_updates, check_detector_update
+from ..gw.inference.gw_samplers import (
+    check_frequency_updates,
+    check_detector_update,
+    check_psd_notches,
+)
 from ..gw.injection import Injection
 from ..gw.noise.asd_dataset import ASDDataset
 
@@ -192,6 +196,11 @@ def fill_in_arguments_from_model(args, perform_arg_checks=True):
     f_min = parse_frequency(args.minimum_frequency, "minimum-frequency")
     f_max = parse_frequency(args.maximum_frequency, "maximum-frequency")
     check_frequency_updates(model_metadata, f_min, f_max)
+    if args.psd_notch_dict is not None:
+        check_psd_notches(
+            model_metadata,
+            parse_psd_notch_dict(convert_string_to_dict(args.psd_notch_dict)),
+        )
     analyzed_detectors = [d.strip("'") for d in args.detectors]
     if isinstance(f_min, dict):
         args.minimum_frequency = str(

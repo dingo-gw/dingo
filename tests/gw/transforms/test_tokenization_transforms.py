@@ -1,3 +1,5 @@
+import warnings
+
 import numpy as np
 import pytest
 
@@ -1118,6 +1120,21 @@ def test_detect_asd_notches_edge_padding_ignored():
     asd[domain.min_idx] = HIGH_ASD_VALUE
     result = detect_asd_notches({"H1": asd}, domain)
     assert result is None
+
+
+def test_detect_asd_notches_edge_padding_ignored_at_f_max():
+    """A high run touching f_max (bilby fills frequencies beyond a PSD file with inf)
+    is edge padding, not a notch. One bin is silent; wider warns that the PSD does
+    not cover the model band."""
+    domain = make_ufd(f_min=20.0, f_max=512.0)
+    asd = _make_asd_array(domain)
+    asd[-1] = np.inf
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        assert detect_asd_notches({"H1": asd}, domain) is None
+    asd[-3:] = np.inf
+    with pytest.warns(UserWarning, match="does not cover"):
+        assert detect_asd_notches({"H1": asd}, domain) is None
 
 
 def test_detect_asd_notches_per_detector():
