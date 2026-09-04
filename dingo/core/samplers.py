@@ -154,7 +154,7 @@ class Sampler(object):
             x = self.transform_pre(context)
             # Require a batch dimension for the embedding network.
             # For transformer models, transform_pre returns a list of tensors
-            # (waveform, position, drop_token_mask); for resnet models a single tensor.
+            # (waveform, position, token_mask); for resnet models a single tensor.
             if isinstance(x, list):
                 x = [t.unsqueeze(0) for t in x]
             else:

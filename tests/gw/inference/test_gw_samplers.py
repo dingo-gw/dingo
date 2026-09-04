@@ -890,6 +890,22 @@ def test_check_psd_notches_from_metadata():
         check_psd_notches(meta, {"H1": [[20.0, 25.0]]})
 
 
+def test_event_metadata_rebuilds_transform_chain_once(gw_sampler, monkeypatch):
+    """Assigning event_metadata applies every setting but rebuilds the chain once;
+    a property assigned by hand still rebuilds immediately."""
+    calls = []
+    monkeypatch.setattr(gw_sampler, "_initialize_transforms", lambda: calls.append(1))
+    gw_sampler.event_metadata = {
+        "time_event": 0.0,
+        "detectors": DETECTORS,
+        "minimum_frequency": DOMAIN_SETTINGS["f_min"],
+        "maximum_frequency": DOMAIN_SETTINGS["f_max"],
+    }
+    assert len(calls) == 1
+    gw_sampler.minimum_frequency = DOMAIN_SETTINGS["f_min"]
+    assert len(calls) == 2
+
+
 def test_event_metadata_omits_psd_notch_dict_when_absent(gw_sampler):
     gw_sampler.event_metadata = {"time_event": 0.0}
     assert "psd_notch_dict" not in gw_sampler.event_metadata

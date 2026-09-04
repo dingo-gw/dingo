@@ -128,10 +128,14 @@ class StrainTokenization:
                 f"StrainTokenization:\n"
                 f"  token_size:             {self.num_bins_per_token} bins\n"
                 f"  tokens per detector:    {self.num_tokens_per_detector}\n"
-                f"  drop last token:        {self.drop_last_token}\n"
-                f"  first token width:      {self.f_min_per_token[1] - self.f_min_per_token[0]:.3f} Hz\n"
-                f"  last token width:       {self.f_min_per_token[-1] - self.f_min_per_token[-2]:.3f} Hz"
+                f"  drop last token:        {self.drop_last_token}"
             )
+            widths = np.diff(self.f_min_per_token)
+            if len(widths):
+                print(
+                    f"  first token width:      {widths[0]:.3f} Hz\n"
+                    f"  last token width:       {widths[-1]:.3f} Hz"
+                )
             if self.num_padded_f_bins > 0:
                 print(f"  zero-padded bins in last token: {self.num_padded_f_bins}")
 
@@ -418,7 +422,7 @@ class MaskDetectors(object):
             # with the number of detectors to mask
             for n in [i for i in np.unique(mask_n_blocks) if i > 0]:
                 # Construct mask for which batch indices require updates
-                mask_mod = np.where(mask_n_blocks == n, True, False)
+                mask_mod = mask_n_blocks == n
                 # Decide which detectors
                 detectors_to_mask = np.apply_along_axis(
                     np.random.choice,
@@ -881,16 +885,12 @@ class MaskFrequencyNotches(object):
         )
 
         # Sample f_lower and f_upper from the base domain frequencies
-        if isinstance(self.domain, UniformFrequencyDomain):
-            f_values_base_domain = self.domain.sample_frequencies[
-                self.domain.frequency_mask
-            ]
-        elif isinstance(self.domain, MultibandedFrequencyDomain):
-            f_values_base_domain = self.domain.base_domain.sample_frequencies[
-                self.domain.base_domain.frequency_mask
-            ]
-        else:
+        base_domain = getattr(self.domain, "base_domain", self.domain)
+        if not isinstance(base_domain, UniformFrequencyDomain):
             raise ValueError(f"Unknown domain type: {self.domain}")
+        f_values_base_domain = base_domain.sample_frequencies[
+            base_domain.frequency_mask
+        ]
         # f_lower from [notch_f_min, notch_f_max - notch_max_width]
         mask_f_vals_lower = np.logical_and(
             self.notch_f_min <= f_values_base_domain,
@@ -905,7 +905,7 @@ class MaskFrequencyNotches(object):
         # f_upper from [f_lower, f_lower + notch_max_width]: draw a number of
         # grid steps rather than collecting per-row candidate arrays, whose counts
         # differ by one for non-dyadic delta_f (float rounding) and cannot be stacked.
-        delta_f = f_values_base_domain[1] - f_values_base_domain[0]
+        delta_f = base_domain.delta_f
         n_steps = int(np.floor(self.notch_max_width / delta_f + 1e-9))
         f_upper_no_mask = (
             f_lower_full
@@ -978,7 +978,7 @@ class MaskTokensForFrequencyRangeUpdate(object):
             single ``[f_lo, f_hi]`` or a list of such pairs.  Tokens whose
             frequency range overlaps with any notch interval are masked.
         print_output:
-            Whether to write a summary to stdout on construction and on the first call.
+            Whether to write a summary to stdout on construction.
         """
         self.minimum_frequency = add_defaults_for_missing_detectors(
             object_to_update=minimum_frequency,
@@ -1037,7 +1037,7 @@ class MaskTokensForFrequencyRangeUpdate(object):
             if isinstance(self.minimum_frequency, (float, int)):
                 mask = np.logical_or(
                     mask,
-                    np.where(f_min_per_token < self.minimum_frequency, True, False),
+                    f_min_per_token < self.minimum_frequency,
                 )
             elif isinstance(self.minimum_frequency, dict):
                 for b in detector_indices:
@@ -1055,14 +1055,12 @@ class MaskTokensForFrequencyRangeUpdate(object):
                     f"minimum_frequency must be float, int, or dict, "
                     f"got {type(self.minimum_frequency)}."
                 )
-            if self.print_output:
-                print(f"Updated f_min to {self.minimum_frequency}.")
 
         if self.maximum_frequency is not None:
             if isinstance(self.maximum_frequency, (float, int)):
                 mask = np.logical_or(
                     mask,
-                    np.where(f_max_per_token > self.maximum_frequency, True, False),
+                    f_max_per_token > self.maximum_frequency,
                 )
             elif isinstance(self.maximum_frequency, dict):
                 for b in detector_indices:
@@ -1080,8 +1078,6 @@ class MaskTokensForFrequencyRangeUpdate(object):
                     f"maximum_frequency must be float, int, or dict, "
                     f"got {type(self.maximum_frequency)}."
                 )
-            if self.print_output:
-                print(f"Updated f_max to {self.maximum_frequency}.")
 
         if self.psd_notch_dict is not None:
             for b in detector_indices:
@@ -1098,8 +1094,6 @@ class MaskTokensForFrequencyRangeUpdate(object):
                         f_min_per_token_single <= f_hi
                     )
                     mask[mask_b] = np.logical_or(mask_notch, mask[mask_b])
-            if self.print_output:
-                print(f"Applied PSD notch masking: {self.psd_notch_dict}.")
 
         sample["token_mask"] = np.logical_or(mask, sample["token_mask"])
         return sample

@@ -71,6 +71,7 @@ class GWSamplerMixin(object):
         self._maximum_frequency = None
         self._detectors = None
         self._psd_notch_dict = None
+        self._defer_rebuild = False
         super().__init__(**kwargs)
         self.t_ref = self.base_model_metadata["train_settings"]["data"]["ref_time"]
         self._pesummary_package = "gw"
@@ -88,7 +89,8 @@ class GWSamplerMixin(object):
     def detectors(self: _GWMixinProtocol, value: list[str]):
         check_detector_update(self.base_model_metadata, value)
         self._detectors = value
-        self._initialize_transforms()
+        if not self._defer_rebuild:
+            self._initialize_transforms()
 
     @property
     def random_strain_cropping(self: SamplerProtocol):
@@ -118,7 +120,8 @@ class GWSamplerMixin(object):
             self.base_model_metadata["train_settings"]["data"],
         )
         self._minimum_frequency = value
-        self._initialize_transforms()
+        if not self._defer_rebuild:
+            self._initialize_transforms()
 
     @property
     def maximum_frequency(self) -> float | dict[str, float]:
@@ -142,7 +145,8 @@ class GWSamplerMixin(object):
             self.base_model_metadata["train_settings"]["data"],
         )
         self._maximum_frequency = value
-        self._initialize_transforms()
+        if not self._defer_rebuild:
+            self._initialize_transforms()
 
     @property
     def frequency_updates(self) -> bool:
@@ -172,7 +176,8 @@ class GWSamplerMixin(object):
                 value, domain, self.base_model_metadata["train_settings"]["data"]
             )
         self._psd_notch_dict = value
-        self._initialize_transforms()
+        if not self._defer_rebuild:
+            self._initialize_transforms()
 
     @property
     def event_metadata(self):
@@ -191,16 +196,23 @@ class GWSamplerMixin(object):
     def event_metadata(self, value):
         if value is not None:
             value = value.copy()
-            # Process detectors first so that frequency validation (which uses
+            # Apply the per-event settings through their validating setters, but
+            # rebuild the transform chain once rather than once per setting.
+            # Detectors go first so that frequency validation (which uses
             # self.detectors) already reflects the event's detector subset.
-            if "detectors" in value and value["detectors"] is not None:
-                self.detectors = value.pop("detectors")
-            if "minimum_frequency" in value:
-                self.minimum_frequency = value.pop("minimum_frequency")
-            if "maximum_frequency" in value:
-                self.maximum_frequency = value.pop("maximum_frequency")
-            if "psd_notch_dict" in value:
-                self.psd_notch_dict = value.pop("psd_notch_dict")
+            self._defer_rebuild = True
+            try:
+                if "detectors" in value and value["detectors"] is not None:
+                    self.detectors = value.pop("detectors")
+                if "minimum_frequency" in value:
+                    self.minimum_frequency = value.pop("minimum_frequency")
+                if "maximum_frequency" in value:
+                    self.maximum_frequency = value.pop("maximum_frequency")
+                if "psd_notch_dict" in value:
+                    self.psd_notch_dict = value.pop("psd_notch_dict")
+            finally:
+                self._defer_rebuild = False
+            self._initialize_transforms()
         self._event_metadata = value
 
     def _build_domain(self: Sampler):
@@ -357,7 +369,7 @@ class GWSampler(GWSamplerMixin, Sampler):
         #   * repackage strains and asds from dicts to an array
         #   * optionally tokenize strain (transformer embedding network only)
         #   * convert array(s) to torch tensor(s) on the correct device
-        #   * extract waveform (and position, drop_token_mask for transformer)
+        #   * extract waveform (and position, token_mask for transformer)
         # Use base metadata so that unconditional samplers still know how to
         # transform data, since this transform is used by the GNPE sampler as well.
         transform_pre.append(
