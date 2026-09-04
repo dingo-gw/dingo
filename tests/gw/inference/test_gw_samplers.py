@@ -710,34 +710,33 @@ def test_check_no_tokenization_mismatch_raises():
 # ---------------------------------------------------------------------------
 
 
-def test_run_sampler_wraps_single_tensor_in_list():
-    """A single tensor from transform_pre must be wrapped into a one-element list."""
-    single = torch.randn(10, 48)
-    if isinstance(single, list):
-        result = [t.unsqueeze(0) for t in single]
-    else:
-        result = [single.unsqueeze(0)]
-    assert isinstance(result, list)
-    assert len(result) == 1
-    assert result[0].shape == (1, 10, 48)
-
-
-def test_run_sampler_list_gets_batch_dim_added():
-    """A list of tensors from transform_pre must each get a batch dimension."""
+@pytest.mark.parametrize("as_list", [True, False])
+def test_run_sampler_adds_and_removes_batch_dimension(gw_sampler, monkeypatch, as_list):
+    """_run_sampler hands the network batched inputs (a list of tensors from a
+    tokenized chain, a single tensor from a resnet chain) and squeezes the batch
+    dimension back out of the samples."""
     tensors = [
         torch.randn(86, 48),
         torch.randn(86, 3),
         torch.zeros(86, dtype=torch.bool),
     ]
-    x = tensors
-    if isinstance(x, list):
-        result = [t.unsqueeze(0) for t in x]
-    else:
-        result = [x.unsqueeze(0)]
-    assert len(result) == 3
-    assert result[0].shape == (1, 86, 48)
-    assert result[1].shape == (1, 86, 3)
-    assert result[2].shape == (1, 86)
+    monkeypatch.setattr(
+        gw_sampler, "transform_pre", lambda ctx: tensors if as_list else tensors[0]
+    )
+    seen = []
+
+    def fake_sample_and_log_prob(*x, num_samples):
+        seen.extend(t.shape for t in x)
+        dim = len(INFERENCE_PARAMETERS)
+        return torch.zeros(1, num_samples, dim), torch.zeros(1, num_samples)
+
+    monkeypatch.setattr(
+        gw_sampler.model, "sample_and_log_prob", fake_sample_and_log_prob
+    )
+    result = gw_sampler._run_sampler(num_samples=5, context={"waveform": {}})
+    expected = [(1, 86, 48), (1, 86, 3), (1, 86)] if as_list else [(1, 86, 48)]
+    assert seen == expected
+    assert len(result["log_prob"]) == 5
 
 
 def test_check_tokenized_without_masking_requires_exact_match():

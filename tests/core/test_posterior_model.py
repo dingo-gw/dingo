@@ -282,23 +282,13 @@ def _make_transformer_model_kwargs():
 
 
 def test_pm_initializes_with_embedding_type_transformer():
-    """embedding_type: transformer builds a TransformerModel as the embedding net."""
+    """embedding_type: transformer builds a TransformerModel as the embedding net
+    (and is filtered out before the network builder, which would reject it)."""
     model_kwargs = _make_transformer_model_kwargs()
     pm = NormalizingFlowPosteriorModel(
         metadata={"train_settings": {"model": model_kwargs}}, device="cpu"
     )
     assert isinstance(pm.network.embedding_net, TransformerModel)
-
-
-def test_pm_transformer_embedding_type_not_passed_to_builder():
-    """embedding_type must be filtered before calling the network builder
-    (would cause a TypeError if leaked)."""
-    model_kwargs = _make_transformer_model_kwargs()
-    # This must not raise TypeError: unexpected keyword argument 'embedding_type'
-    pm = NormalizingFlowPosteriorModel(
-        metadata={"train_settings": {"model": model_kwargs}}, device="cpu"
-    )
-    assert pm.network is not None
 
 
 def test_pm_initializes_with_explicit_embedding_type_resnet(data_setup_pm_1):

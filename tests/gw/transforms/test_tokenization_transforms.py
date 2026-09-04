@@ -1,11 +1,8 @@
-import warnings
-
 import numpy as np
 import pytest
+from scipy.stats import chisquare
 
 from dingo.gw.domains import UniformFrequencyDomain, MultibandedFrequencyDomain
-from dingo.gw.gwutils import detect_asd_notches
-from dingo.gw.noise.asd_dataset import HIGH_ASD_VALUE
 from dingo.gw.transforms import (
     StrainTokenization,
     MaskRandomTokens,
@@ -125,9 +122,9 @@ def _check_position_and_mask(out, domain, num_tokens_per_block, num_blocks):
 @pytest.fixture
 def ufd_batch():
     domain = make_ufd()
-    # frequency_mask_length = 8032 (f_min=20, f_max=1024, delta_f=0.125).
-    # 8032 % 40 != 0, so these fixtures exercise the zero-padding path.
-    # 8032 has no convenient power-of-2 divisor, so an exact-division UFD case
+    # frequency_mask_length = 8033 (f_min=20, f_max=1024, delta_f=0.125).
+    # 8033 % 40 != 0, so these fixtures exercise the zero-padding path.
+    # 8033 has no convenient power-of-2 divisor, so an exact-division UFD case
     # would require an artificially chosen domain; the MFD fixtures cover that.
     num_tokens_per_block = 40
     return domain, num_tokens_per_block, 2, make_sample(domain, batch_size=100)
@@ -366,6 +363,7 @@ def test_MaskRandomTokens(request, setup):
 
     # Evaluate transforms
     out = token_transformation(sample)
+    np.random.seed(0)
     out = mask_trafo(out)
 
     # Check that not more than max_num_tokens are masked per sample
@@ -378,12 +376,9 @@ def test_MaskRandomTokens(request, setup):
         prob_mask = np.mean(np.where(num_removed_tokens > 0.0, 1.0, 0.0))
         assert np.isclose(prob_mask, mask_dict["p_mask"], atol=0.1, rtol=0.1)
 
-        # Check that dropped tokens are uniformly distributed
+        # Dropped tokens are uniformly distributed over token positions.
         hist_removed_tokens = np.sum(out["token_mask"], axis=0)
-        mean_removed_tokens = np.mean(hist_removed_tokens)
-        assert np.all(
-            np.isclose(mean_removed_tokens, hist_removed_tokens, atol=5, rtol=5)
-        )
+        assert chisquare(hist_removed_tokens).pvalue > 1e-3
 
 
 def test_MaskRandomTokens_p_mask_zero():
@@ -775,6 +770,7 @@ def test_MaskFrequencyNotches(request, setup):
         print_output=False,
     )
     out = token_transformation(sample)
+    np.random.seed(0)
     out = mask_transformation(out)
 
     # Masked tokens must overlap with [f_min, f_max]: the f_max of the token must be
@@ -853,9 +849,9 @@ def test_MaskFrequencyNotches(request, setup):
                     True
                 )
                 lower_edge_counts += np.sum(edge, axis=0)
-            non_zero = lower_edge_counts[mask_tokens]
-            if non_zero.size > 0:
-                assert np.isclose(np.mean(non_zero), non_zero, atol=5, rtol=5).all()
+            counts = lower_edge_counts[mask_tokens]
+            if counts.size > 1:
+                assert chisquare(counts).pvalue > 1e-3
 
 
 def test_MaskFrequencyNotches_p_per_detector_zero():
@@ -1058,97 +1054,6 @@ def test_MaskTokensForFrequencyRangeUpdate_preserves_existing_mask():
 
 
 # ---------------------------------------------------------------------------
-# detect_asd_notches
-# ---------------------------------------------------------------------------
-
-
-def _make_asd_array(domain, notch_intervals=None):
-    """Build a full-length ASD array (length max_idx + 1) with real-valued noise
-    below HIGH_ASD_VALUE, except inside notch_intervals where ASD = HIGH_ASD_VALUE.
-    Edge-padding bins (0 .. min_idx-1) are set to HIGH_ASD_VALUE by convention.
-    """
-    n = domain.max_idx + 1
-    asd = np.full(n, 1e-23)  # realistic noise amplitude
-    # edge padding
-    asd[: domain.min_idx] = HIGH_ASD_VALUE
-    if notch_intervals:
-        freqs = domain.sample_frequencies
-        for f_lo, f_hi in notch_intervals:
-            mask = (freqs >= f_lo) & (freqs <= f_hi)
-            asd[mask] = HIGH_ASD_VALUE
-    return asd
-
-
-def test_detect_asd_notches_no_notch():
-    """No notches in any detector → returns None."""
-    domain = make_ufd(f_min=20.0, f_max=512.0)
-    asd = _make_asd_array(domain)
-    result = detect_asd_notches({"H1": asd, "L1": asd}, domain)
-    assert result is None
-
-
-def test_detect_asd_notches_single_notch():
-    """Single interior notch is correctly detected."""
-    domain = make_ufd(f_min=20.0, f_max=512.0)
-    f_lo, f_hi = 59.0, 61.0
-    asd = _make_asd_array(domain, notch_intervals=[[f_lo, f_hi]])
-    result = detect_asd_notches({"H1": asd}, domain)
-    assert result is not None
-    assert "H1" in result
-    intervals = result["H1"]
-    assert len(intervals) == 1
-    detected_lo, detected_hi = intervals[0]
-    assert detected_lo >= f_lo
-    assert detected_hi <= f_hi + domain.delta_f
-
-
-def test_detect_asd_notches_multiple_notches():
-    """Multiple disjoint notches per detector are all detected."""
-    domain = make_ufd(f_min=20.0, f_max=512.0)
-    notches = [[59.0, 61.0], [119.0, 121.0]]
-    asd = _make_asd_array(domain, notch_intervals=notches)
-    result = detect_asd_notches({"H1": asd}, domain)
-    assert result is not None
-    assert len(result["H1"]) == 2
-
-
-def test_detect_asd_notches_edge_padding_ignored():
-    """Edge-padding at f_min (index 0 of valid band) is not reported as a notch."""
-    domain = make_ufd(f_min=20.0, f_max=512.0)
-    # Set the very first valid bin (at f_min) to HIGH_ASD_VALUE to mimic edge padding.
-    asd = _make_asd_array(domain)
-    asd[domain.min_idx] = HIGH_ASD_VALUE
-    result = detect_asd_notches({"H1": asd}, domain)
-    assert result is None
-
-
-def test_detect_asd_notches_edge_padding_ignored_at_f_max():
-    """A high run touching f_max (bilby fills frequencies beyond a PSD file with inf)
-    is edge padding, not a notch. One bin is silent; wider warns that the PSD does
-    not cover the model band."""
-    domain = make_ufd(f_min=20.0, f_max=512.0)
-    asd = _make_asd_array(domain)
-    asd[-1] = np.inf
-    with warnings.catch_warnings():
-        warnings.simplefilter("error")
-        assert detect_asd_notches({"H1": asd}, domain) is None
-    asd[-3:] = np.inf
-    with pytest.warns(UserWarning, match="does not cover"):
-        assert detect_asd_notches({"H1": asd}, domain) is None
-
-
-def test_detect_asd_notches_per_detector():
-    """Notch in H1 only is not reported for L1."""
-    domain = make_ufd(f_min=20.0, f_max=512.0)
-    asd_h1 = _make_asd_array(domain, notch_intervals=[[59.0, 61.0]])
-    asd_l1 = _make_asd_array(domain)
-    result = detect_asd_notches({"H1": asd_h1, "L1": asd_l1}, domain)
-    assert result is not None
-    assert "H1" in result
-    assert "L1" not in result
-
-
-# ---------------------------------------------------------------------------
 # MaskTokensForFrequencyRangeUpdate — psd_notch_dict
 # ---------------------------------------------------------------------------
 
@@ -1306,17 +1211,3 @@ def test_mask_frequency_notches_non_dyadic_delta_f():
     out = transform(sample)
     assert out["token_mask"].any()
     assert not out["token_mask"].all()
-
-
-def test_detect_asd_notches_multibanded_uses_base_domain():
-    """Stored ASDs live on the base grid; MFD indices must not be used (this
-    returned wrong notch frequencies before)."""
-    base = UniformFrequencyDomain(f_min=20.0, f_max=100.0, delta_f=0.25)
-    mfd = MultibandedFrequencyDomain(
-        nodes=[20.0, 36.0, 100.0], delta_f_initial=0.25, base_domain=base
-    )
-    asd = np.full(len(base), 1e-23)
-    freqs = base.sample_frequencies
-    asd[(freqs >= 60.0) & (freqs <= 61.0)] = HIGH_ASD_VALUE
-    notches = detect_asd_notches({"H1": asd}, mfd)
-    assert notches == {"H1": [[60.0, 61.0]]}

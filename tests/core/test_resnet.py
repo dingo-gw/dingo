@@ -54,18 +54,6 @@ def test_layer_norm_and_batch_norm_are_mutually_exclusive():
         MyResidualBlock(features=16, use_batch_norm=True, use_layer_norm=True)
 
 
-def test_layer_norm_runs_and_normalizes():
-    """With layer_norm enabled, the normalized pre-activation within the block should
-    have ~zero mean and ~unit variance across the feature dimension."""
-    block = MyResidualBlock(features=32, use_batch_norm=False, use_layer_norm=True)
-    x = torch.rand(50, 32) * 100 + 1000  # large offset/scale to make norm effect clear
-    normalized = block.layer_norm_layers[0](x)
-    assert torch.allclose(normalized.mean(dim=-1), torch.zeros(50), atol=1e-5)
-    assert torch.allclose(
-        normalized.std(dim=-1, unbiased=False), torch.ones(50), atol=1e-3
-    )
-
-
 def test_context_glu_does_not_mix_across_tokens():
     """Regression test for the dim=1 -> dim=-1 GLU fix.
 

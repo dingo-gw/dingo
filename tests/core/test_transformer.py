@@ -5,7 +5,11 @@ import torch
 from torch.nn import functional as F
 
 from dingo.core.nn.resnet import DenseResidualNet, LinearLayer
-from dingo.core.nn.transformer import Tokenizer, TransformerModel, create_transformer_enet
+from dingo.core.nn.transformer import (
+    Tokenizer,
+    TransformerModel,
+    create_transformer_enet,
+)
 
 
 NUM_TOKENS = 6
@@ -290,19 +294,6 @@ def make_full_enet(pooling="cls"):
     )
 
 
-def test_padding_mask_does_not_change_output_shape():
-    """Output shape must be identical whether or not a padding mask is supplied."""
-    model = make_full_enet(pooling="cls")
-    model.eval()
-    x, position = make_enet_inputs(batch_size=4)
-    mask = torch.zeros(4, NUM_TOKENS, dtype=torch.bool)
-    mask[:, -2:] = True  # mask last two tokens
-
-    out_no_mask = model(x=x, position=position)
-    out_masked = model(x=x, position=position, src_key_padding_mask=mask)
-    assert out_no_mask.shape == out_masked.shape
-
-
 def test_padding_mask_changes_output():
     """Masking some tokens must change the CLS-pooled output."""
     model = make_full_enet(pooling="cls")
@@ -313,6 +304,7 @@ def test_padding_mask_changes_output():
 
     out_no_mask = model(x=x, position=position)
     out_masked = model(x=x, position=position, src_key_padding_mask=mask)
+    assert out_no_mask.shape == out_masked.shape
     assert not torch.allclose(out_no_mask, out_masked)
 
 
