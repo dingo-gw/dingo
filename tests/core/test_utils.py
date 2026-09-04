@@ -130,7 +130,7 @@ def test_update_model_config_maps_dingo_t1_transformer_kwargs():
         "activation": "elu",
         "batch_norm": False,
         "layer_norm": True,
-        "input_dims": [207, 48],
+        "input_dim": 48,
         "num_blocks": 3,
     }
     assert embedding_kwargs["final_net_kwargs"] == {

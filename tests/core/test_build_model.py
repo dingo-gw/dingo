@@ -150,15 +150,14 @@ def _make_resnet_model_kwargs(output_dim=_CONTEXT_DIM):
 # ---------------------------------------------------------------------------
 
 
-def test_autocomplete_transformer_sets_tokenizer_input_dims():
+def test_autocomplete_transformer_sets_tokenizer_input_dim():
     model_kwargs = _make_transformer_model_kwargs()
     data_sample = _make_data_sample()
 
     autocomplete_model_kwargs(model_kwargs, data_sample)
 
-    assert model_kwargs["embedding_kwargs"]["tokenizer_kwargs"]["input_dims"] == list(
-        data_sample[1].shape
-    )
+    tokenizer_kwargs = model_kwargs["embedding_kwargs"]["tokenizer_kwargs"]
+    assert tokenizer_kwargs["input_dim"] == data_sample[1].shape[-1]
 
 
 def test_autocomplete_transformer_context_dim_from_final_net():

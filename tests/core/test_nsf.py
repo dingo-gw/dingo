@@ -292,7 +292,7 @@ def _make_transformer_posterior_kwargs():
 def _make_transformer_embedding_kwargs():
     return {
         "tokenizer_kwargs": {
-            "input_dims": [_NUM_TOKENS, _NUM_FEATURES],
+            "input_dim": _NUM_FEATURES,
             "num_blocks": _NUM_BLOCKS,
             "hidden_dims": [16],
             "activation": "elu",

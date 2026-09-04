@@ -168,6 +168,9 @@ def update_model_config(model_settings: dict):
         # Derived from num_blocks and d_model at construction.
         for key in ("context_features", "output_dim"):
             tokenizer_kwargs.pop(key, None)
+        # [num_tokens, num_features] -> num_features (only the latter was used).
+        if "input_dims" in tokenizer_kwargs:
+            tokenizer_kwargs["input_dim"] = tokenizer_kwargs.pop("input_dims")[-1]
         (embedding_kwargs.get("final_net_kwargs") or {}).pop("input_dim", None)
 
 

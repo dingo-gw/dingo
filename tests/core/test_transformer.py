@@ -20,7 +20,7 @@ OUTPUT_DIM = 8
 
 def make_tokenizer(num_blocks=NUM_BLOCKS, layer_norm=False, batch_norm=False):
     return Tokenizer(
-        input_dims=[NUM_TOKENS, NUM_FEATURES],
+        input_dim=NUM_FEATURES,
         hidden_dims=[16, 16],
         output_dim=OUTPUT_DIM,
         activation=F.elu,
@@ -57,17 +57,6 @@ def test_output_shape_unbatched():
     position = torch.stack([f_min, f_max, detector], dim=-1)
     out = tokenizer(x, position)
     assert out.shape == (NUM_TOKENS, OUTPUT_DIM)
-
-
-def test_invalid_input_dims_raises():
-    with pytest.raises(ValueError):
-        Tokenizer(
-            input_dims=[NUM_TOKENS, NUM_FEATURES, 1],
-            hidden_dims=[16],
-            output_dim=OUTPUT_DIM,
-            activation=F.elu,
-            num_blocks=NUM_BLOCKS,
-        )
 
 
 def test_wrong_feature_dim_raises():
@@ -158,7 +147,7 @@ D_MODEL = 16
 
 def make_enet_kwargs():
     tokenizer_kwargs = {
-        "input_dims": [NUM_TOKENS, NUM_FEATURES],
+        "input_dim": NUM_FEATURES,
         "num_blocks": NUM_BLOCKS,
         "hidden_dims": [16],
         "activation": "elu",
@@ -281,6 +270,26 @@ def test_invalid_pooling_raises():
 # ---------------------------------------------------------------------------
 # TransformerModel — src_key_padding_mask (drop-token masking)
 # ---------------------------------------------------------------------------
+
+
+def test_final_net_without_activation_is_a_bare_projection():
+    """Omitting activation from final_net_kwargs gives an unbounded linear output;
+    a residual final net still requires one."""
+    tokenizer_kwargs, transformer_kwargs = make_enet_kwargs()
+    model = create_transformer_enet(
+        tokenizer_kwargs=tokenizer_kwargs,
+        transformer_kwargs=transformer_kwargs,
+        final_net_kwargs={"output_dim": 5},
+    )
+    assert model.final_net.activation is None
+    x, position = make_enet_inputs(batch_size=3)
+    assert model(x=x, position=position).shape == (3, 5)
+    with pytest.raises(ValueError, match="requires activation"):
+        create_transformer_enet(
+            tokenizer_kwargs=tokenizer_kwargs,
+            transformer_kwargs=transformer_kwargs,
+            final_net_kwargs={"output_dim": 5, "hidden_dims": [8]},
+        )
 
 
 def make_full_enet(pooling="cls"):

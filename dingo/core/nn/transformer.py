@@ -1,6 +1,7 @@
 from typing import Callable, List, Optional
 
 import torch
+import torch.nn.functional as F
 from torch import nn, Tensor
 from torch.nn import TransformerEncoder, TransformerEncoderLayer
 
@@ -22,7 +23,7 @@ class Tokenizer(nn.Module):
 
     def __init__(
         self,
-        input_dims: List[int],
+        input_dim: int,
         hidden_dims: List[int],
         output_dim: int,
         activation: Callable,
@@ -34,9 +35,9 @@ class Tokenizer(nn.Module):
         """
         Parameters
         ----------
-        input_dims : List[int]
-            [num_tokens, num_features], i.e., the shape of the tokenized waveform,
-            omitting batch dimensions. Only num_features (the last entry) is used.
+        input_dim : int
+            number of features per token (the last dimension of the tokenized
+            waveform)
         hidden_dims : List[int]
             dimensions of hidden layers for the underlying DenseResidualNet
         output_dim : int
@@ -54,12 +55,7 @@ class Tokenizer(nn.Module):
             whether to use layer normalization in the DenseResidualNet
         """
         super().__init__()
-        if len(input_dims) != 2:
-            raise ValueError(
-                f"Invalid shape in Tokenizer, expected len(input_dims) == 2, got "
-                f"{input_dims}."
-            )
-        self.num_features = input_dims[-1]
+        self.num_features = input_dim
         self.num_blocks = num_blocks
         self.tokenizer_net = DenseResidualNet(
             input_dim=self.num_features,
@@ -93,9 +89,9 @@ class Tokenizer(nn.Module):
                 f"{x.shape[-1]}."
             )
         detector_per_token = position[..., 2]
-        detector_one_hot = torch.eye(self.num_blocks, device=position.device)[
-            detector_per_token.long()
-        ]
+        detector_one_hot = F.one_hot(detector_per_token.long(), self.num_blocks).to(
+            position.dtype
+        )
         context = torch.cat((position[..., :2], detector_one_hot), dim=-1)
         return self.tokenizer_net(x=x, context=context)
 
@@ -157,7 +153,6 @@ class TransformerModel(nn.Module):
             )
 
         self.tokenizer = tokenizer
-        self.d_model = d_model
         self.pooling = pooling
         self.final_net = final_net
 
@@ -261,7 +256,7 @@ def create_transformer_enet(
     Parameters
     ----------
     tokenizer_kwargs : dict
-        settings for the Tokenizer. Must contain input_dims and num_blocks (set
+        settings for the Tokenizer. Must contain input_dim and num_blocks (set
         based on the data, not hardcoded in a settings file); activation is given
         as a str and resolved to a Callable here; output_dim is set automatically
         to transformer_kwargs["d_model"].
@@ -271,12 +266,12 @@ def create_transformer_enet(
     pooling : str
         one of ["average", "cls"]
     final_net_kwargs : Optional[dict]
-        settings for the network applied after pooling. Must contain output_dim and
-        activation. If it also contains hidden_dims, a DenseResidualNet is built
-        (dropout, batch_norm, layer_norm are then read from this dict as well,
-        analogous to tokenizer_kwargs). Otherwise, a LinearLayer (linear + activation)
-        is used. If final_net_kwargs is None, no final_net is used and the pooled
-        d_model-dim vector is returned directly.
+        settings for the network applied after pooling. Must contain output_dim. If
+        it also contains hidden_dims, a DenseResidualNet is built and activation is
+        required (dropout, batch_norm, layer_norm are then read from this dict as
+        well, analogous to tokenizer_kwargs). Otherwise, a single linear layer is
+        used, followed by activation if one is given. If final_net_kwargs is None,
+        no final_net is used and the pooled d_model-dim vector is returned directly.
 
     Returns
     -------
@@ -295,9 +290,14 @@ def create_transformer_enet(
     if final_net_kwargs is not None:
         final_net_kwargs = dict(final_net_kwargs)
         output_dim = final_net_kwargs.pop("output_dim")
-        final_net_kwargs["activation"] = torchutils.get_activation_function_from_string(
-            final_net_kwargs["activation"]
-        )
+        if final_net_kwargs.get("activation") is not None:
+            final_net_kwargs["activation"] = (
+                torchutils.get_activation_function_from_string(
+                    final_net_kwargs["activation"]
+                )
+            )
+        elif "hidden_dims" in final_net_kwargs:
+            raise ValueError("final_net_kwargs with hidden_dims requires activation.")
         if "hidden_dims" in final_net_kwargs:
             final_net_kwargs["hidden_dims"] = tuple(final_net_kwargs["hidden_dims"])
             final_net = DenseResidualNet(

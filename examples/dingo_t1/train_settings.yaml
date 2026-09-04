@@ -80,8 +80,7 @@ model:
       num_layers: 8
       norm_first: True
     pooling: cls
-    final_net_kwargs:
-      activation: elu
+    final_net_kwargs:  # linear projection to the flow context (no activation)
       output_dim: 128
 
 training:

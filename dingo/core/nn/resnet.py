@@ -209,12 +209,15 @@ class DenseResidualNet(nn.Module):
 
 
 class LinearLayer(nn.Module):
-    """A single linear layer followed by an activation function."""
+    """A single linear layer, followed by an activation function if one is given."""
 
-    def __init__(self, input_dim: int, output_dim: int, activation: Callable):
+    def __init__(
+        self, input_dim: int, output_dim: int, activation: Optional[Callable] = None
+    ):
         super().__init__()
         self.linear = nn.Linear(input_dim, output_dim)
         self.activation = activation
 
     def forward(self, x: Tensor) -> Tensor:
-        return self.activation(self.linear(x))
+        x = self.linear(x)
+        return x if self.activation is None else self.activation(x)

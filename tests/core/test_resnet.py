@@ -12,6 +12,12 @@ def test_forward_pass_of_LinearLayer():
     check_model_forward_pass(layer, [output_dim], [input_dim], batch_size)
 
 
+def test_LinearLayer_without_activation_is_a_bare_projection():
+    layer = LinearLayer(input_dim=16, output_dim=4)
+    x = torch.randn(10, 16)
+    assert torch.equal(layer(x), layer.linear(x))
+
+
 def test_backward_pass_of_LinearLayer():
     batch_size, input_dim, output_dim = 10, 16, 4
     layer = LinearLayer(input_dim=input_dim, output_dim=output_dim, activation=F.elu)

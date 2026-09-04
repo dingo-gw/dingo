@@ -339,7 +339,7 @@ def create_nsf_wrapped(**kwargs):
 def create_nsf_with_transformer_embedding_net(
     posterior_kwargs: dict,
     embedding_kwargs: dict,
-    **kwargs,
+    initial_weights: dict = None,
 ):
     """Builds a neural spline flow with a transformer embedding network.
 
@@ -350,6 +350,10 @@ def create_nsf_with_transformer_embedding_net(
     embedding_kwargs : dict
         kwargs for transformer embedding network (tokenizer_kwargs, transformer_kwargs,
         pooling, final_net_kwargs)
+    initial_weights : dict
+        accepted for interface parity with the resnet builder (the posterior model
+        always passes it); the transformer embedding has no SVD initialization, so
+        it is ignored.
     """
     from dingo.core.nn.transformer import create_transformer_enet
 

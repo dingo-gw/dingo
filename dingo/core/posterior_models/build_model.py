@@ -93,7 +93,7 @@ def autocomplete_model_kwargs(model_kwargs: dict, data_sample: list):
 
     if embedding_type == "transformer":
         tokenizer_kwargs = model_kwargs["embedding_kwargs"]["tokenizer_kwargs"]
-        tokenizer_kwargs["input_dims"] = list(data_sample[1].shape)
+        tokenizer_kwargs["input_dim"] = int(data_sample[1].shape[-1])
         if "num_blocks" not in tokenizer_kwargs:
             # position tensor is data_sample[2], shape [num_tokens, 3];
             # column 2 holds integer detector indices 0..num_blocks-1
