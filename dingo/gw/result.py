@@ -70,6 +70,15 @@ class Result(CoreResult):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+        # Correct bug in recursive hdf5 load: If we want to analyze a single detector event, the detector list gets
+        # loaded as a string instead of a list (i.e., 'L1' instead of ['L1']). This has to be reverted because the code
+        # expects detectors to be a list in result.reset_event(). If it is not a list, event_metadata is not the same as
+        # the event metadata loaded from the events file (where detectors is a list) and it assumes that a domain update
+        # is necessary (which is not implemented for MFD).
+        if self.event_metadata is not None and isinstance(
+            self.event_metadata.get("detectors"), str
+        ):
+            self.event_metadata["detectors"] = [self.event_metadata["detectors"]]
 
     @property
     def synthetic_phase_kwargs(self):
@@ -446,7 +455,7 @@ class Result(CoreResult):
 
         # Removing the delta function priors on the frequency nodes, amplitude and phase.
         # Usually the frequency nodes are set to delta functions, but we also remove the
-        # amplitude and phase delta functions if present.
+        # the amplitude and phase delta functions if present.
         # This avoids large log probs and log priors, since the density of a delta function
         # at the sampled point is infinite. The delta functions do not affect the sampling,
         # since they just fix certain parameters to constant values.

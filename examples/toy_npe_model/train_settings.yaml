@@ -38,7 +38,8 @@ model:
       batch_norm: True
       num_bins: 8
       base_transform_type: rq-coupling
-  # kwargs for embedding net
+  # embedding network
+  embedding_type: resnet
   embedding_kwargs:
     output_dim: 128
     hidden_dims: [1024, 512, 256, 128]

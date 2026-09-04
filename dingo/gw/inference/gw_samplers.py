@@ -1,5 +1,7 @@
 from typing import Union, Protocol
 
+import warnings
+
 import numpy as np
 import pandas as pd
 from astropy.time import Time
@@ -32,14 +34,16 @@ from dingo.gw.transforms import (
     GetDetectorTimes,
     DecimateWaveformsAndASDS,
     MaskDataForFrequencyRangeUpdate,
+    StrainTokenization,
+    MaskTokensForFrequencyRangeUpdate,
+    UnpackDict,
 )
 
 
 class SamplerProtocol(Protocol):
     base_model_metadata: dict
 
-    def _initialize_transforms(self) -> None:
-        ...
+    def _initialize_transforms(self) -> None: ...
 
 
 class _GWMixinProtocol(SamplerProtocol):
@@ -65,6 +69,9 @@ class GWSamplerMixin(object):
         # Has to be specified before init, because the information is required in _initialize_transforms()
         self._minimum_frequency = None
         self._maximum_frequency = None
+        self._detectors = None
+        self._psd_notch_dict = None
+        self._defer_rebuild = False
         super().__init__(**kwargs)
         self.t_ref = self.base_model_metadata["train_settings"]["data"]["ref_time"]
         self._pesummary_package = "gw"
@@ -72,7 +79,18 @@ class GWSamplerMixin(object):
 
     @property
     def detectors(self: SamplerProtocol):
-        return self.base_model_metadata["train_settings"]["data"]["detectors"]
+        if self._detectors is None:
+            self._detectors = self.base_model_metadata["train_settings"]["data"][
+                "detectors"
+            ]
+        return self._detectors
+
+    @detectors.setter
+    def detectors(self: _GWMixinProtocol, value: list[str]):
+        check_detector_update(self.base_model_metadata, value)
+        self._detectors = value
+        if not self._defer_rebuild:
+            self._initialize_transforms()
 
     @property
     def random_strain_cropping(self: SamplerProtocol):
@@ -95,14 +113,15 @@ class GWSamplerMixin(object):
             domain = self.domain
         else:
             raise ValueError("Frequency updates only possible for frequency domains.")
-        _validate_minimum_frequency(
+        _validate_frequency_bound(
             value,
-            self.detectors,
+            "minimum_frequency",
             domain,
-            self.random_strain_cropping,
-        )  # TODO: Ensure minimum frequency is a dict?
+            self.base_model_metadata["train_settings"]["data"],
+        )
         self._minimum_frequency = value
-        self._initialize_transforms()
+        if not self._defer_rebuild:
+            self._initialize_transforms()
 
     @property
     def maximum_frequency(self) -> float | dict[str, float]:
@@ -112,21 +131,22 @@ class GWSamplerMixin(object):
             return self.domain.f_max
 
     @maximum_frequency.setter
-    def maximum_frequency(self: _GWMixinProtocol, value: Union[float, dict]):
+    def maximum_frequency(self: _GWMixinProtocol, value: dict[str, float] | float):
         if isinstance(self.domain, MultibandedFrequencyDomain):
             domain = self.domain.base_domain
         elif isinstance(self.domain, UniformFrequencyDomain):
             domain = self.domain
         else:
             raise ValueError("Frequency updates only possible for frequency domains.")
-        _validate_maximum_frequency(
+        _validate_frequency_bound(
             value,
-            self.detectors,
+            "maximum_frequency",
             domain,
-            self.random_strain_cropping,
+            self.base_model_metadata["train_settings"]["data"],
         )
         self._maximum_frequency = value
-        self._initialize_transforms()
+        if not self._defer_rebuild:
+            self._initialize_transforms()
 
     @property
     def frequency_updates(self) -> bool:
@@ -140,6 +160,26 @@ class GWSamplerMixin(object):
         ) != {self.domain.f_max}
 
     @property
+    def psd_notch_dict(self) -> dict | None:
+        return getattr(self, "_psd_notch_dict", None)
+
+    @psd_notch_dict.setter
+    def psd_notch_dict(self, value: dict | None):
+        if value is not None:
+            if isinstance(self.domain, MultibandedFrequencyDomain):
+                domain = self.domain.base_domain
+            elif isinstance(self.domain, UniformFrequencyDomain):
+                domain = self.domain
+            else:
+                raise ValueError("psd_notch_dict requires a frequency domain.")
+            _validate_psd_notches(
+                value, domain, self.base_model_metadata["train_settings"]["data"]
+            )
+        self._psd_notch_dict = value
+        if not self._defer_rebuild:
+            self._initialize_transforms()
+
+    @property
     def event_metadata(self):
         if self._event_metadata is not None:
             metadata = self._event_metadata.copy()
@@ -147,16 +187,32 @@ class GWSamplerMixin(object):
             metadata = {}
         metadata["minimum_frequency"] = self.minimum_frequency
         metadata["maximum_frequency"] = self.maximum_frequency
+        metadata["detectors"] = self.detectors
+        if self.psd_notch_dict is not None:
+            metadata["psd_notch_dict"] = self.psd_notch_dict
         return metadata
 
     @event_metadata.setter
     def event_metadata(self, value):
         if value is not None:
             value = value.copy()
-            if "minimum_frequency" in value:
-                self.minimum_frequency = value.pop("minimum_frequency")
-            if "maximum_frequency" in value:
-                self.maximum_frequency = value.pop("maximum_frequency")
+            # Apply the per-event settings through their validating setters, but
+            # rebuild the transform chain once rather than once per setting.
+            # Detectors go first so that frequency validation (which uses
+            # self.detectors) already reflects the event's detector subset.
+            self._defer_rebuild = True
+            try:
+                if "detectors" in value and value["detectors"] is not None:
+                    self.detectors = value.pop("detectors")
+                if "minimum_frequency" in value:
+                    self.minimum_frequency = value.pop("minimum_frequency")
+                if "maximum_frequency" in value:
+                    self.maximum_frequency = value.pop("maximum_frequency")
+                if "psd_notch_dict" in value:
+                    self.psd_notch_dict = value.pop("psd_notch_dict")
+            finally:
+                self._defer_rebuild = False
+            self._initialize_transforms()
         self._event_metadata = value
 
     def _build_domain(self: Sampler):
@@ -172,7 +228,6 @@ class GWSamplerMixin(object):
         data_settings = self.base_model_metadata["train_settings"]["data"]
         if "domain_update" in data_settings:
             self.domain.update(data_settings["domain_update"])
-
 
     def _correct_reference_time(
         self: Sampler, samples: Union[dict, pd.DataFrame], inverse: bool = False
@@ -297,10 +352,13 @@ class GWSampler(GWSamplerMixin, Sampler):
         #   * whiten and scale strain (since the inference network expects standardized
         #   data)
         transform_pre.append(WhitenAndScaleStrain(self.domain.noise_std))
-        if self.frequency_updates:
+        tok = self.metadata["train_settings"]["data"].get("tokenization")
+        if self.frequency_updates and not tok:
             # * update frequency range
-            # Needs to happen before RepackageStrainsAndASDs since we might need to apply
-            # detectors specific frequency updates.
+            # Needs to happen before RepackageStrainsAndASDs since we might need to
+            # apply detectors specific frequency updates. For tokenized models,
+            # we do not apply bin-level masking since it is inert ( every unmasked
+            # token lies fully inside the requested range).
             transform_pre.append(
                 MaskDataForFrequencyRangeUpdate(
                     domain=self.domain,
@@ -309,19 +367,46 @@ class GWSampler(GWSamplerMixin, Sampler):
                 )
             )
         #   * repackage strains and asds from dicts to an array
-        #   * convert array to torch tensor on the correct device
-        #   * extract only strain/waveform from the sample
-        transform_pre += [
-            # Use base metadata so that unconditional samplers still know how to
-            # transform data, since this transform is used by the GNPE sampler as
-            # well.
+        #   * optionally tokenize strain (transformer embedding network only)
+        #   * convert array(s) to torch tensor(s) on the correct device
+        #   * extract waveform (and position, token_mask for transformer)
+        # Use base metadata so that unconditional samplers still know how to
+        # transform data, since this transform is used by the GNPE sampler as well.
+        transform_pre.append(
             RepackageStrainsAndASDS(
                 ifos=self.detectors,
                 first_index=self.domain.min_idx,
-            ),
-            ToTorch(device=self.model.device),
-            GetItem("waveform"),
-        ]
+            )
+        )
+
+        if tok:
+            # StrainTokenization operates on numpy arrays, so it must precede ToTorch.
+            transform_pre.append(
+                StrainTokenization(
+                    domain=self.domain,
+                    token_size=tok.get("token_size"),
+                    num_tokens_per_block=tok.get("num_tokens_per_block"),
+                    drop_last_token=tok.get("drop_last_token", False),
+                )
+            )
+            if self.frequency_updates or self.psd_notch_dict:
+                transform_pre.append(
+                    MaskTokensForFrequencyRangeUpdate(
+                        domain=self.domain,
+                        detectors=self.detectors,
+                        minimum_frequency=self.minimum_frequency,
+                        maximum_frequency=self.maximum_frequency,
+                        psd_notch_dict=self.psd_notch_dict,
+                    )
+                )
+
+        transform_pre.append(ToTorch(device=self.model.device))
+
+        if tok:
+            transform_pre.append(UnpackDict(["waveform", "position", "token_mask"]))
+        else:
+            transform_pre.append(GetItem("waveform"))
+
         self.transform_pre = Compose(transform_pre)
 
         # postprocessing transforms:
@@ -512,108 +597,115 @@ class GWSamplerGNPE(GWSamplerMixin, GNPESampler):
 # Functions for frequency cropping. Used by Sampler classes and dingo-pipe.
 
 
-def _validate_maximum_frequency(
-    f_max: dict[str, float] | float,
-    detectors: list[str],
+def _validate_frequency_bound(
+    value: dict[str, float] | float,
+    bound: str,
     domain: UniformFrequencyDomain | MultibandedFrequencyDomain,
-    crop_settings: dict | None,
+    data_settings: dict,
 ):
-    if isinstance(f_max, float):
-        f_max = {d: f_max for d in detectors}
-    if set(f_max) != set(detectors):
-        raise ValueError(
-            f"f_max must have exactly detectors {detectors}, got " f"{list(f_max)}."
-        )
-    f_max_vals = np.array([f_max[d] for d in detectors])
+    """
+    Validate a requested minimum or maximum frequency against the model's training
+    settings.
 
-    # Hard upper bound
-    if np.any(f_max_vals > domain.f_max):
-        raise ValueError(f"f_max {f_max} > domain.f_max = {domain.f_max}.")
+    ``value`` may be a float (applying to all detectors) or a per-detector dict
+    constraining only the detectors it names; keys must be detectors the model was
+    trained with. Values equal to the domain bound are always allowed. A changed
+    value requires frequency flexibility from training: ``random_strain_cropping``
+    and/or ``tokenization.mask_frequency_range`` are validated against their
+    envelopes; a model with only ``tokenization.mask_random_tokens`` passes with a
+    warning, since the contiguous masking pattern differs from the random training
+    distribution.
 
-    # Nothing changed
-    if np.all(f_max_vals == domain.f_max):
+    Parameters
+    ----------
+    value : dict[str, float] or float
+        Requested frequency bound.
+    bound : str
+        "minimum_frequency" or "maximum_frequency".
+    domain : UniformFrequencyDomain or MultibandedFrequencyDomain
+        The model's base (uniform) domain.
+    data_settings : dict
+        ``train_settings["data"]`` of the model.
+
+    Raises
+    ------
+    ValueError
+        If the request is incompatible with the training settings.
+    """
+    minimum = bound == "minimum_frequency"
+    domain_value = domain.f_min if minimum else domain.f_max
+    model_detectors = data_settings["detectors"]
+
+    if isinstance(value, dict):
+        unknown = set(value) - set(model_detectors)
+        if unknown:
+            raise ValueError(
+                f"{bound} names detectors {sorted(unknown)} the model was not "
+                f"trained with (detectors: {model_detectors})."
+            )
+        values = dict(value)
+    else:
+        values = {d: value for d in model_detectors}
+
+    # Hard domain bounds.
+    for det, v in values.items():
+        if minimum and v < domain.f_min:
+            raise ValueError(f"f_min {values} < domain.f_min = {domain.f_min}.")
+        if not minimum and v > domain.f_max:
+            raise ValueError(f"f_max {values} > domain.f_max = {domain.f_max}.")
+
+    changed = {d: v for d, v in values.items() if v != domain_value}
+    if not changed:
         return
 
-    # Cropping must be on
-    if not crop_settings or crop_settings.get("cropping_probability", 0.0) == 0.0:
+    crop_settings = data_settings.get("random_strain_cropping")
+    tok = data_settings.get("tokenization") or {}
+    range_settings = tok.get("mask_frequency_range")
+
+    if crop_settings is None and range_settings is None:
+        if "mask_random_tokens" in tok:
+            warnings.warn(
+                f"Updating {bound} relies on mask_random_tokens training only; the "
+                f"contiguous masking pattern differs from the random training "
+                f"distribution. Expect reduced importance-sampling efficiency and "
+                f"check the effective sample size."
+            )
+            return
         raise ValueError(
-            f"Cropping disabled; cannot lower maximum frequency to {f_max}."
+            f"Model was not trained with variable frequency ranges "
+            f"(no random_strain_cropping, mask_frequency_range, or "
+            f"mask_random_tokens). Cannot update {bound}."
         )
 
-    # Extract lower bounds
-    floors = crop_settings.get("f_max_lower")
-    if floors is None:
-        floors = domain.f_max
-    if not isinstance(floors, dict):
-        floors = {d: floors for d in detectors}
+    if crop_settings is not None:
+        if crop_settings.get("cropping_probability", 0.0) == 0.0:
+            raise ValueError(f"Cropping disabled; cannot update {bound} to {value}.")
+        if not crop_settings.get("independent_detectors", True):
+            effective = {d: values.get(d, domain_value) for d in model_detectors}
+            if len(set(effective.values())) > 1:
+                raise ValueError(
+                    f"Independent frequencies per detector not enabled. All "
+                    f"frequencies must match, got {bound} = {value}."
+                )
 
-    # Check lower bound.
-    if not crop_settings.get("independent_detectors", True):
-        if len(set(f_max_vals)) > 1:
-            raise ValueError(
-                f"Independent max frequencies per detector not enabled. "
-                f"All frequencies must match, got f_max = {f_max}."
-            )
-        # TODO: Risk of non-constant floors with non-independent detectors.
-        assert len(set(floors.values())) == 1
-    for d in detectors:
-        if f_max[d] < floors[d]:
-            raise ValueError(
-                f"Maximum frequency requested for {d} ({f_max[d]} Hz) "
-                f"less than lower bound of {floors[d]} Hz."
-            )
-
-
-def _validate_minimum_frequency(
-    f_min: dict[str, float] | float,
-    detectors: list[str],
-    domain: UniformFrequencyDomain | MultibandedFrequencyDomain,
-    crop_settings: dict | None,
-):
-    if isinstance(f_min, float):
-        f_min = {d: f_min for d in detectors}
-    if set(f_min) != set(detectors):
-        raise ValueError(
-            f"f_min must have exactly detectors {detectors}, got {list(f_min)}."
-        )
-    f_min_vals = np.array([f_min[d] for d in detectors])
-
-    # Hard lower bound
-    if np.any(f_min_vals < domain.f_min):
-        raise ValueError(f"f_min {f_min} < domain.f_min = {domain.f_min}.")
-
-    # Nothing changed
-    if np.all(f_min_vals == domain.f_min):
-        return
-
-    # Cropping must be on
-    if not crop_settings or crop_settings.get("cropping_probability", 0.0) == 0.0:
-        raise ValueError(
-            f"Cropping disabled; cannot raise minimum frequency to {f_min}."
-        )
-
-    # Extract upper bounds
-    caps = crop_settings.get("f_min_upper")
-    if caps is None:
-        caps = domain.f_min
-    if not isinstance(caps, dict):
-        caps = {d: caps for d in detectors}
-
-    # Check upper bound.
-    if not crop_settings.get("independent_detectors", True):
-        if len(set(f_min_vals)) > 1:
-            raise ValueError(
-                f"Independent min frequencies per detector not enabled. "
-                f"All frequencies must match, got f_min = {f_min}."
-            )
-        # TODO: Risk of non-constant caps with non-independent detectors.
-        assert len(set(caps.values())) == 1
-    for d in detectors:
-        if f_min[d] > caps[d]:
-            raise ValueError(
-                f"Minimum frequency requested for {d} ({f_min[d]} Hz) "
-                f"greater than upper bound of {caps[d]} Hz."
-            )
+    # Training envelopes, in shared vocabulary: f_min may be raised up to
+    # f_min_upper, f_max lowered down to f_max_lower; an absent key means that
+    # side was never cropped / cut in training.
+    key = "f_min_upper" if minimum else "f_max_lower"
+    for settings, source in (
+        (crop_settings, "random_strain_cropping"),
+        (range_settings, "tokenization.mask_frequency_range"),
+    ):
+        if settings is None:
+            continue
+        cap = settings.get(key, domain_value)
+        caps = cap if isinstance(cap, dict) else {d: cap for d in model_detectors}
+        for det, v in changed.items():
+            if (minimum and v > caps[det]) or (not minimum and v < caps[det]):
+                raise ValueError(
+                    f"Requested {bound} for {det} ({v} Hz) is outside the "
+                    f"training envelope ({key}={cap} Hz from {source})."
+                )
 
 
 def check_frequency_updates(
@@ -622,61 +714,228 @@ def check_frequency_updates(
     f_max: dict[str, float] | float | None = None,
 ):
     """
-    Validate and apply optional minimum and maximum frequency constraints
-    for a model’s frequency domain.
+    Validate requested minimum / maximum frequencies against a model's metadata.
 
-    This function checks that any provided per-detector minimum (`f_min`)
-    or maximum (`f_max`) frequencies—either as a single float applied to
-    all detectors or as a dict mapping each detector to its own value—:
-      - Match exactly the set of detectors in the model metadata.
-      - Respect the hard bounds defined by the domain (`domain.f_min` /
-        `domain.f_max`).
-      - Comply with optional random-strain-cropping settings (probability,
-        independent vs. joint detectors, and per-detector caps/floors).
+    Thin metadata-level wrapper around ``_validate_frequency_bound``, used by
+    dingo_pipe at DAG-build time; see there for the accepted forms and semantics.
+    """
+    domain = build_domain_from_model_metadata(model_metadata, base=True)
+    if not isinstance(domain, (UniformFrequencyDomain, MultibandedFrequencyDomain)):
+        raise ValueError("Frequency updates only possible for frequency domains.")
+    data_settings = model_metadata["train_settings"]["data"]
+    if f_min is not None:
+        _validate_frequency_bound(f_min, "minimum_frequency", domain, data_settings)
+    if f_max is not None:
+        _validate_frequency_bound(f_max, "maximum_frequency", domain, data_settings)
+
+
+def _validate_psd_notches(
+    psd_notch_dict: dict,
+    domain: UniformFrequencyDomain | MultibandedFrequencyDomain,
+    data_settings: dict,
+):
+    """
+    Validate PSD notch intervals against the domain and the model's training settings.
+
+    ``psd_notch_dict`` maps detectors to one ``[f_lo, f_hi]`` interval or a list of
+    them. Configuration errors raise: a detector the model was not trained with, an
+    empty interval, or an interval touching the domain bounds (at data generation a
+    high-ASD run at an edge is taken for PSD padding, see ``detect_asd_notches``, so
+    the frequency bound must be moved instead). A mismatch with the training
+    distribution only warns, since the likelihood stays exact and the network is
+    merely a worse proposal: no notch training (including non-tokenized models),
+    ``mask_random_tokens`` only, or an interval outside the
+    ``tokenization.mask_frequency_notches`` envelope (range and ``max_width``).
 
     Parameters
     ----------
-    model_metadata : dict
-        Dictionary containing the model’s training settings and data.
-        Must include:
-          - `["train_settings"]["data"]["detectors"]`: list of detector names.
-          - `["train_settings"]["data"]["random_strain_cropping"]`: optional
-            dict of cropping parameters.
-    f_min : dict[str, float], float, or None, optional
-        Single float or per-detector dict of minimum frequencies to enforce.
-        If a float is provided, it is applied to all detectors. Each value
-        must be ≥ `domain.f_min`. If `None`, no minimum-frequency
-        validation is performed.
-    f_max : dict[str, float], float, or None, optional
-        Single float or per-detector dict of maximum frequencies to enforce.
-        If a float is provided, it is applied to all detectors. Each value
-        must be ≤ `domain.f_max`. If `None`, no maximum-frequency
-        validation is performed.
+    psd_notch_dict : dict
+        ``{det: [f_lo, f_hi]}`` or ``{det: [[f_lo, f_hi], ...]}``.
+    domain : UniformFrequencyDomain or MultibandedFrequencyDomain
+        The model's base (uniform) domain.
+    data_settings : dict
+        ``train_settings["data"]`` of the model.
 
     Raises
     ------
     ValueError
-        - If `model_metadata` does not describe a `UniformFrequencyDomain`
-          or `MultibandedFrequencyDomain`.
-        - If `f_min`/`f_max` keys don’t exactly match the detector list.
-        - If any requested frequency lies outside the hard domain bounds.
-        - If cropping is disabled but a change in frequency is requested.
-        - If per-detector constraints (independent vs. joint) or
-          cropping caps/floors are violated.
-
-    Returns
-    -------
-    None
+        If the notches are incompatible with the model or the domain.
     """
-    crop_settings = model_metadata["train_settings"]["data"].get(
-        "random_strain_cropping"
-    )
-    detectors = model_metadata["train_settings"]["data"]["detectors"]
+    model_detectors = data_settings["detectors"]
+    unknown = set(psd_notch_dict) - set(model_detectors)
+    if unknown:
+        raise ValueError(
+            f"psd_notch_dict names detectors {sorted(unknown)} the model was not "
+            f"trained with (detectors: {model_detectors})."
+        )
+    intervals = []
+    for det, notch in psd_notch_dict.items():
+        ranges = [notch] if not isinstance(notch[0], (list, tuple)) else notch
+        for f_lo, f_hi in ranges:
+            if not f_lo <= f_hi:
+                raise ValueError(
+                    f"psd_notch_dict interval [{f_lo}, {f_hi}] for {det} is empty."
+                )
+            if f_lo <= domain.f_min or f_hi >= domain.f_max:
+                raise ValueError(
+                    f"psd_notch_dict interval [{f_lo}, {f_hi}] for {det} touches the "
+                    f"domain bounds [{domain.f_min}, {domain.f_max}]; move "
+                    f"minimum_frequency / maximum_frequency instead of notching an edge."
+                )
+            intervals.append((det, f_lo, f_hi))
+
+    tok = data_settings.get("tokenization") or {}
+    notch_settings = tok.get("mask_frequency_notches")
+    if notch_settings is None:
+        if "mask_random_tokens" in tok:
+            warnings.warn(
+                "psd_notch_dict relies on mask_random_tokens training only; the "
+                "contiguous masking pattern differs from the random training "
+                "distribution. Expect reduced importance-sampling efficiency and "
+                "check the effective sample size."
+            )
+        else:
+            warnings.warn(
+                "Model was not trained with mask_frequency_notches; the notched bins "
+                "are out of distribution for the network. The likelihood is exact, "
+                "so check the importance-sampling efficiency."
+            )
+        return
+
+    # Training envelope as MaskFrequencyNotches resolves it: an explicit range is
+    # clamped to the domain, and the width is capped by the range.
+    f_min = notch_settings.get("f_min")
+    f_max = notch_settings.get("f_max")
+    notch_f_min = domain.f_min if f_min is None else max(f_min, domain.f_min)
+    notch_f_max = domain.f_max if f_max is None else min(f_max, domain.f_max)
+    max_width = min(notch_settings["max_width"], notch_f_max - notch_f_min)
+    for det, f_lo, f_hi in intervals:
+        if f_lo < notch_f_min or f_hi > notch_f_max or f_hi - f_lo > max_width + 1e-9:
+            warnings.warn(
+                f"psd_notch_dict interval [{f_lo}, {f_hi}] for {det} is outside the "
+                f"training envelope (mask_frequency_notches: range "
+                f"[{notch_f_min}, {notch_f_max}] Hz, max_width {max_width} Hz). "
+                f"Expect reduced importance-sampling efficiency."
+            )
+
+
+def check_psd_notches(model_metadata: dict, psd_notch_dict: dict):
+    """
+    Validate PSD notch intervals against a model's metadata.
+
+    Thin metadata-level wrapper around ``_validate_psd_notches``, used by dingo_pipe
+    at DAG-build time; see there for the accepted forms and semantics.
+    """
     domain = build_domain_from_model_metadata(model_metadata, base=True)
     if not isinstance(domain, (UniformFrequencyDomain, MultibandedFrequencyDomain)):
-        raise ValueError("Frequency updates only possible for frequency domains.")
+        raise ValueError("psd_notch_dict requires a frequency domain.")
+    _validate_psd_notches(
+        psd_notch_dict, domain, model_metadata["train_settings"]["data"]
+    )
 
-    if f_min is not None:
-        _validate_minimum_frequency(f_min, detectors, domain, crop_settings)
-    if f_max is not None:
-        _validate_maximum_frequency(f_max, detectors, domain, crop_settings)
+
+def _validate_detectors_transformer(
+    detectors_event: list[str],
+    detectors_network: list[str],
+    mask_detector_settings: dict,
+):
+    """
+    Validate that the event detectors are compatible with a transformer network
+    trained with detector masking.
+
+    The event detectors must be a subset of the training detectors, and every
+    *absent* training detector must have been maskable in training. Keys missing
+    from ``mask_detector_settings`` impose no constraint, since ``MaskDetectors``
+    then defaulted to uniform probabilities.
+
+    Parameters
+    ----------
+    detectors_event : list[str]
+        Detectors present in the event data.
+    detectors_network : list[str]
+        Detectors the network was trained with.
+    mask_detector_settings : dict
+        The ``tokenization.mask_detectors`` sub-dict from the train settings.
+
+    Raises
+    ------
+    ValueError
+        If the detector configuration is incompatible with the network.
+    """
+    if not set(detectors_event).issubset(set(detectors_network)):
+        raise ValueError(
+            f"Event has detectors {detectors_event} but model was only trained "
+            f"with detectors {detectors_network}."
+        )
+    absent = set(detectors_network) - set(detectors_event)
+
+    p_mask_012 = mask_detector_settings.get("p_mask_012_detectors")
+    # p_mask_012[k] = probability of masking k detectors during training.
+    if p_mask_012 is not None and (
+        len(absent) >= len(p_mask_012) or p_mask_012[len(absent)] == 0.0
+    ):
+        raise ValueError(
+            f"Event has detectors {detectors_event}, but model was trained with "
+            f"p_mask_012_detectors={p_mask_012}, not allowing "
+            f"{len(detectors_event)} active detectors."
+        )
+
+    p_mask_hlv = mask_detector_settings.get("p_mask_hlv")
+    # p_mask_hlv[det] = probability that det is masked; zero means det was always
+    # present in training, so it must also be present in the event.
+    if p_mask_hlv is not None:
+        for det in absent:
+            if p_mask_hlv.get(det, 0.0) == 0.0:
+                raise ValueError(
+                    f"Detector {det} was never masked in training "
+                    f"(p_mask_hlv={p_mask_hlv}); cannot drop it at inference."
+                )
+
+
+def check_detector_update(
+    model_metadata: dict,
+    detectors: list[str],
+):
+    """
+    Validate that a given set of detectors is compatible with the network.
+
+    For transformer networks trained with ``tokenization.mask_detectors``, the event
+    detectors must be a subset of the training detectors and must be allowed by the
+    masking probabilities.  For networks trained with ``tokenization.mask_random_tokens``
+    only the subset check is performed.  For non-tokenization networks the event detectors
+    must exactly match the training detectors.
+
+    Parameters
+    ----------
+    model_metadata : dict
+        Dictionary containing the network's training settings and data.
+    detectors : list[str]
+        Detectors present in the event data.
+
+    Raises
+    ------
+    ValueError
+        If the detector configuration is incompatible with the model.
+    """
+    detectors_network = model_metadata["train_settings"]["data"]["detectors"]
+    if not set(detectors).issubset(set(detectors_network)):
+        raise ValueError(
+            f"Event has detectors {detectors} but model was only trained with "
+            f"detectors {detectors_network}."
+        )
+    tok = model_metadata["train_settings"]["data"].get("tokenization", {})
+    if "mask_detectors" in tok:
+        _validate_detectors_transformer(
+            detectors_event=detectors,
+            detectors_network=detectors_network,
+            mask_detector_settings=tok["mask_detectors"],
+        )
+    elif "mask_random_tokens" in tok:
+        # Token-level masking does not constrain which detectors are present.
+        pass
+    elif set(detectors) != set(detectors_network):
+        # Without detector masking (tokenized or not), an exact match is required.
+        raise ValueError(
+            f"Detectors {detectors} of event do not match detectors "
+            f"{detectors_network} from model."
+        )

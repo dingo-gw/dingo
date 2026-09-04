@@ -63,7 +63,9 @@ class SamplingInput(Input):
         # self.sampler_kwargs = args.sampler_kwargs
         # self.sampling_seed = args.sampling_seed
 
-        # Frequencies
+        # Frequencies and notches travel in the event file settings and reach the
+        # sampler via event_metadata. The commented lines mirror bilby_pipe's
+        # input class, from which this one was adapted.
         # self.sampling_frequency = args.sampling_frequency
         # self.minimum_frequency = args.minimum_frequency
         # self.maximum_frequency = args.maximum_frequency

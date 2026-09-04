@@ -27,8 +27,13 @@ from .parser import create_parser
 from .utils import dict_to_string
 
 from ..gw.domains.build_domain import build_domain_from_model_metadata
+from ..gw.gwutils import add_defaults_for_missing_detectors, parse_psd_notch_dict
 from dingo.core.posterior_models.build_model import build_model_from_kwargs
-from ..gw.inference.gw_samplers import check_frequency_updates
+from ..gw.inference.gw_samplers import (
+    check_frequency_updates,
+    check_detector_update,
+    check_psd_notches,
+)
 from ..gw.injection import Injection
 from ..gw.noise.asd_dataset import ASDDataset
 
@@ -79,6 +84,12 @@ def fill_in_arguments_from_model(args, perform_arg_checks=True):
     del prior["geocent_time"]
 
     data_settings = model_metadata["train_settings"]["data"]
+
+    # The analyzed detectors may be a subset of the training detectors (for models
+    # trained with detector masking). Default them from the channel dict when not
+    # given explicitly; check_detector_update() decides compatibility below.
+    if args.detectors is None and args.channel_dict is not None:
+        args.detectors = list(convert_string_to_dict(args.channel_dict).keys())
 
     # In dingo_pipe, we download and prepare data based on the model frequency range.
     # This is because different maximum frequencies for different detectors would
@@ -139,6 +150,19 @@ def fill_in_arguments_from_model(args, perform_arg_checks=True):
                     raise NotImplementedError(
                         "Cannot change waveform approximant during importance sampling."
                     )  # TODO: Implement this. Also no error if passed explicitly as an update.
+                if k == "detectors":
+                    # A detector subset is applied at inference (absent detectors'
+                    # tokens are never built). Validate against the training
+                    # configuration and keep the user's choice, in training order.
+                    check_detector_update(
+                        model_metadata=model_metadata, detectors=args_v
+                    )
+                    logger.info(
+                        f"Analyzing detectors {args_v}; model was trained with {v}."
+                    )
+                    # Ensure same detector order as model config.
+                    setattr(args, k, [d for d in v if d in args_v])
+                    continue  # Do not update args to the model value.
                 if k in ["minimum_frequency", "maximum_frequency"]:
                     logger.info(
                         f"Strain-cropping: Plan to update network {k} from {v} to"
@@ -155,16 +179,37 @@ def fill_in_arguments_from_model(args, perform_arg_checks=True):
 
         setattr(args, k, v)
 
-    frequency_input = Input([], [], print_msg=False)
-    frequency_input.detectors = model_args["detectors"]
-    frequency_input.sampling_frequency = args.sampling_frequency
-    frequency_input.minimum_frequency = args.minimum_frequency
-    frequency_input.maximum_frequency = args.maximum_frequency
-    check_frequency_updates(
-        model_metadata,
-        frequency_input.minimum_frequency_dict,
-        frequency_input.maximum_frequency_dict,
-    )
+    # Validate the requested frequency ranges. A float applies to all analyzed
+    # detectors; a dict constrains only the detectors it names. Fill the model
+    # range in for analyzed detectors missing from a dict, so that downstream
+    # bilby_pipe parsing (which requires every detector) succeeds.
+    def parse_frequency(value, key):
+        """Parse an ini frequency entry exactly as bilby_pipe's Input setter does:
+        a float if possible, otherwise a per-detector dict (with "None" -> None)."""
+        if value is None:
+            return None
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return convert_string_to_dict(value, key)
+
+    f_min = parse_frequency(args.minimum_frequency, "minimum-frequency")
+    f_max = parse_frequency(args.maximum_frequency, "maximum-frequency")
+    check_frequency_updates(model_metadata, f_min, f_max)
+    if args.psd_notch_dict is not None:
+        check_psd_notches(
+            model_metadata,
+            parse_psd_notch_dict(convert_string_to_dict(args.psd_notch_dict)),
+        )
+    analyzed_detectors = [d.strip("'") for d in args.detectors]
+    if isinstance(f_min, dict):
+        args.minimum_frequency = str(
+            add_defaults_for_missing_detectors(f_min, domain.f_min, analyzed_detectors)
+        )
+    if isinstance(f_max, dict):
+        args.maximum_frequency = str(
+            add_defaults_for_missing_detectors(f_max, domain.f_max, analyzed_detectors)
+        )
 
     # TODO: Also check consistency between model and init_model settings.
 

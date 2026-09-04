@@ -1,0 +1,1213 @@
+import numpy as np
+import pytest
+from scipy.stats import chisquare
+
+from dingo.gw.domains import UniformFrequencyDomain, MultibandedFrequencyDomain
+from dingo.gw.transforms import (
+    StrainTokenization,
+    MaskRandomTokens,
+    MaskDetectors,
+    MaskFrequencyRange,
+    MaskFrequencyNotches,
+    MaskTokensForFrequencyRangeUpdate,
+    DETECTOR_DICT,
+)
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def make_ufd(f_min=20.0, f_max=1024.0, T=8.0):
+    return UniformFrequencyDomain(f_min=f_min, f_max=f_max, delta_f=1.0 / T)
+
+
+def make_mfd(nodes=None, f_max=1038.0, T=8.0):
+    if nodes is None:
+        nodes = [20.0, 34.0, 46.0, 62.0, 78.0, 1038.0]
+    base = UniformFrequencyDomain(f_min=nodes[0], f_max=f_max, delta_f=1.0 / T)
+    return MultibandedFrequencyDomain(
+        nodes=nodes, delta_f_initial=1.0 / T, base_domain=base
+    )
+
+
+def make_sample(domain, batch_size, num_channels=3):
+    """Build a minimal {'waveform': ..., 'asds': ...} dict.
+
+    H1 waveform is all zeros; L1 real channel is set to [1, 2, ..., num_f]
+    so we can track ordering through the reshape.
+    """
+    num_f = domain.frequency_mask_length
+    detectors = ["H1", "L1"]
+
+    if batch_size is None:
+        # No batch dimension: shape [num_blocks, num_channels, num_f]
+        waveform_h1 = np.zeros([1, num_channels, num_f])
+        waveform_l1 = np.ones([1, num_channels, num_f])
+        waveform_l1[0, 0, :] = np.arange(1, num_f + 1)
+        waveform = np.concatenate([waveform_h1, waveform_l1], axis=0)
+        asds = {d: np.random.rand(num_f) for d in detectors}
+    else:
+        # Batched: shape [batch, num_blocks, num_channels, num_f]
+        waveform_h1 = np.zeros([batch_size, 1, num_channels, num_f])
+        waveform_l1 = np.ones([batch_size, 1, num_channels, num_f])
+        waveform_l1[0, 0, 0, :] = np.arange(1, num_f + 1)
+        waveform = np.concatenate([waveform_h1, waveform_l1], axis=1)
+        asds = {d: np.random.rand(batch_size, num_f) for d in detectors}
+
+    return {"waveform": waveform, "asds": asds}
+
+
+def _check_position_and_mask(out, domain, num_tokens_per_block, num_blocks):
+    """Shared checks for position and token_mask outputs."""
+    num_tokens = num_tokens_per_block * num_blocks
+
+    # position shape
+    assert out["position"].shape[-2:] == (num_tokens, 3)
+
+    # First token of each detector starts at domain.f_min
+    for block in range(num_blocks):
+        first_tok = block * num_tokens_per_block
+        assert np.all(out["position"][..., first_tok, 0] == domain.f_min)
+
+    # Last token of each detector reaches at least domain.f_max - delta_f
+    if isinstance(domain, MultibandedFrequencyDomain):
+        f_max_threshold = domain.f_max - domain.delta_f[-1]
+    else:
+        f_max_threshold = domain.f_max - domain.delta_f
+    for block in range(num_blocks):
+        last_tok = block * num_tokens_per_block + num_tokens_per_block - 1
+        assert np.all(out["position"][..., last_tok, 1] >= f_max_threshold)
+
+    # f_min increases monotonically within each detector's tokens
+    for block in range(num_blocks):
+        tok_slice = slice(
+            block * num_tokens_per_block, (block + 1) * num_tokens_per_block
+        )
+        f_mins = out["position"][..., tok_slice, 0]
+        # Take first batch element if batched
+        f_mins_1d = f_mins.reshape(-1, num_tokens_per_block)[0]
+        assert np.all(
+            np.diff(f_mins_1d) > 0
+        ), "f_min is not monotonically increasing within a detector"
+
+    # Each detector's tokens share the same detector index, and indices differ across detectors
+    unique_det_indices = set()
+    for block in range(num_blocks):
+        tok_slice = slice(
+            block * num_tokens_per_block, (block + 1) * num_tokens_per_block
+        )
+        det_vals = np.unique(out["position"][..., tok_slice, 2])
+        assert (
+            len(det_vals) == 1
+        ), "Tokens of a single detector have mixed detector indices"
+        unique_det_indices.add(det_vals[0])
+    assert (
+        len(unique_det_indices) == num_blocks
+    ), "Detector indices are not unique across blocks"
+
+    # token_mask: shape and default all-False
+    assert out["token_mask"].shape[-1] == num_tokens
+    assert not out[
+        "token_mask"
+    ].any(), "Default mask should keep all tokens (all False)"
+
+
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def ufd_batch():
+    domain = make_ufd()
+    # frequency_mask_length = 8033 (f_min=20, f_max=1024, delta_f=0.125).
+    # 8033 % 40 != 0, so these fixtures exercise the zero-padding path.
+    # 8033 has no convenient power-of-2 divisor, so an exact-division UFD case
+    # would require an artificially chosen domain; the MFD fixtures cover that.
+    num_tokens_per_block = 40
+    return domain, num_tokens_per_block, 2, make_sample(domain, batch_size=100)
+
+
+@pytest.fixture
+def ufd_no_batch():
+    domain = make_ufd()
+    num_tokens_per_block = 40  # non-divisible; see ufd_batch comment
+    return domain, num_tokens_per_block, 2, make_sample(domain, batch_size=None)
+
+
+@pytest.fixture
+def ufd_single_batch():
+    domain = make_ufd()
+    num_tokens_per_block = 40  # non-divisible; see ufd_batch comment
+    return domain, num_tokens_per_block, 2, make_sample(domain, batch_size=1)
+
+
+@pytest.fixture
+def mfd_batch():
+    # 43 tokens fits exactly for these nodes with T=8
+    domain = make_mfd()
+    num_tokens_per_block = 43
+    return domain, num_tokens_per_block, 2, make_sample(domain, batch_size=100)
+
+
+@pytest.fixture
+def mfd_drop_last_token():
+    # Extend f_max slightly so the last token is incomplete
+    domain = make_mfd(f_max=1040.0)
+    num_tokens_per_block = 43
+    return domain, num_tokens_per_block, 2, make_sample(domain, batch_size=100)
+
+
+# ---------------------------------------------------------------------------
+# Tests
+# ---------------------------------------------------------------------------
+
+SETUPS = ["ufd_batch", "ufd_no_batch", "ufd_single_batch", "mfd_batch"]
+
+
+@pytest.mark.parametrize("setup", SETUPS)
+def test_strain_tokenization_num_tokens(request, setup):
+    """Basic tokenization using num_tokens_per_block: shapes and content."""
+    domain, num_tokens_per_block, num_blocks, sample = request.getfixturevalue(setup)
+
+    transform = StrainTokenization(
+        domain, num_tokens_per_block=num_tokens_per_block, print_output=False
+    )
+    out = transform(sample)
+
+    # Output waveform shape
+    assert out["waveform"].shape[-2] == num_tokens_per_block * num_blocks
+    num_features = out["waveform"].shape[-1]
+
+    # L1 sits in the second half of the token sequence; real is the first 1/3 of features.
+    # The linearly increasing values 1..num_f should be recoverable in order.
+    num_f = domain.frequency_mask_length
+    if out["waveform"].ndim == 2:
+        l1_real = out["waveform"][num_tokens_per_block:, : num_features // 3]
+    else:
+        l1_real = out["waveform"][0, num_tokens_per_block:, : num_features // 3]
+    assert np.all(l1_real.flatten()[:num_f] == np.arange(1, num_f + 1))
+
+    _check_position_and_mask(out, domain, num_tokens_per_block, num_blocks)
+
+
+@pytest.mark.parametrize("setup", SETUPS)
+def test_strain_tokenization_token_size(request, setup):
+    """Equivalent result when specifying token_size instead of num_tokens_per_block."""
+    domain, num_tokens_per_block, num_blocks, sample = request.getfixturevalue(setup)
+    token_size = int(np.ceil(domain.frequency_mask_length / num_tokens_per_block))
+
+    transform = StrainTokenization(domain, token_size=token_size, print_output=False)
+    out = transform(sample)
+
+    assert out["waveform"].shape[-2] == num_tokens_per_block * num_blocks
+    _check_position_and_mask(out, domain, num_tokens_per_block, num_blocks)
+
+
+@pytest.mark.parametrize("setup", SETUPS + ["mfd_drop_last_token"])
+def test_strain_tokenization_drop_last_token(request, setup):
+    """drop_last_token removes the trailing incomplete token."""
+    domain, num_tokens_per_block, num_blocks, sample = request.getfixturevalue(setup)
+    token_size = int(np.ceil(domain.frequency_mask_length / num_tokens_per_block))
+    remainder = domain.frequency_mask_length % num_tokens_per_block
+    expected = (num_tokens_per_block - (1 if remainder else 0)) * num_blocks
+
+    transform = StrainTokenization(
+        domain, token_size=token_size, drop_last_token=True, print_output=False
+    )
+    out = transform(sample)
+
+    assert out["waveform"].shape[-2] == expected
+
+
+def test_token_bin_content():
+    """Each token contains exactly the right frequency bins in order.
+
+    Uses the MFD fixture (exact division, no padding) so token k of L1 contains
+    bins [k*P, ..., (k+1)*P - 1] with values [k*P+1, ..., (k+1)*P].
+    """
+    domain = make_mfd()
+    num_tokens_per_block = 43
+    num_channels = 3
+    P = domain.frequency_mask_length // num_tokens_per_block  # bins per token
+
+    sample = make_sample(domain, batch_size=100, num_channels=num_channels)
+    transform = StrainTokenization(
+        domain, num_tokens_per_block=num_tokens_per_block, print_output=False
+    )
+    out = transform(sample)
+
+    num_features = out["waveform"].shape[-1]
+    real_width = num_features // num_channels  # = P
+
+    # L1 tokens occupy indices [num_tokens_per_block, 2*num_tokens_per_block)
+    # Real channel is the first `real_width` features within each token
+    l1_real = out["waveform"][0, num_tokens_per_block:, :real_width]  # [T, P]
+
+    for k in range(num_tokens_per_block):
+        expected = np.arange(k * P + 1, (k + 1) * P + 1, dtype=float)
+        assert np.allclose(
+            l1_real[k], expected
+        ), f"Token {k} has wrong bin values: got {l1_real[k]}, expected {expected}"
+
+
+def test_three_detectors():
+    """Detector-index assignment and token ordering with three detectors (H1, L1, V1).
+
+    Uses MFD with exact division so no zero-padding obscures the value checks.
+    """
+    domain = make_mfd()  # frequency_mask_length=688, 688/16=43 exactly
+    num_f = domain.frequency_mask_length
+    num_channels = 3
+    batch_size = 4
+    detectors = ["H1", "L1", "V1"]
+
+    waveforms = []
+    for i, det in enumerate(detectors):
+        w = np.full([batch_size, 1, num_channels, num_f], float(i))
+        waveforms.append(w)
+    waveform = np.concatenate(waveforms, axis=1)  # [B, 3, C, F]
+    asds = {d: np.ones([batch_size, num_f]) for d in detectors}
+    sample = {"waveform": waveform, "asds": asds}
+
+    num_tokens_per_block = 43
+    transform = StrainTokenization(
+        domain, num_tokens_per_block=num_tokens_per_block, print_output=False
+    )
+    out = transform(sample)
+
+    T = num_tokens_per_block
+    for block_idx, det in enumerate(detectors):
+        tok_slice = slice(block_idx * T, (block_idx + 1) * T)
+
+        # All waveform values in this block's tokens equal float(block_idx)
+        assert np.all(
+            out["waveform"][0, tok_slice, :] == float(block_idx)
+        ), f"Wrong waveform values for detector {det}"
+        # Detector index in position matches DETECTOR_DICT
+        det_indices = out["position"][0, tok_slice, 2]
+        assert np.all(
+            det_indices == DETECTOR_DICT[det]
+        ), f"Wrong detector index for {det}: got {det_indices[0]}, expected {DETECTOR_DICT[det]}"
+
+
+def test_output_dtype():
+    """Output arrays preserve input dtype; token_mask is always bool."""
+    domain = make_ufd()
+
+    for dtype in (np.float32, np.float64):
+        sample = make_sample(domain, batch_size=8)
+        sample["waveform"] = sample["waveform"].astype(dtype)
+
+        transform = StrainTokenization(
+            domain, num_tokens_per_block=40, print_output=False
+        )
+        out = transform(sample)
+
+        assert out["waveform"].dtype == dtype, f"waveform dtype changed from {dtype}"
+        assert out["position"].dtype == dtype, f"position dtype changed from {dtype}"
+        assert out["token_mask"].dtype == bool
+
+
+def test_mutual_exclusivity():
+    """Passing both or neither of num_tokens_per_block / token_size raises ValueError."""
+    domain = make_ufd()
+    with pytest.raises(ValueError):
+        StrainTokenization(domain, print_output=False)
+    with pytest.raises(ValueError):
+        StrainTokenization(
+            domain, num_tokens_per_block=10, token_size=20, print_output=False
+        )
+
+
+def test_mfd_incompatible_nodes():
+    """MFD node inside a token should raise ValueError."""
+    # nodes=[20, 34, ...]: with token_size=200, a node will land inside a token
+    domain = make_mfd()
+    with pytest.raises(ValueError):
+        StrainTokenization(domain, token_size=200, print_output=False)
+
+
+# ---------------------------------------------------------------------------
+# MaskRandomTokens tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "setup",
+    [
+        "ufd_batch",
+        "ufd_no_batch",
+        "ufd_single_batch",
+        "mfd_batch",
+    ],
+)
+def test_MaskRandomTokens(request, setup):
+    domain, num_tokens_per_block, num_blocks, sample = request.getfixturevalue(setup)
+    # Drop random tokens
+    # Initialize StrainTokenization transform
+    token_transformation = StrainTokenization(
+        domain,
+        num_tokens_per_block=num_tokens_per_block,
+    )
+    mask_dict = {
+        "p_mask": 0.2,
+        "max_num_tokens": num_tokens_per_block,
+    }
+    mask_trafo = MaskRandomTokens(
+        p_mask=mask_dict["p_mask"],
+        max_num_tokens=mask_dict["max_num_tokens"],
+    )
+
+    # Evaluate transforms
+    out = token_transformation(sample)
+    np.random.seed(0)
+    out = mask_trafo(out)
+
+    # Check that not more than max_num_tokens are masked per sample
+    num_removed_tokens = np.sum(out["token_mask"], axis=-1)
+    assert np.all(num_removed_tokens <= mask_dict["max_num_tokens"])
+
+    # Only check probabilities if we can average over the batch dimension
+    if len(out["position"].shape) > 2 and out["position"].shape[0] > 1:
+        # Check that p_mask is correct
+        prob_mask = np.mean(np.where(num_removed_tokens > 0.0, 1.0, 0.0))
+        assert np.isclose(prob_mask, mask_dict["p_mask"], atol=0.1, rtol=0.1)
+
+        # Dropped tokens are uniformly distributed over token positions.
+        hist_removed_tokens = np.sum(out["token_mask"], axis=0)
+        assert chisquare(hist_removed_tokens).pvalue > 1e-3
+
+
+def test_MaskRandomTokens_p_mask_zero():
+    """With p_mask=0 no tokens should ever be masked."""
+    domain = make_ufd()
+    sample = make_sample(domain, batch_size=100)
+    out = StrainTokenization(domain, num_tokens_per_block=40)(sample)
+    out = MaskRandomTokens(p_mask=0.0, max_num_tokens=40)(out)
+    assert not out["token_mask"].any()
+
+
+def test_MaskRandomTokens_preserves_existing_mask():
+    """Pre-existing True entries in token_mask must remain True after the transform."""
+    domain = make_ufd()
+    sample = make_sample(domain, batch_size=100)
+    out = StrainTokenization(domain, num_tokens_per_block=40)(sample)
+    out["token_mask"][:, 0] = True
+    out = MaskRandomTokens(p_mask=0.0, max_num_tokens=40)(out)
+    assert np.all(out["token_mask"][:, 0])
+
+
+# ---------------------------------------------------------------------------
+# MaskDetectors tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "setup",
+    [
+        "ufd_batch",
+        "ufd_no_batch",
+        "ufd_single_batch",
+        "mfd_batch",
+    ],
+)
+def test_MaskDetectors(request, setup):
+    domain, num_tokens_per_block, num_blocks, sample = request.getfixturevalue(setup)
+
+    # Initialize StrainTokenization transform
+    token_transformation = StrainTokenization(
+        domain,
+        num_tokens_per_block=num_tokens_per_block,
+    )
+    # Always mask exactly H1, never L1
+    mask_transformation = MaskDetectors(
+        num_blocks=num_blocks,
+        p_mask_012_detectors=[0.0, 1.0],
+        p_mask_hlv={"H1": 1.0, "L1": 0.0},
+    )
+
+    out = token_transformation(sample)
+    out = mask_transformation(out)
+
+    # Check that mask has expected shape
+    assert out["token_mask"].shape[-1] == num_tokens_per_block * num_blocks
+    # Check that mask only contains True for tokens of exactly one detector
+    assert np.all(np.sum(out["token_mask"], axis=-1) == num_tokens_per_block)
+
+    trafo_dict = {
+        "p_mask_012_detectors": [0.3, 0.7],
+        "p_mask_hlv": {"H1": 0.4, "L1": 0.6},
+    }
+
+    mask_transformation = MaskDetectors(
+        num_blocks=num_blocks,
+        p_mask_012_detectors=trafo_dict["p_mask_012_detectors"],
+        p_mask_hlv=trafo_dict["p_mask_hlv"],
+    )
+    out = token_transformation(sample)
+    out = mask_transformation(out)
+
+    # Masked count is always 0 or num_tokens_per_block (all-or-nothing per detector)
+    count_masked_tokens = np.sum(out["token_mask"], axis=-1)
+    assert np.all(np.isin(count_masked_tokens, [0, num_tokens_per_block]))
+
+    # Only run probability checks if we can average over the batch dimension
+    if len(out["position"].shape) > 2 and out["position"].shape[0] > 1:
+        prob_mask_1_detector = np.mean(np.where(count_masked_tokens > 0, 1, 0))
+        assert np.isclose(
+            prob_mask_1_detector,
+            trafo_dict["p_mask_012_detectors"][1],
+            atol=0.1,
+            rtol=0.1,
+        )
+
+        # Check per-detector masking probabilities
+        detectors = [det for det in out["asds"].keys()]
+        for b in range(num_blocks):
+            b_min, b_max = b * num_tokens_per_block, (b + 1) * num_tokens_per_block
+            vals = out["token_mask"][..., b_min:b_max]
+            count_masked = np.sum(vals, axis=-1)
+            assert np.all(np.isin(count_masked, [0, num_tokens_per_block]))
+            prob_mask_detector = np.mean(np.where(count_masked > 0, 1, 0))
+            prob_expected = (
+                trafo_dict["p_mask_012_detectors"][1]
+                * trafo_dict["p_mask_hlv"][detectors[b]]
+            )
+            assert np.isclose(prob_mask_detector, prob_expected, atol=0.1, rtol=0.1)
+
+
+def test_MaskDetectors_never_masks():
+    """With p_mask_012_detectors=[1.0, 0.0] nothing should ever be masked."""
+    domain = make_ufd()
+    sample = make_sample(domain, batch_size=100)
+    out = StrainTokenization(domain, num_tokens_per_block=40)(sample)
+    out = MaskDetectors(
+        num_blocks=2,
+        p_mask_012_detectors=[1.0, 0.0],
+        p_mask_hlv={"H1": 0.5, "L1": 0.5},
+    )(out)
+    assert not out["token_mask"].any()
+
+
+def test_MaskDetectors_preserves_existing_mask():
+    """Pre-existing True entries in token_mask must remain True after the transform."""
+    domain = make_ufd()
+    sample = make_sample(domain, batch_size=100)
+    out = StrainTokenization(domain, num_tokens_per_block=40)(sample)
+    out["token_mask"][:, 0] = True
+    out = MaskDetectors(
+        num_blocks=2,
+        p_mask_012_detectors=[1.0, 0.0],
+        p_mask_hlv={"H1": 0.5, "L1": 0.5},
+    )(out)
+    assert np.all(out["token_mask"][:, 0])
+
+
+def test_MaskDetectors_two_of_three():
+    """With 3 detectors, masking 2 simultaneously exercises the multi-detector branch."""
+    domain = make_ufd()
+    num_tokens_per_block = 40
+    # Build a 3-detector sample manually
+    num_f = domain.frequency_mask_length
+    batch_size = 100
+    waveform = np.concatenate([np.zeros([batch_size, 1, 3, num_f])] * 3, axis=1)
+    asds = {d: np.random.rand(batch_size, num_f) for d in ["H1", "L1", "V1"]}
+    sample = {"waveform": waveform, "asds": asds}
+
+    out = StrainTokenization(domain, num_tokens_per_block=num_tokens_per_block)(sample)
+    # Always mask exactly 2 detectors, always H1 and L1
+    out = MaskDetectors(
+        num_blocks=3,
+        p_mask_012_detectors=[0.0, 0.0, 1.0],
+        p_mask_hlv={"H1": 0.5, "L1": 0.5, "V1": 0.0},
+    )(out)
+    # Exactly 2 * num_tokens_per_block tokens should be masked per sample
+    assert np.all(np.sum(out["token_mask"], axis=-1) == 2 * num_tokens_per_block)
+
+
+# ---------------------------------------------------------------------------
+# MaskFrequencyRange tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("setup", SETUPS)
+def test_MaskFrequencyRange(request, setup):
+    domain, num_tokens_per_block, num_blocks, sample = request.getfixturevalue(setup)
+
+    token_transformation = StrainTokenization(
+        domain,
+        num_tokens_per_block=num_tokens_per_block,
+        print_output=False,
+    )
+    mask_dict = {
+        "p_mask": 0.2,
+        "f_min_upper": 100.0,
+        "f_max_lower": 800.0,
+        "p_lower_upper_both": [0.4, 0.4, 0.2],
+        "p_same_all_detectors": 0.7,
+    }
+    mask_transformation = MaskFrequencyRange(
+        domain=domain,
+        p_mask=mask_dict["p_mask"],
+        f_min_upper=mask_dict["f_min_upper"],
+        f_max_lower=mask_dict["f_max_lower"],
+        p_lower_upper_both=mask_dict["p_lower_upper_both"],
+        p_same_all_detectors=mask_dict["p_same_all_detectors"],
+        print_output=False,
+    )
+    out = token_transformation(sample)
+    out = mask_transformation(out)
+
+    # Masked tokens must be at the lower end (f_min < f_min_upper) or
+    # upper end (f_max > f_max_lower) of the frequency range.
+    dropped_f_mins = out["position"][..., 0][out["token_mask"]]
+    dropped_f_maxs = out["position"][..., 1][out["token_mask"]]
+    assert np.all(
+        np.logical_or(
+            dropped_f_mins < mask_dict["f_min_upper"],
+            dropped_f_maxs > mask_dict["f_max_lower"],
+        )
+    )
+
+    # Only run probability checks if we can average over the batch dimension
+    if len(out["position"].shape) > 2 and out["position"].shape[0] > 1:
+        num_masked_tokens = np.sum(out["token_mask"], axis=-1)
+        prob_mask = np.mean(np.where(num_masked_tokens > 0.0, 1.0, 0.0))
+        assert np.isclose(prob_mask, mask_dict["p_mask"], atol=0.1, rtol=0.1)
+
+        # Check p_lower_upper_both
+        mask_lower = (
+            out["position"][..., :num_tokens_per_block, 0] <= mask_dict["f_min_upper"]
+        )
+        mask_upper = (
+            out["position"][..., :num_tokens_per_block, 1] >= mask_dict["f_max_lower"]
+        )
+        lower_blocks = []
+        upper_blocks = []
+        both_blocks = []
+        for b in range(num_blocks):
+            b_min, b_max = b * num_tokens_per_block, (b + 1) * num_tokens_per_block
+            vals = out["token_mask"][:, b_min:b_max]
+            num_masked_lower = np.sum(np.where(mask_lower, vals, False), axis=-1)
+            num_masked_upper = np.sum(np.where(mask_upper, vals, False), axis=-1)
+            lower = np.where(num_masked_lower > 0.0, 1.0, 0.0)
+            upper = np.where(num_masked_upper > 0.0, 1.0, 0.0)
+            both = np.logical_and(lower, upper)
+            lower = np.where(np.logical_and(lower, ~both), 1.0, 0.0)
+            upper = np.where(np.logical_and(upper, ~both), 1.0, 0.0)
+            assert np.isclose(
+                np.mean(lower),
+                mask_dict["p_mask"] * mask_dict["p_lower_upper_both"][0],
+                atol=0.1,
+                rtol=0.1,
+            )
+            assert np.isclose(
+                np.mean(upper),
+                mask_dict["p_mask"] * mask_dict["p_lower_upper_both"][1],
+                atol=0.1,
+                rtol=0.1,
+            )
+            assert np.isclose(
+                np.mean(both),
+                mask_dict["p_mask"] * mask_dict["p_lower_upper_both"][2],
+                atol=0.1,
+                rtol=0.1,
+            )
+            lower_blocks.append(lower)
+            upper_blocks.append(upper)
+            both_blocks.append(both)
+
+        # Check p_same_all_detectors
+        all_lower = np.logical_and(*lower_blocks)
+        all_upper = np.logical_and(*upper_blocks)
+        all_both = np.logical_and(*both_blocks)
+        p_mask_all_detectors = np.mean(
+            np.logical_or.reduce((all_lower, all_upper, all_both))
+        )
+        assert np.isclose(
+            p_mask_all_detectors,
+            mask_dict["p_mask"] * mask_dict["p_same_all_detectors"],
+            atol=0.1,
+            rtol=0.1,
+        )
+
+        # Verify masked-token counts decrease toward higher frequencies at the lower
+        # cut end, and increase toward higher frequencies at the upper cut end.
+        edge_mask_lower = mask_lower[..., :-1] & ~mask_lower[..., 1:]
+        mask_lower_strict = mask_lower.copy()
+        mask_lower_strict[..., :-1][edge_mask_lower] = False
+        edge_mask_upper = ~mask_upper[..., :-1] & mask_upper[..., 1:]
+        mask_upper_strict = mask_upper.copy()
+        mask_upper_strict[..., 1:][edge_mask_upper] = False
+        masked_lower_blocks, masked_upper_blocks = [], []
+        for b in range(num_blocks):
+            b_min, b_max = b * num_tokens_per_block, (b + 1) * num_tokens_per_block
+            vals = out["token_mask"][:, b_min:b_max]
+            masked_lower_blocks.append(np.where(mask_lower_strict, vals, False))
+            masked_upper_blocks.append(np.where(mask_upper_strict, vals, False))
+        num_tokens_masked_lower = np.apply_over_axes(
+            np.sum, np.array(masked_lower_blocks), [0, 1]
+        ).squeeze()
+        num_tokens_masked_upper = np.apply_over_axes(
+            np.sum, np.array(masked_upper_blocks), [0, 1]
+        ).squeeze()
+        assert np.all(num_tokens_masked_lower[1:] <= num_tokens_masked_lower[:-1])
+        assert np.all(num_tokens_masked_upper[1:] >= num_tokens_masked_upper[:-1])
+
+    # Check that we never mask all tokens when f_min_upper > f_max_lower
+    mask_dict_overlap = {
+        "p_mask": 1.0,
+        "f_min_upper": 900.0,
+        "f_max_lower": 100.0,
+        "p_lower_upper_both": [0.1, 0.1, 0.8],
+        "p_same_all_detectors": 0.7,
+    }
+    mask_transformation_overlap = MaskFrequencyRange(
+        domain=domain,
+        p_mask=mask_dict_overlap["p_mask"],
+        f_min_upper=mask_dict_overlap["f_min_upper"],
+        f_max_lower=mask_dict_overlap["f_max_lower"],
+        p_lower_upper_both=mask_dict_overlap["p_lower_upper_both"],
+        p_same_all_detectors=mask_dict_overlap["p_same_all_detectors"],
+        print_output=False,
+    )
+    out = token_transformation(sample)
+    out = mask_transformation_overlap(out)
+
+    num_masked_tokens = np.sum(out["token_mask"], axis=-1)
+    assert np.all(num_masked_tokens < num_tokens_per_block * num_blocks)
+    dropped_f_mins = out["position"][..., 0][out["token_mask"]]
+    dropped_f_maxs = out["position"][..., 1][out["token_mask"]]
+    assert np.all(
+        np.logical_or(
+            dropped_f_mins < mask_dict_overlap["f_min_upper"],
+            dropped_f_maxs > mask_dict_overlap["f_max_lower"],
+        )
+    )
+
+
+def test_MaskFrequencyRange_p_mask_zero():
+    """With p_mask=0 no tokens should ever be masked."""
+    domain = make_ufd()
+    sample = make_sample(domain, batch_size=100)
+    out = StrainTokenization(domain, num_tokens_per_block=40, print_output=False)(
+        sample
+    )
+    out = MaskFrequencyRange(
+        domain=domain,
+        p_mask=0.0,
+        f_min_upper=100.0,
+        f_max_lower=800.0,
+        p_same_all_detectors=0.5,
+        print_output=False,
+    )(out)
+    assert not out["token_mask"].any()
+
+
+def test_MaskFrequencyRange_preserves_existing_mask():
+    """Pre-existing True entries in token_mask must remain True after the transform."""
+    domain = make_ufd()
+    sample = make_sample(domain, batch_size=100)
+    out = StrainTokenization(domain, num_tokens_per_block=40, print_output=False)(
+        sample
+    )
+    out["token_mask"][:, 0] = True
+    out = MaskFrequencyRange(
+        domain=domain,
+        p_mask=0.0,
+        f_min_upper=100.0,
+        f_max_lower=800.0,
+        p_same_all_detectors=0.5,
+        print_output=False,
+    )(out)
+    assert np.all(out["token_mask"][:, 0])
+
+
+def test_MaskFrequencyRange_p_lower_upper_both_not_summing_to_one():
+    """p_lower_upper_both that does not sum to 1 raises ValueError."""
+    domain = make_ufd()
+    with pytest.raises(ValueError, match="does not sum to 1"):
+        MaskFrequencyRange(
+            domain=domain,
+            p_mask=0.2,
+            f_min_upper=100.0,
+            f_max_lower=800.0,
+            p_same_all_detectors=0.5,
+            p_lower_upper_both=[0.3, 0.3, 0.3],
+            print_output=False,
+        )
+
+
+# ---------------------------------------------------------------------------
+# MaskFrequencyNotches tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("setup", SETUPS)
+def test_MaskFrequencyNotches(request, setup):
+    domain, num_tokens_per_block, num_blocks, sample = request.getfixturevalue(setup)
+
+    token_transformation = StrainTokenization(
+        domain,
+        num_tokens_per_block=num_tokens_per_block,
+        print_output=False,
+    )
+    mask_dict = {
+        "p_per_detector": 0.4,
+        "f_min": 100.0,
+        "f_max": 500.0,
+        "max_width": 100.0,
+    }
+    mask_transformation = MaskFrequencyNotches(
+        domain=domain,
+        p_per_detector=mask_dict["p_per_detector"],
+        f_min=mask_dict["f_min"],
+        f_max=mask_dict["f_max"],
+        max_width=mask_dict["max_width"],
+        print_output=False,
+    )
+    out = token_transformation(sample)
+    np.random.seed(0)
+    out = mask_transformation(out)
+
+    # Masked tokens must overlap with [f_min, f_max]: the f_max of the token must be
+    # >= f_min, and the f_min of the token must be <= f_max.  (A token at the boundary
+    # may straddle f_min or f_max, so we use f_max/f_min of the token for the comparison.)
+    dropped_f_mins = out["position"][..., 1][out["token_mask"]]  # f_max of token
+    dropped_f_maxs = out["position"][..., 0][out["token_mask"]]  # f_min of token
+    assert np.all(
+        np.logical_and(
+            dropped_f_mins >= mask_dict["f_min"],
+            dropped_f_maxs <= mask_dict["f_max"],
+        )
+    )
+
+    # Masked ranges must not be wider than max_width (with token-boundary tolerance)
+    for b in range(num_blocks):
+        b_min, b_max = b * num_tokens_per_block, (b + 1) * num_tokens_per_block
+        vals = out["token_mask"][..., b_min:b_max]
+        first_true_idx = np.argmax(vals, axis=-1)
+        last_true_idx = vals.shape[-1] - 1 - np.argmax(vals[..., ::-1], axis=-1)
+
+        edge_mask_lower = np.zeros_like(vals, dtype=bool)
+        edge_mask_upper = np.zeros_like(vals, dtype=bool)
+        if len(out["position"].shape) > 2:
+            batch_indices = np.arange(vals.shape[0])
+            edge_mask_lower[batch_indices, first_true_idx] = True
+            edge_mask_upper[batch_indices, last_true_idx] = True
+        else:
+            edge_mask_lower[first_true_idx] = True
+            edge_mask_upper[last_true_idx] = True
+
+        has_true = np.any(vals, axis=-1)
+        edge_mask_lower[~has_true] = False
+        edge_mask_upper[~has_true] = False
+
+        # Use f_max of first masked token and f_min of last masked token so that
+        # single-token intervals (where f_min_token > f_max_token measured this way)
+        # are excluded from the width check via the diff_f > 0 guard.
+        dropped_f_mins_lower = out["position"][..., b_min:b_max, 1][edge_mask_lower]
+        dropped_f_maxs_upper = out["position"][..., b_min:b_max, 0][edge_mask_upper]
+        diff_f = dropped_f_maxs_upper - dropped_f_mins_lower
+        assert np.all(np.where(diff_f > 0.0, diff_f <= mask_dict["max_width"], True))
+
+    # Only run probability checks if we can average over the batch dimension
+    if len(out["position"].shape) > 2 and out["position"].shape[0] > 1:
+        mask_has_true = [
+            np.any(
+                out["token_mask"][
+                    ..., b * num_tokens_per_block : (b + 1) * num_tokens_per_block
+                ],
+                axis=-1,
+            )
+            for b in range(num_blocks)
+        ]
+        masked_blocks = np.concatenate(mask_has_true)
+        prob_mask = np.mean(masked_blocks)
+        assert np.isclose(prob_mask, mask_dict["p_per_detector"], atol=0.1, rtol=0.1)
+
+        # For UFD, the lower edge of the masked interval should be uniformly
+        # distributed. Only consider tokens completely within [f_min, f_max - max_width]
+        # — those are the only tokens where f_lower can be sampled.
+        if isinstance(domain, UniformFrequencyDomain):
+            mask_tokens = np.logical_and(
+                out["position"][0, :num_tokens_per_block, 0] >= mask_dict["f_min"],
+                out["position"][0, :num_tokens_per_block, 1]
+                <= mask_dict["f_max"] - mask_dict["max_width"],
+            )
+            lower_edge_counts = np.zeros(num_tokens_per_block, dtype=int)
+            for b in range(num_blocks):
+                b_min = b * num_tokens_per_block
+                vals = out["token_mask"][:, b_min : b_min + num_tokens_per_block]
+                first_true_idx = np.argmax(vals, axis=-1)
+                edge = np.zeros_like(vals, dtype=bool)
+                has_true = np.any(vals, axis=-1)
+                edge[np.arange(vals.shape[0])[has_true], first_true_idx[has_true]] = (
+                    True
+                )
+                lower_edge_counts += np.sum(edge, axis=0)
+            counts = lower_edge_counts[mask_tokens]
+            if counts.size > 1:
+                assert chisquare(counts).pvalue > 1e-3
+
+
+def test_MaskFrequencyNotches_p_per_detector_zero():
+    """With p_per_detector=0 no tokens should ever be masked."""
+    domain = make_ufd()
+    sample = make_sample(domain, batch_size=100)
+    out = StrainTokenization(domain, num_tokens_per_block=40, print_output=False)(
+        sample
+    )
+    out = MaskFrequencyNotches(
+        domain=domain,
+        p_per_detector=0.0,
+        f_min=100.0,
+        f_max=500.0,
+        max_width=100.0,
+        print_output=False,
+    )(out)
+    assert not out["token_mask"].any()
+
+
+def test_MaskFrequencyNotches_preserves_existing_mask():
+    """Pre-existing True entries in token_mask must remain True after the transform."""
+    domain = make_ufd()
+    sample = make_sample(domain, batch_size=100)
+    out = StrainTokenization(domain, num_tokens_per_block=40, print_output=False)(
+        sample
+    )
+    out["token_mask"][:, 0] = True
+    out = MaskFrequencyNotches(
+        domain=domain,
+        p_per_detector=0.0,
+        f_min=100.0,
+        f_max=500.0,
+        max_width=100.0,
+        print_output=False,
+    )(out)
+    assert np.all(out["token_mask"][:, 0])
+
+
+# ---------------------------------------------------------------------------
+# MaskTokensForFrequencyRangeUpdate
+# ---------------------------------------------------------------------------
+
+# MaskTokensForFrequencyRangeUpdate is an inference-time transform applied to a single
+# (non-batched) tokenized sample.  We use a UFD with a coarse token grid so
+# that we can reason about exact token counts.
+
+
+def _make_tokenized_sample_unbatched(domain, num_tokens_per_block=10):
+    """Return a tokenized, unbatched sample (no batch dimension).
+
+    drop_last_token=True avoids zero-padding, ensuring every token's f_max is
+    within the domain — so tests can rely on domain.f_max as a clean boundary.
+    """
+    sample = make_sample(domain, batch_size=None)
+    out = StrainTokenization(
+        domain,
+        num_tokens_per_block=num_tokens_per_block,
+        drop_last_token=True,
+        print_output=False,
+    )(sample)
+    return out
+
+
+def test_MaskTokensForFrequencyRangeUpdate_fmin_float():
+    """Tokens whose f_min falls below the new minimum_frequency are masked."""
+    domain = make_ufd(f_min=20.0, f_max=1024.0)
+    out = _make_tokenized_sample_unbatched(domain)
+    new_fmin = 200.0
+
+    out = MaskTokensForFrequencyRangeUpdate(
+        domain=domain,
+        detectors=["H1", "L1"],
+        minimum_frequency=new_fmin,
+        print_output=False,
+    )(out)
+
+    f_min_per_token = out["position"][..., 0]
+    masked = out["token_mask"]
+    assert np.all(masked[f_min_per_token < new_fmin])
+    assert not np.any(masked[f_min_per_token >= new_fmin])
+
+
+def test_MaskTokensForFrequencyRangeUpdate_fmax_float():
+    """Tokens whose f_max exceeds the new maximum_frequency are masked."""
+    domain = make_ufd(f_min=20.0, f_max=1024.0)
+    out = _make_tokenized_sample_unbatched(domain)
+    new_fmax = 500.0
+
+    out = MaskTokensForFrequencyRangeUpdate(
+        domain=domain,
+        detectors=["H1", "L1"],
+        maximum_frequency=new_fmax,
+        print_output=False,
+    )(out)
+
+    f_max_per_token = out["position"][..., 1]
+    masked = out["token_mask"]
+    assert np.all(masked[f_max_per_token > new_fmax])
+    assert not np.any(masked[f_max_per_token <= new_fmax])
+
+
+def test_MaskTokensForFrequencyRangeUpdate_fmin_fmax_float():
+    """Both f_min and f_max updates applied together mask the correct tokens."""
+    domain = make_ufd(f_min=20.0, f_max=1024.0)
+    out = _make_tokenized_sample_unbatched(domain)
+    new_fmin, new_fmax = 200.0, 800.0
+
+    out = MaskTokensForFrequencyRangeUpdate(
+        domain=domain,
+        detectors=["H1", "L1"],
+        minimum_frequency=new_fmin,
+        maximum_frequency=new_fmax,
+        print_output=False,
+    )(out)
+
+    f_min_per_token = out["position"][..., 0]
+    f_max_per_token = out["position"][..., 1]
+    masked = out["token_mask"]
+    expected = (f_min_per_token < new_fmin) | (f_max_per_token > new_fmax)
+    np.testing.assert_array_equal(masked, expected)
+
+
+def test_MaskTokensForFrequencyRangeUpdate_fmin_dict():
+    """Per-detector f_min update: only the specified detector's tokens are masked."""
+    domain = make_ufd(f_min=20.0, f_max=1024.0)
+    out = _make_tokenized_sample_unbatched(domain)
+    new_fmin_h1 = 200.0
+
+    out = MaskTokensForFrequencyRangeUpdate(
+        domain=domain,
+        detectors=["H1", "L1"],
+        minimum_frequency={"H1": new_fmin_h1},
+        print_output=False,
+    )(out)
+
+    position = out["position"]
+    masked = out["token_mask"]
+    h1_tokens = position[..., 2] == DETECTOR_DICT["H1"]
+    l1_tokens = position[..., 2] == DETECTOR_DICT["L1"]
+    assert np.all(masked[h1_tokens & (position[..., 0] < new_fmin_h1)])
+    assert not np.any(masked[h1_tokens & (position[..., 0] >= new_fmin_h1)])
+    # L1 not in the dict so it falls back to domain.f_min — no tokens masked
+    assert not np.any(masked[l1_tokens])
+
+
+def test_MaskTokensForFrequencyRangeUpdate_fmax_dict():
+    """Per-detector f_max update: only the specified detector's tokens are masked."""
+    domain = make_ufd(f_min=20.0, f_max=1024.0)
+    out = _make_tokenized_sample_unbatched(domain)
+    new_fmax_l1 = 700.0
+
+    out = MaskTokensForFrequencyRangeUpdate(
+        domain=domain,
+        detectors=["H1", "L1"],
+        maximum_frequency={"L1": new_fmax_l1},
+        print_output=False,
+    )(out)
+
+    position = out["position"]
+    masked = out["token_mask"]
+    h1_tokens = position[..., 2] == DETECTOR_DICT["H1"]
+    l1_tokens = position[..., 2] == DETECTOR_DICT["L1"]
+    assert np.all(masked[l1_tokens & (position[..., 1] > new_fmax_l1)])
+    assert not np.any(masked[l1_tokens & (position[..., 1] <= new_fmax_l1)])
+    assert not np.any(masked[h1_tokens])
+
+
+def test_MaskTokensForFrequencyRangeUpdate_no_update():
+    """When min/max equal the domain defaults, the mask stays all-False."""
+    domain = make_ufd(f_min=20.0, f_max=1024.0)
+    out = _make_tokenized_sample_unbatched(domain)
+
+    out = MaskTokensForFrequencyRangeUpdate(
+        domain=domain,
+        detectors=["H1", "L1"],
+        minimum_frequency=domain.f_min,
+        maximum_frequency=domain.f_max,
+        print_output=False,
+    )(out)
+
+    assert not out["token_mask"].any()
+
+
+def test_MaskTokensForFrequencyRangeUpdate_preserves_existing_mask():
+    """Pre-existing True entries in token_mask must remain True after the transform."""
+    domain = make_ufd(f_min=20.0, f_max=1024.0)
+    out = _make_tokenized_sample_unbatched(domain)
+    out["token_mask"][0] = True
+
+    out = MaskTokensForFrequencyRangeUpdate(
+        domain=domain,
+        detectors=["H1", "L1"],
+        minimum_frequency=domain.f_min,
+        maximum_frequency=domain.f_max,
+        print_output=False,
+    )(out)
+
+    assert out["token_mask"][0]
+
+
+# ---------------------------------------------------------------------------
+# MaskTokensForFrequencyRangeUpdate — psd_notch_dict
+# ---------------------------------------------------------------------------
+
+
+def test_MaskTokensForFrequencyRangeUpdate_psd_notch_single():
+    """Tokens overlapping the notch interval are masked for all detectors."""
+    domain = make_ufd(f_min=20.0, f_max=1024.0)
+    out = _make_tokenized_sample_unbatched(domain)
+
+    # Pick a notch that overlaps at least one token.  Token size with
+    # num_tokens_per_block=10 over [20, 1024] is ~100 Hz wide; centre on 500 Hz.
+    f_lo, f_hi = 480.0, 520.0
+    notch_dict = {"H1": [f_lo, f_hi], "L1": [f_lo, f_hi]}
+
+    out = MaskTokensForFrequencyRangeUpdate(
+        domain=domain,
+        detectors=["H1", "L1"],
+        psd_notch_dict=notch_dict,
+        print_output=False,
+    )(out)
+
+    position = out["position"]
+    masked = out["token_mask"]
+    f_min_tok = position[..., 0]
+    f_max_tok = position[..., 1]
+
+    # Tokens overlapping the notch must be masked.
+    overlapping = (f_max_tok >= f_lo) & (f_min_tok <= f_hi)
+    assert np.all(masked[overlapping]), "Overlapping tokens must be masked"
+    # Tokens clearly outside the notch must not be masked.
+    outside = (f_max_tok < f_lo - 1) | (f_min_tok > f_hi + 1)
+    assert not np.any(masked[outside]), "Non-overlapping tokens must not be masked"
+
+
+def test_MaskTokensForFrequencyRangeUpdate_psd_notch_per_detector():
+    """Notch on H1 only does not mask L1 tokens."""
+    domain = make_ufd(f_min=20.0, f_max=1024.0)
+    out = _make_tokenized_sample_unbatched(domain)
+    f_lo, f_hi = 480.0, 520.0
+    notch_dict = {"H1": [f_lo, f_hi]}  # L1 intentionally absent
+
+    out = MaskTokensForFrequencyRangeUpdate(
+        domain=domain,
+        detectors=["H1", "L1"],
+        psd_notch_dict=notch_dict,
+        print_output=False,
+    )(out)
+
+    position = out["position"]
+    masked = out["token_mask"]
+    l1_tokens = position[..., 2] == DETECTOR_DICT["L1"]
+    assert not np.any(masked[l1_tokens]), "L1 tokens must not be masked"
+
+
+def test_MaskTokensForFrequencyRangeUpdate_psd_notch_multiple_intervals():
+    """Multiple notch intervals per detector all produce masked tokens."""
+    domain = make_ufd(f_min=20.0, f_max=1024.0)
+    out = _make_tokenized_sample_unbatched(domain)
+    intervals = [[200.0, 240.0], [600.0, 640.0]]
+    notch_dict = {"H1": intervals, "L1": intervals}
+
+    out = MaskTokensForFrequencyRangeUpdate(
+        domain=domain,
+        detectors=["H1", "L1"],
+        psd_notch_dict=notch_dict,
+        print_output=False,
+    )(out)
+
+    position = out["position"]
+    masked = out["token_mask"]
+    f_min_tok = position[..., 0]
+    f_max_tok = position[..., 1]
+
+    for f_lo, f_hi in intervals:
+        overlapping = (f_max_tok >= f_lo) & (f_min_tok <= f_hi)
+        assert np.any(
+            masked[overlapping]
+        ), f"Notch [{f_lo}, {f_hi}] produced no masked tokens"
+
+
+def test_MaskTokensForFrequencyRangeUpdate_psd_notch_preserves_existing_mask():
+    """Pre-existing True entries in token_mask survive the notch masking."""
+    domain = make_ufd(f_min=20.0, f_max=1024.0)
+    out = _make_tokenized_sample_unbatched(domain)
+    # Pick a token that is well outside the notch range and pre-mask it.
+    out["token_mask"][0] = True
+    notch_dict = {"H1": [480.0, 520.0], "L1": [480.0, 520.0]}
+
+    out = MaskTokensForFrequencyRangeUpdate(
+        domain=domain,
+        detectors=["H1", "L1"],
+        psd_notch_dict=notch_dict,
+        print_output=False,
+    )(out)
+
+    assert out["token_mask"][0], "Pre-masked token must remain masked"
+
+
+def test_dingo_t1_settings_build_mask_transforms():
+    """Tokenization settings converted from the dingo-t1 schema are accepted by the
+    mask transforms as keyword arguments, as set_train_transforms passes them."""
+    from dingo.core.utils.backward_compatibility import update_data_config
+    from tests.core.test_utils import dingo_t1_settings
+
+    settings = dingo_t1_settings()
+    update_data_config(settings)
+    tok = settings["train_settings"]["data"]["tokenization"]
+    domain = UniformFrequencyDomain(f_min=20.0, f_max=1024.0, delta_f=0.125)
+    MaskDetectors(**tok["mask_detectors"], print_output=False)
+    MaskFrequencyRange(domain=domain, **tok["mask_frequency_range"], print_output=False)
+    MaskFrequencyNotches(
+        domain=domain, **tok["mask_frequency_notches"], print_output=False
+    )
+
+
+def test_strain_tokenization_non_dyadic_delta_f():
+    """T = 6 s gives delta_f = 1/6, not exactly representable; the padded-bin count
+    must come from integer arithmetic (float division truncated here)."""
+    # f_max = 256 with delta_f = 1/6: the old float expression gave 6 padded bins
+    # where 7 are needed, so the reshape in __call__ crashed.
+    domain = UniformFrequencyDomain(f_min=20.0, f_max=256.0, delta_f=1.0 / 6.0)
+    tok = StrainTokenization(domain=domain, token_size=16, print_output=False)
+    num_f = domain.frequency_mask_length
+    n_tokens = tok.num_tokens_per_detector
+    assert tok.num_padded_f_bins == n_tokens * 16 - num_f
+    assert tok.num_padded_f_bins == 7
+    sample = {
+        "waveform": np.random.default_rng(0).normal(size=(2, 3, num_f)),
+        "asds": {"H1": np.ones(2), "L1": np.ones(2)},
+    }
+    out = tok(sample)
+    assert out["waveform"].shape == (2 * n_tokens, 3 * 16)
+
+
+def test_mask_frequency_notches_non_dyadic_delta_f():
+    """The upper-edge draw must not assume equal candidate counts per row, which
+    float rounding breaks for delta_f = 1/12."""
+    domain = UniformFrequencyDomain(f_min=20.0, f_max=100.0, delta_f=1.0 / 12.0)
+    tok = StrainTokenization(domain=domain, token_size=16, print_output=False)
+    num_f = domain.frequency_mask_length
+    sample = {
+        "waveform": np.random.default_rng(0).normal(size=(8, 2, 3, num_f)),
+        "asds": {"H1": np.ones(2), "L1": np.ones(2)},
+    }
+    sample = tok(sample)
+    np.random.seed(0)
+    transform = MaskFrequencyNotches(
+        domain=domain,
+        p_per_detector=1.0,
+        f_min=20.0,
+        f_max=100.0,
+        max_width=5.0,
+        print_output=False,
+    )
+    out = transform(sample)
+    assert out["token_mask"].any()
+    assert not out["token_mask"].all()

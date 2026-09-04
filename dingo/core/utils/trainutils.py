@@ -289,12 +289,7 @@ def write_history(
 
 
 def copyfile(src, dst):
-    """
-    copy src to dst.
-    :param src:
-    :param dst:
-    :return:
-    """
+    """Copy src to dst."""
     os.system("cp -p %s %s" % (src, dst))
 
 
