@@ -897,34 +897,28 @@ class MaskFrequencyNotches(object):
             f_values_base_domain <= self.notch_f_max - self.notch_max_width,
         )
         possible_f_vals_lower = f_values_base_domain[mask_f_vals_lower]
-        f_lower_full = np.random.choice(
+        f_lower = np.random.choice(
             possible_f_vals_lower, replace=True, size=batch_block_size
         )
-        f_lower = np.where(apply_notch, f_lower_full, np.inf)
-
         # f_upper from [f_lower, f_lower + notch_max_width]: draw a number of
         # grid steps rather than collecting per-row candidate arrays, whose counts
         # differ by one for non-dyadic delta_f (float rounding) and cannot be stacked.
         delta_f = base_domain.delta_f
         n_steps = int(np.floor(self.notch_max_width / delta_f + 1e-9))
-        f_upper_no_mask = (
-            f_lower_full
-            + np.random.randint(0, n_steps + 1, size=batch_block_size) * delta_f
+        f_upper = (
+            f_lower + np.random.randint(0, n_steps + 1, size=batch_block_size) * delta_f
         )
-        f_upper = np.where(apply_notch, f_upper_no_mask, -1.0)
 
-        # Construct mask: f_lower <= f_max_per_token AND f_upper >= f_min_per_token
+        # Mask the tokens overlapping [f_lower, f_upper] on the detectors drawn for
+        # a notch. Per-detector values are repeated over that detector's tokens.
         f_mins = input_sample["position"][..., 0]
         f_maxs = input_sample["position"][..., 1]
-        token_mask_lower = (
-            np.repeat(f_lower, repeats=num_tokens_per_detector, axis=-1) <= f_maxs
+        rep = dict(repeats=num_tokens_per_detector, axis=-1)
+        token_mask = (
+            np.repeat(apply_notch, **rep)
+            & (np.repeat(f_lower, **rep) <= f_maxs)
+            & (np.repeat(f_upper, **rep) >= f_mins)
         )
-        token_mask_upper = (
-            np.repeat(f_upper, repeats=num_tokens_per_detector, axis=-1) >= f_mins
-        )
-
-        # Combine into one mask
-        token_mask = np.logical_and(token_mask_lower, token_mask_upper)
 
         # Modify mask
         if len(input_sample["token_mask"].shape) == 1:
