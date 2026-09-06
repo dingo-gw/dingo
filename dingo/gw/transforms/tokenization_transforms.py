@@ -5,9 +5,6 @@ import numpy as np
 from dingo.gw.domains import UniformFrequencyDomain, MultibandedFrequencyDomain
 from dingo.gw.gwutils import add_defaults_for_missing_detectors
 
-DETECTOR_DICT = {"H1": 0, "L1": 1, "V1": 2}
-DETECTOR_DICT_INVERSE = {v: k for k, v in DETECTOR_DICT.items()}
-
 
 class StrainTokenization:
     """
@@ -22,7 +19,9 @@ class StrainTokenization:
     - 'waveform':        [..., num_detectors * num_tokens_per_detector,
                                num_channels * num_bins_per_token]
     - 'position':        [..., num_tokens, 3]
-                         last dim = [f_min, f_max, detector_index]
+                         last dim = [f_min, f_max, detector_index], where the
+                         detector index is the detector's position in the
+                         training detector list
     - 'token_mask': [..., num_tokens] bool, False = keep token
                          (PyTorch transformer convention: True = masked out).
     """
@@ -30,9 +29,11 @@ class StrainTokenization:
     def __init__(
         self,
         domain: UniformFrequencyDomain | MultibandedFrequencyDomain,
+        detectors: list[str],
         num_tokens_per_block: Optional[int] = None,
         token_size: Optional[int] = None,
         drop_last_token: bool = False,
+        training_detectors: Optional[list[str]] = None,
         print_output: bool = True,
     ):
         """
@@ -40,6 +41,8 @@ class StrainTokenization:
         ----------
         domain:
             Domain carrying f_min, f_max, delta_f, sample_frequencies.
+        detectors:
+            Detectors in the order of the waveform's detector blocks.
         num_tokens_per_block:
             Number of tokens per detector. Mutually exclusive with token_size.
         token_size:
@@ -48,6 +51,10 @@ class StrainTokenization:
         drop_last_token:
             If True and the bins do not divide evenly, drop the trailing incomplete
             token. If False, pad it with zeros.
+        training_detectors:
+            Detectors the network was trained with; the detector index of a token is
+            the position of its detector in this list. Defaults to ``detectors``
+            (training); at inference ``detectors`` may be a subset in any order.
         print_output:
             Write a summary to stdout on construction.
         """
@@ -55,6 +62,18 @@ class StrainTokenization:
             raise ValueError(
                 "Specify exactly one of num_tokens_per_block or token_size."
             )
+        if training_detectors is None:
+            training_detectors = detectors
+        unknown = [d for d in detectors if d not in training_detectors]
+        if unknown:
+            raise ValueError(
+                f"Detectors {unknown} are not among the training detectors "
+                f"{list(training_detectors)}."
+            )
+        self.detectors = list(detectors)
+        self.detector_indices = np.array(
+            [list(training_detectors).index(d) for d in detectors]
+        )
 
         num_f = domain.frequency_mask_length
 
@@ -145,8 +164,8 @@ class StrainTokenization:
         ----------
         input_sample:
             Must contain:
-            - 'waveform': array of shape [..., num_detectors, num_channels, num_bins]
-            - 'asds':     dict {detector_name: asd_array} used to read detector order
+            - 'waveform': array of shape [..., num_detectors, num_channels, num_bins],
+                          detector blocks in the order of ``self.detectors``
 
         Returns
         -------
@@ -155,6 +174,11 @@ class StrainTokenization:
         sample = input_sample.copy()
         strain = sample["waveform"]
         *batch_dims, num_detectors, num_channels, _ = strain.shape
+        if num_detectors != len(self.detectors):
+            raise ValueError(
+                f"Expected {len(self.detectors)} detector blocks {self.detectors}, "
+                f"got {num_detectors}."
+            )
 
         # (0) Cut or zero-pad the frequency axis to a multiple of num_bins_per_token
         target_bins = self.num_tokens_per_detector * self.num_bins_per_token
@@ -190,10 +214,9 @@ class StrainTokenization:
         num_tokens = num_detectors * self.num_tokens_per_detector
         token_f_min = np.tile(self.f_min_per_token, num_detectors)
         token_f_max = np.tile(self.f_max_per_token, num_detectors)
-        detector_indices = np.array(
-            [DETECTOR_DICT[k] for k in input_sample["asds"]], dtype=strain.dtype
+        token_detector = np.repeat(
+            self.detector_indices.astype(strain.dtype), self.num_tokens_per_detector
         )
-        token_detector = np.repeat(detector_indices, self.num_tokens_per_detector)
         token_position = np.stack([token_f_min, token_f_max, token_detector], axis=-1)
 
         if batch_dims:
@@ -315,69 +338,68 @@ class MaskRandomTokens(object):
 
 class MaskDetectors(object):
     """
-    Randomly mask detectors.
+    Randomly mask whole detectors.
+
+    For each sample, first draw how many detectors to mask from ``p_num_masked``,
+    then draw which ones from ``p_detector`` without replacement.
     """
 
     def __init__(
         self,
-        num_blocks: int,
-        p_mask_012_detectors: list | None = None,
-        p_mask_hlv: dict | None = None,
+        detectors: list[str],
+        p_num_masked: list | None = None,
+        p_detector: dict | None = None,
         print_output: bool = True,
     ):
         """
         Parameters
         ----------
-        num_blocks: int
-            Number of blocks (= detectors) in GW use case.
-        p_mask_012_detectors: list[float]
-            Specifies the categorical probability distribution for how many detectors to mask, in ascending order.
-            example: [0.1, 0.6, 0.3] = [10% probability to mask 0 detectors (=3 detector setup), 60 % probability for
-            2 detector setup, 30% probability for 1 detector setup]
-        p_mask_hlv: dict
-            Specifies the categorical probability distribution for which specific detectors to mask, order: H1, L1, V1.
-            example: {'H1': 0.1, 'L1': 0.2, 'V1': 0.7} = 10 % probability to mask H1, 20 % probability to mask L1,
-            70% probability to mask V1
+        detectors: list[str]
+            Training detectors; the detector index of a token is its position in
+            this list.
+        p_num_masked: list[float]
+            Categorical distribution over the number of masked detectors, 0 to
+            len(detectors) - 1. Example for three detectors: [0.6, 0.3, 0.1] = 60%
+            mask none, 30% mask one, 10% mask two. Default: uniform.
+        p_detector: dict
+            Categorical distribution over which detector to mask, keyed by detector
+            name. Example: {'H1': 0.3, 'L1': 0.3, 'V1': 0.4}. Default: uniform.
         print_output: bool
             Whether to write print statements to the console.
         """
-        self.num_blocks = num_blocks
-        if p_mask_012_detectors is None:
-            p_mask_012_detectors = [1 / num_blocks for _ in range(num_blocks)]
-        if not np.isclose(np.sum(p_mask_012_detectors), 1.0, rtol=1e-6, atol=1e-12):
+        num_detectors = len(detectors)
+        if p_num_masked is None:
+            p_num_masked = [1 / num_detectors] * num_detectors
+        if len(p_num_masked) != num_detectors:
             raise ValueError(
-                f"p_mask_012_detectors {p_mask_012_detectors} does not sum to 1."
+                f"p_num_masked {p_num_masked} needs one entry per number of masked "
+                f"detectors, 0 to {num_detectors - 1}."
             )
-        self.p_mask_012_detectors = p_mask_012_detectors
-        if p_mask_hlv is None:
-            p_mask_hlv = {
-                ["H1", "L1", "V1"][k]: 1 / num_blocks for k in range(num_blocks)
-            }
+        if not np.isclose(np.sum(p_num_masked), 1.0, rtol=1e-6, atol=1e-12):
+            raise ValueError(f"p_num_masked {p_num_masked} does not sum to 1.")
+        if p_detector is None:
+            p_detector = {d: 1 / num_detectors for d in detectors}
+        if set(p_detector) != set(detectors):
+            raise ValueError(
+                f"p_detector keys {sorted(p_detector)} do not match the detectors "
+                f"{list(detectors)}."
+            )
         if not np.isclose(
-            np.sum(list(p_mask_hlv.values())), 1.0, rtol=1e-6, atol=1e-12
+            np.sum(list(p_detector.values())), 1.0, rtol=1e-6, atol=1e-12
         ):
-            raise ValueError(f"p_mask_hlv {p_mask_hlv} does not sum to 1.")
-        # Update keys equivalently to tokenization transform
-        self.p_mask_hlv = {DETECTOR_DICT[k]: v for k, v in p_mask_hlv.items()}
+            raise ValueError(f"p_detector {p_detector} does not sum to 1.")
+        self.detectors = list(detectors)
+        self.p_num_masked = p_num_masked
+        self.p_detector = p_detector
+        # Same distribution indexed by the token detector index.
+        self._p_detector_by_index = np.array([p_detector[d] for d in detectors])
 
-        if len(p_mask_012_detectors) > num_blocks:
-            raise ValueError(
-                f"p_mask_012_detectors {self.p_mask_012_detectors} contains more options than"
-                f"detectors available: {num_blocks}. You need to specify a categorical probability"
-                f"value for masking 0, ..., {num_blocks - 1} detectors."
-            )
-        if len(self.p_mask_hlv) != num_blocks:
-            raise ValueError(
-                f"Provided values for p_mask_hlv={self.p_mask_hlv} is inconsistent with number of "
-                f"detectors: {num_blocks}. You need to specify a categorical probability value for each "
-                f"detector."
-            )
         if print_output:
             print(
                 f"Transform MaskDetectors activated: \n"
-                f"    - Probabilities for masking {[i for i in range(num_blocks)]} detectors are "
-                f"{self.p_mask_012_detectors}.\n"
-                f"    - Probabilities for specific detectors are {self.p_mask_hlv}."
+                f"    - Probabilities for masking 0, ..., {num_detectors - 1} detectors "
+                f"are {self.p_num_masked}.\n"
+                f"    - Probabilities for specific detectors are {self.p_detector}."
             )
 
     def __call__(self, input_sample: dict) -> dict:
@@ -404,17 +426,15 @@ class MaskDetectors(object):
 
         """
         detector_indices = input_sample["position"][..., 2]
-        num_detectors = len(np.unique(detector_indices))
         detectors = np.unique(detector_indices)
-
-        # Convert p_mask_hlv dict to list
-        p_mask_hlv = [self.p_mask_hlv[k] for k in detectors]
+        num_detectors = len(detectors)
+        p_detector = self._p_detector_by_index[detectors.astype(int)]
 
         # Decide how many detectors to mask (either none, or one less than the number of detectors present)
         # for each element in batch_size
         mask_n_blocks = np.random.choice(
             [i for i in range(num_detectors)],
-            p=self.p_mask_012_detectors,
+            p=self.p_num_masked,
             size=[*detector_indices.shape[:-1]],
         )
         if np.sum(mask_n_blocks) != 0:
@@ -430,7 +450,7 @@ class MaskDetectors(object):
                     arr=np.repeat(
                         np.expand_dims(detectors, 0), repeats=np.sum(mask_mod), axis=0
                     ),
-                    p=p_mask_hlv,
+                    p=p_detector,
                     size=n,
                     replace=False,
                 )
@@ -951,6 +971,7 @@ class MaskTokensForFrequencyRangeUpdate(object):
         minimum_frequency: Optional[float | dict] = None,
         maximum_frequency: Optional[float | dict] = None,
         psd_notch_dict: Optional[dict] = None,
+        training_detectors: Optional[list[str]] = None,
         print_output: bool = True,
     ):
         """
@@ -959,7 +980,7 @@ class MaskTokensForFrequencyRangeUpdate(object):
         domain:
             Domain corresponding to the data being transformed.
         detectors:
-            List of detector names (e.g. ["H1", "L1"]).
+            Detectors present in the data (e.g. ["H1", "L1"]).
         minimum_frequency: float | dict | None
             New lower frequency bound. Float applies to all detectors; dict specifies
             per-detector values. Detectors missing from the dict use domain.f_min.
@@ -971,9 +992,15 @@ class MaskTokensForFrequencyRangeUpdate(object):
             ``{H1: [[50, 60]], L1: [[50, 60]]}``.  Each value is either a
             single ``[f_lo, f_hi]`` or a list of such pairs.  Tokens whose
             frequency range overlaps with any notch interval are masked.
+        training_detectors:
+            Detectors the network was trained with; token detector indices are
+            positions in this list. Defaults to ``detectors``.
         print_output:
             Whether to write a summary to stdout on construction.
         """
+        self.training_detectors = list(
+            detectors if training_detectors is None else training_detectors
+        )
         self.minimum_frequency = add_defaults_for_missing_detectors(
             object_to_update=minimum_frequency,
             update_value=domain.f_min,
@@ -1035,7 +1062,7 @@ class MaskTokensForFrequencyRangeUpdate(object):
                 )
             elif isinstance(self.minimum_frequency, dict):
                 for b in detector_indices:
-                    det = DETECTOR_DICT_INVERSE[b]
+                    det = self.training_detectors[int(b)]
                     if det in self.minimum_frequency:
                         mask_min = np.where(
                             f_min_per_token_single < self.minimum_frequency[det],
@@ -1058,7 +1085,7 @@ class MaskTokensForFrequencyRangeUpdate(object):
                 )
             elif isinstance(self.maximum_frequency, dict):
                 for b in detector_indices:
-                    det = DETECTOR_DICT_INVERSE[b]
+                    det = self.training_detectors[int(b)]
                     if det in self.maximum_frequency:
                         mask_max = np.where(
                             f_max_per_token_single > self.maximum_frequency[det],
@@ -1075,7 +1102,7 @@ class MaskTokensForFrequencyRangeUpdate(object):
 
         if self.psd_notch_dict is not None:
             for b in detector_indices:
-                det = DETECTOR_DICT_INVERSE[b]
+                det = self.training_detectors[int(b)]
                 if det not in self.psd_notch_dict:
                     continue
                 notch = self.psd_notch_dict[det]

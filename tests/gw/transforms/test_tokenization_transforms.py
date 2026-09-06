@@ -10,7 +10,6 @@ from dingo.gw.transforms import (
     MaskFrequencyRange,
     MaskFrequencyNotches,
     MaskTokensForFrequencyRangeUpdate,
-    DETECTOR_DICT,
 )
 
 
@@ -173,7 +172,10 @@ def test_strain_tokenization_num_tokens(request, setup):
     domain, num_tokens_per_block, num_blocks, sample = request.getfixturevalue(setup)
 
     transform = StrainTokenization(
-        domain, num_tokens_per_block=num_tokens_per_block, print_output=False
+        domain,
+        detectors=["H1", "L1"],
+        num_tokens_per_block=num_tokens_per_block,
+        print_output=False,
     )
     out = transform(sample)
 
@@ -199,7 +201,9 @@ def test_strain_tokenization_token_size(request, setup):
     domain, num_tokens_per_block, num_blocks, sample = request.getfixturevalue(setup)
     token_size = int(np.ceil(domain.frequency_mask_length / num_tokens_per_block))
 
-    transform = StrainTokenization(domain, token_size=token_size, print_output=False)
+    transform = StrainTokenization(
+        domain, detectors=["H1", "L1"], token_size=token_size, print_output=False
+    )
     out = transform(sample)
 
     assert out["waveform"].shape[-2] == num_tokens_per_block * num_blocks
@@ -215,7 +219,11 @@ def test_strain_tokenization_drop_last_token(request, setup):
     expected = (num_tokens_per_block - (1 if remainder else 0)) * num_blocks
 
     transform = StrainTokenization(
-        domain, token_size=token_size, drop_last_token=True, print_output=False
+        domain,
+        detectors=["H1", "L1"],
+        token_size=token_size,
+        drop_last_token=True,
+        print_output=False,
     )
     out = transform(sample)
 
@@ -235,7 +243,10 @@ def test_token_bin_content():
 
     sample = make_sample(domain, batch_size=100, num_channels=num_channels)
     transform = StrainTokenization(
-        domain, num_tokens_per_block=num_tokens_per_block, print_output=False
+        domain,
+        detectors=["H1", "L1"],
+        num_tokens_per_block=num_tokens_per_block,
+        print_output=False,
     )
     out = transform(sample)
 
@@ -274,7 +285,7 @@ def test_three_detectors():
 
     num_tokens_per_block = 43
     transform = StrainTokenization(
-        domain, num_tokens_per_block=num_tokens_per_block, print_output=False
+        domain, detectors, num_tokens_per_block=num_tokens_per_block, print_output=False
     )
     out = transform(sample)
 
@@ -286,11 +297,48 @@ def test_three_detectors():
         assert np.all(
             out["waveform"][0, tok_slice, :] == float(block_idx)
         ), f"Wrong waveform values for detector {det}"
-        # Detector index in position matches DETECTOR_DICT
+        # Detector index in position is the position in the detector list
         det_indices = out["position"][0, tok_slice, 2]
         assert np.all(
-            det_indices == DETECTOR_DICT[det]
-        ), f"Wrong detector index for {det}: got {det_indices[0]}, expected {DETECTOR_DICT[det]}"
+            det_indices == block_idx
+        ), f"Wrong detector index for {det}: got {det_indices[0]}, expected {block_idx}"
+
+
+def test_detector_index_is_position_in_training_list():
+    """Any detector list works; indices are list positions, also for a subset given
+    in another order at inference. The ASD dict is not consulted."""
+    domain = make_ufd()
+    num_f = domain.frequency_mask_length
+    sample = {"waveform": np.zeros([2, 3, num_f])}
+    for detectors in (["L1", "V1"], ["H1", "K1"]):
+        out = StrainTokenization(domain, detectors, token_size=16, print_output=False)(
+            sample
+        )
+        T = out["position"].shape[0] // 2
+        assert np.all(out["position"][:T, 2] == 0)
+        assert np.all(out["position"][T:, 2] == 1)
+    # Inference on a V1, H1 subset of an H1, L1, V1 network: block order is the
+    # subset's, indices are the training positions.
+    out = StrainTokenization(
+        domain,
+        ["V1", "H1"],
+        token_size=16,
+        training_detectors=["H1", "L1", "V1"],
+        print_output=False,
+    )(sample)
+    T = out["position"].shape[0] // 2
+    assert np.all(out["position"][:T, 2] == 2)
+    assert np.all(out["position"][T:, 2] == 0)
+    with pytest.raises(ValueError, match="not among the training detectors"):
+        StrainTokenization(
+            domain,
+            ["K1"],
+            token_size=16,
+            training_detectors=["H1", "L1"],
+            print_output=False,
+        )
+    with pytest.raises(ValueError, match="detector blocks"):
+        StrainTokenization(domain, ["H1"], token_size=16, print_output=False)(sample)
 
 
 def test_output_dtype():
@@ -302,7 +350,7 @@ def test_output_dtype():
         sample["waveform"] = sample["waveform"].astype(dtype)
 
         transform = StrainTokenization(
-            domain, num_tokens_per_block=40, print_output=False
+            domain, detectors=["H1", "L1"], num_tokens_per_block=40, print_output=False
         )
         out = transform(sample)
 
@@ -315,10 +363,14 @@ def test_mutual_exclusivity():
     """Passing both or neither of num_tokens_per_block / token_size raises ValueError."""
     domain = make_ufd()
     with pytest.raises(ValueError):
-        StrainTokenization(domain, print_output=False)
+        StrainTokenization(domain, detectors=["H1", "L1"], print_output=False)
     with pytest.raises(ValueError):
         StrainTokenization(
-            domain, num_tokens_per_block=10, token_size=20, print_output=False
+            domain,
+            detectors=["H1", "L1"],
+            num_tokens_per_block=10,
+            token_size=20,
+            print_output=False,
         )
 
 
@@ -327,7 +379,9 @@ def test_mfd_incompatible_nodes():
     # nodes=[20, 34, ...]: with token_size=200, a node will land inside a token
     domain = make_mfd()
     with pytest.raises(ValueError):
-        StrainTokenization(domain, token_size=200, print_output=False)
+        StrainTokenization(
+            domain, detectors=["H1", "L1"], token_size=200, print_output=False
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -350,6 +404,7 @@ def test_MaskRandomTokens(request, setup):
     # Initialize StrainTokenization transform
     token_transformation = StrainTokenization(
         domain,
+        detectors=["H1", "L1"],
         num_tokens_per_block=num_tokens_per_block,
     )
     mask_dict = {
@@ -385,7 +440,9 @@ def test_MaskRandomTokens_p_mask_zero():
     """With p_mask=0 no tokens should ever be masked."""
     domain = make_ufd()
     sample = make_sample(domain, batch_size=100)
-    out = StrainTokenization(domain, num_tokens_per_block=40)(sample)
+    out = StrainTokenization(domain, detectors=["H1", "L1"], num_tokens_per_block=40)(
+        sample
+    )
     out = MaskRandomTokens(p_mask=0.0, max_num_tokens=40)(out)
     assert not out["token_mask"].any()
 
@@ -394,7 +451,9 @@ def test_MaskRandomTokens_preserves_existing_mask():
     """Pre-existing True entries in token_mask must remain True after the transform."""
     domain = make_ufd()
     sample = make_sample(domain, batch_size=100)
-    out = StrainTokenization(domain, num_tokens_per_block=40)(sample)
+    out = StrainTokenization(domain, detectors=["H1", "L1"], num_tokens_per_block=40)(
+        sample
+    )
     out["token_mask"][:, 0] = True
     out = MaskRandomTokens(p_mask=0.0, max_num_tokens=40)(out)
     assert np.all(out["token_mask"][:, 0])
@@ -420,13 +479,14 @@ def test_MaskDetectors(request, setup):
     # Initialize StrainTokenization transform
     token_transformation = StrainTokenization(
         domain,
+        detectors=["H1", "L1"],
         num_tokens_per_block=num_tokens_per_block,
     )
     # Always mask exactly H1, never L1
     mask_transformation = MaskDetectors(
-        num_blocks=num_blocks,
-        p_mask_012_detectors=[0.0, 1.0],
-        p_mask_hlv={"H1": 1.0, "L1": 0.0},
+        detectors=["H1", "L1"],
+        p_num_masked=[0.0, 1.0],
+        p_detector={"H1": 1.0, "L1": 0.0},
     )
 
     out = token_transformation(sample)
@@ -438,14 +498,14 @@ def test_MaskDetectors(request, setup):
     assert np.all(np.sum(out["token_mask"], axis=-1) == num_tokens_per_block)
 
     trafo_dict = {
-        "p_mask_012_detectors": [0.3, 0.7],
-        "p_mask_hlv": {"H1": 0.4, "L1": 0.6},
+        "p_num_masked": [0.3, 0.7],
+        "p_detector": {"H1": 0.4, "L1": 0.6},
     }
 
     mask_transformation = MaskDetectors(
-        num_blocks=num_blocks,
-        p_mask_012_detectors=trafo_dict["p_mask_012_detectors"],
-        p_mask_hlv=trafo_dict["p_mask_hlv"],
+        detectors=["H1", "L1"],
+        p_num_masked=trafo_dict["p_num_masked"],
+        p_detector=trafo_dict["p_detector"],
     )
     out = token_transformation(sample)
     out = mask_transformation(out)
@@ -459,7 +519,7 @@ def test_MaskDetectors(request, setup):
         prob_mask_1_detector = np.mean(np.where(count_masked_tokens > 0, 1, 0))
         assert np.isclose(
             prob_mask_1_detector,
-            trafo_dict["p_mask_012_detectors"][1],
+            trafo_dict["p_num_masked"][1],
             atol=0.1,
             rtol=0.1,
         )
@@ -473,21 +533,22 @@ def test_MaskDetectors(request, setup):
             assert np.all(np.isin(count_masked, [0, num_tokens_per_block]))
             prob_mask_detector = np.mean(np.where(count_masked > 0, 1, 0))
             prob_expected = (
-                trafo_dict["p_mask_012_detectors"][1]
-                * trafo_dict["p_mask_hlv"][detectors[b]]
+                trafo_dict["p_num_masked"][1] * trafo_dict["p_detector"][detectors[b]]
             )
             assert np.isclose(prob_mask_detector, prob_expected, atol=0.1, rtol=0.1)
 
 
 def test_MaskDetectors_never_masks():
-    """With p_mask_012_detectors=[1.0, 0.0] nothing should ever be masked."""
+    """With p_num_masked=[1.0, 0.0] nothing should ever be masked."""
     domain = make_ufd()
     sample = make_sample(domain, batch_size=100)
-    out = StrainTokenization(domain, num_tokens_per_block=40)(sample)
+    out = StrainTokenization(domain, detectors=["H1", "L1"], num_tokens_per_block=40)(
+        sample
+    )
     out = MaskDetectors(
-        num_blocks=2,
-        p_mask_012_detectors=[1.0, 0.0],
-        p_mask_hlv={"H1": 0.5, "L1": 0.5},
+        detectors=["H1", "L1"],
+        p_num_masked=[1.0, 0.0],
+        p_detector={"H1": 0.5, "L1": 0.5},
     )(out)
     assert not out["token_mask"].any()
 
@@ -496,12 +557,14 @@ def test_MaskDetectors_preserves_existing_mask():
     """Pre-existing True entries in token_mask must remain True after the transform."""
     domain = make_ufd()
     sample = make_sample(domain, batch_size=100)
-    out = StrainTokenization(domain, num_tokens_per_block=40)(sample)
+    out = StrainTokenization(domain, detectors=["H1", "L1"], num_tokens_per_block=40)(
+        sample
+    )
     out["token_mask"][:, 0] = True
     out = MaskDetectors(
-        num_blocks=2,
-        p_mask_012_detectors=[1.0, 0.0],
-        p_mask_hlv={"H1": 0.5, "L1": 0.5},
+        detectors=["H1", "L1"],
+        p_num_masked=[1.0, 0.0],
+        p_detector={"H1": 0.5, "L1": 0.5},
     )(out)
     assert np.all(out["token_mask"][:, 0])
 
@@ -517,15 +580,41 @@ def test_MaskDetectors_two_of_three():
     asds = {d: np.random.rand(batch_size, num_f) for d in ["H1", "L1", "V1"]}
     sample = {"waveform": waveform, "asds": asds}
 
-    out = StrainTokenization(domain, num_tokens_per_block=num_tokens_per_block)(sample)
+    out = StrainTokenization(
+        domain, ["H1", "L1", "V1"], num_tokens_per_block=num_tokens_per_block
+    )(sample)
     # Always mask exactly 2 detectors, always H1 and L1
     out = MaskDetectors(
-        num_blocks=3,
-        p_mask_012_detectors=[0.0, 0.0, 1.0],
-        p_mask_hlv={"H1": 0.5, "L1": 0.5, "V1": 0.0},
+        detectors=["H1", "L1", "V1"],
+        p_num_masked=[0.0, 0.0, 1.0],
+        p_detector={"H1": 0.5, "L1": 0.5, "V1": 0.0},
     )(out)
     # Exactly 2 * num_tokens_per_block tokens should be masked per sample
     assert np.all(np.sum(out["token_mask"], axis=-1) == 2 * num_tokens_per_block)
+
+
+def test_MaskDetectors_any_detector_list():
+    """Detector identity comes from the list: an L1, V1 network masks the block the
+    settings name; settings for other detectors or a wrong count raise."""
+    domain = make_ufd()
+    num_f = domain.frequency_mask_length
+    detectors = ["L1", "V1"]
+    sample = {"waveform": np.zeros([50, 2, 3, num_f])}
+    out = StrainTokenization(
+        domain, detectors, num_tokens_per_block=40, print_output=False
+    )(sample)
+    out = MaskDetectors(
+        detectors,
+        p_num_masked=[0.0, 1.0],
+        p_detector={"L1": 0.0, "V1": 1.0},
+        print_output=False,
+    )(out)
+    assert not out["token_mask"][:, :40].any()
+    assert out["token_mask"][:, 40:].all()
+    with pytest.raises(ValueError, match="p_detector keys"):
+        MaskDetectors(detectors, p_detector={"H1": 0.5, "L1": 0.5}, print_output=False)
+    with pytest.raises(ValueError, match="one entry per number"):
+        MaskDetectors(detectors, p_num_masked=[1.0], print_output=False)
 
 
 # ---------------------------------------------------------------------------
@@ -539,6 +628,7 @@ def test_MaskFrequencyRange(request, setup):
 
     token_transformation = StrainTokenization(
         domain,
+        detectors=["H1", "L1"],
         num_tokens_per_block=num_tokens_per_block,
         print_output=False,
     )
@@ -693,9 +783,9 @@ def test_MaskFrequencyRange_p_mask_zero():
     """With p_mask=0 no tokens should ever be masked."""
     domain = make_ufd()
     sample = make_sample(domain, batch_size=100)
-    out = StrainTokenization(domain, num_tokens_per_block=40, print_output=False)(
-        sample
-    )
+    out = StrainTokenization(
+        domain, detectors=["H1", "L1"], num_tokens_per_block=40, print_output=False
+    )(sample)
     out = MaskFrequencyRange(
         domain=domain,
         p_mask=0.0,
@@ -711,9 +801,9 @@ def test_MaskFrequencyRange_preserves_existing_mask():
     """Pre-existing True entries in token_mask must remain True after the transform."""
     domain = make_ufd()
     sample = make_sample(domain, batch_size=100)
-    out = StrainTokenization(domain, num_tokens_per_block=40, print_output=False)(
-        sample
-    )
+    out = StrainTokenization(
+        domain, detectors=["H1", "L1"], num_tokens_per_block=40, print_output=False
+    )(sample)
     out["token_mask"][:, 0] = True
     out = MaskFrequencyRange(
         domain=domain,
@@ -752,6 +842,7 @@ def test_MaskFrequencyNotches(request, setup):
 
     token_transformation = StrainTokenization(
         domain,
+        detectors=["H1", "L1"],
         num_tokens_per_block=num_tokens_per_block,
         print_output=False,
     )
@@ -858,9 +949,9 @@ def test_MaskFrequencyNotches_p_per_detector_zero():
     """With p_per_detector=0 no tokens should ever be masked."""
     domain = make_ufd()
     sample = make_sample(domain, batch_size=100)
-    out = StrainTokenization(domain, num_tokens_per_block=40, print_output=False)(
-        sample
-    )
+    out = StrainTokenization(
+        domain, detectors=["H1", "L1"], num_tokens_per_block=40, print_output=False
+    )(sample)
     out = MaskFrequencyNotches(
         domain=domain,
         p_per_detector=0.0,
@@ -876,9 +967,9 @@ def test_MaskFrequencyNotches_preserves_existing_mask():
     """Pre-existing True entries in token_mask must remain True after the transform."""
     domain = make_ufd()
     sample = make_sample(domain, batch_size=100)
-    out = StrainTokenization(domain, num_tokens_per_block=40, print_output=False)(
-        sample
-    )
+    out = StrainTokenization(
+        domain, detectors=["H1", "L1"], num_tokens_per_block=40, print_output=False
+    )(sample)
     out["token_mask"][:, 0] = True
     out = MaskFrequencyNotches(
         domain=domain,
@@ -909,6 +1000,7 @@ def _make_tokenized_sample_unbatched(domain, num_tokens_per_block=10):
     sample = make_sample(domain, batch_size=None)
     out = StrainTokenization(
         domain,
+        detectors=["H1", "L1"],
         num_tokens_per_block=num_tokens_per_block,
         drop_last_token=True,
         print_output=False,
@@ -990,8 +1082,8 @@ def test_MaskTokensForFrequencyRangeUpdate_fmin_dict():
 
     position = out["position"]
     masked = out["token_mask"]
-    h1_tokens = position[..., 2] == DETECTOR_DICT["H1"]
-    l1_tokens = position[..., 2] == DETECTOR_DICT["L1"]
+    h1_tokens = position[..., 2] == 0
+    l1_tokens = position[..., 2] == 1
     assert np.all(masked[h1_tokens & (position[..., 0] < new_fmin_h1)])
     assert not np.any(masked[h1_tokens & (position[..., 0] >= new_fmin_h1)])
     # L1 not in the dict so it falls back to domain.f_min — no tokens masked
@@ -1013,8 +1105,8 @@ def test_MaskTokensForFrequencyRangeUpdate_fmax_dict():
 
     position = out["position"]
     masked = out["token_mask"]
-    h1_tokens = position[..., 2] == DETECTOR_DICT["H1"]
-    l1_tokens = position[..., 2] == DETECTOR_DICT["L1"]
+    h1_tokens = position[..., 2] == 0
+    l1_tokens = position[..., 2] == 1
     assert np.all(masked[l1_tokens & (position[..., 1] > new_fmax_l1)])
     assert not np.any(masked[l1_tokens & (position[..., 1] <= new_fmax_l1)])
     assert not np.any(masked[h1_tokens])
@@ -1104,7 +1196,7 @@ def test_MaskTokensForFrequencyRangeUpdate_psd_notch_per_detector():
 
     position = out["position"]
     masked = out["token_mask"]
-    l1_tokens = position[..., 2] == DETECTOR_DICT["L1"]
+    l1_tokens = position[..., 2] == 1
     assert not np.any(masked[l1_tokens]), "L1 tokens must not be masked"
 
 
@@ -1162,7 +1254,8 @@ def test_dingo_t1_settings_build_mask_transforms():
     update_data_config(settings)
     tok = settings["train_settings"]["data"]["tokenization"]
     domain = UniformFrequencyDomain(f_min=20.0, f_max=1024.0, delta_f=0.125)
-    MaskDetectors(**tok["mask_detectors"], print_output=False)
+    detectors = settings["train_settings"]["data"]["detectors"]
+    MaskDetectors(detectors, **tok["mask_detectors"], print_output=False)
     MaskFrequencyRange(domain=domain, **tok["mask_frequency_range"], print_output=False)
     MaskFrequencyNotches(
         domain=domain, **tok["mask_frequency_notches"], print_output=False
@@ -1175,7 +1268,9 @@ def test_strain_tokenization_non_dyadic_delta_f():
     # f_max = 256 with delta_f = 1/6: the old float expression gave 6 padded bins
     # where 7 are needed, so the reshape in __call__ crashed.
     domain = UniformFrequencyDomain(f_min=20.0, f_max=256.0, delta_f=1.0 / 6.0)
-    tok = StrainTokenization(domain=domain, token_size=16, print_output=False)
+    tok = StrainTokenization(
+        domain=domain, detectors=["H1", "L1"], token_size=16, print_output=False
+    )
     num_f = domain.frequency_mask_length
     n_tokens = tok.num_tokens_per_detector
     assert tok.num_padded_f_bins == n_tokens * 16 - num_f
@@ -1192,7 +1287,9 @@ def test_mask_frequency_notches_non_dyadic_delta_f():
     """The upper-edge draw must not assume equal candidate counts per row, which
     float rounding breaks for delta_f = 1/12."""
     domain = UniformFrequencyDomain(f_min=20.0, f_max=100.0, delta_f=1.0 / 12.0)
-    tok = StrainTokenization(domain=domain, token_size=16, print_output=False)
+    tok = StrainTokenization(
+        domain=domain, detectors=["H1", "L1"], token_size=16, print_output=False
+    )
     num_f = domain.frequency_mask_length
     sample = {
         "waveform": np.random.default_rng(0).normal(size=(8, 2, 3, num_f)),

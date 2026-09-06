@@ -191,9 +191,8 @@ def dingo_t1_settings():
 DINGO_T1_TOKENIZATION_CONVERTED = {
     "token_size": 16,
     "mask_detectors": {
-        "num_blocks": 3,
-        "p_mask_012_detectors": [0.6, 0.3, 0.1],
-        "p_mask_hlv": {"H1": 0.3, "L1": 0.3, "V1": 0.4},
+        "p_num_masked": [0.6, 0.3, 0.1],
+        "p_detector": {"H1": 0.3, "L1": 0.3, "V1": 0.4},
     },
     "mask_frequency_range": {
         "p_mask": 0.25,
@@ -224,6 +223,36 @@ def test_update_data_config_maps_dingo_t1_schema():
         settings["train_settings"]["data"]["tokenization"]
         == DINGO_T1_TOKENIZATION_CONVERTED
     )
+
+
+def test_update_data_config_maps_interim_mask_detectors_keys():
+    """The transformer-branch keys (global detector indices) map to the list-based
+    schema; new-schema settings pass through untouched."""
+    data_settings = {
+        "detectors": ["H1", "L1"],
+        "tokenization": {
+            "mask_detectors": {
+                "num_blocks": 2,
+                "p_mask_012_detectors": [0.6, 0.4],
+                "p_mask_hlv": {"H1": 0.5, "L1": 0.5},
+            }
+        },
+    }
+    converted = {"p_num_masked": [0.6, 0.4], "p_detector": {"H1": 0.5, "L1": 0.5}}
+    update_data_config({"train_settings": {"data": data_settings}})
+    assert data_settings["tokenization"]["mask_detectors"] == converted
+    data_settings["detectors"] = ["V1", "L1"]  # any order is fine for the new schema
+    update_data_config({"train_settings": {"data": data_settings}})
+    assert data_settings["tokenization"]["mask_detectors"] == converted
+
+
+def test_update_data_config_rejects_global_indices_with_permuted_detectors():
+    """Old-schema networks used H1=0, L1=1, V1=2; any other list order must not load
+    silently under list-position indexing."""
+    settings = dingo_t1_settings()
+    settings["train_settings"]["data"]["detectors"] = ["H1", "V1", "L1"]
+    with pytest.raises(ValueError, match="position in the training detector list"):
+        update_data_config(settings)
 
 
 def test_update_data_config_fills_dingo_t1_constant_defaults():

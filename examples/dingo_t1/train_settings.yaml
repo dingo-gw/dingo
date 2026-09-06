@@ -30,9 +30,8 @@ data:
   tokenization:
     token_size: 16
     mask_detectors:
-      num_blocks: 3
-      p_mask_012_detectors: [0.6, 0.3, 0.1]
-      p_mask_hlv:
+      p_num_masked: [0.6, 0.3, 0.1]
+      p_detector:
         H1: 0.3
         L1: 0.3
         V1: 0.4

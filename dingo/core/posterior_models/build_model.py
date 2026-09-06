@@ -95,8 +95,9 @@ def autocomplete_model_kwargs(model_kwargs: dict, data_sample: list):
         tokenizer_kwargs = model_kwargs["embedding_kwargs"]["tokenizer_kwargs"]
         tokenizer_kwargs["input_dim"] = int(data_sample[1].shape[-1])
         if "num_blocks" not in tokenizer_kwargs:
-            # position tensor is data_sample[2], shape [num_tokens, 3];
-            # column 2 holds integer detector indices 0..num_blocks-1
+            # position tensor is data_sample[2], shape [num_tokens, 3]; column 2
+            # holds the detector index (position in the training detector list),
+            # and every training sample contains all detectors.
             tokenizer_kwargs["num_blocks"] = int(data_sample[2][:, 2].max().item()) + 1
         embedding_kwargs = model_kwargs["embedding_kwargs"]
         if embedding_kwargs.get("final_net_kwargs"):

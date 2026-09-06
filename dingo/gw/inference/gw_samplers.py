@@ -380,13 +380,20 @@ class GWSampler(GWSamplerMixin, Sampler):
         )
 
         if tok:
+            # Token detector indices are positions in the training detector list;
+            # self.detectors holds the event's (sub)set of them.
+            training_detectors = self.base_model_metadata["train_settings"]["data"][
+                "detectors"
+            ]
             # StrainTokenization operates on numpy arrays, so it must precede ToTorch.
             transform_pre.append(
                 StrainTokenization(
                     domain=self.domain,
+                    detectors=self.detectors,
                     token_size=tok.get("token_size"),
                     num_tokens_per_block=tok.get("num_tokens_per_block"),
                     drop_last_token=tok.get("drop_last_token", False),
+                    training_detectors=training_detectors,
                 )
             )
             if self.frequency_updates or self.psd_notch_dict:
@@ -397,6 +404,7 @@ class GWSampler(GWSamplerMixin, Sampler):
                         minimum_frequency=self.minimum_frequency,
                         maximum_frequency=self.maximum_frequency,
                         psd_notch_dict=self.psd_notch_dict,
+                        training_detectors=training_detectors,
                     )
                 )
 
@@ -869,26 +877,26 @@ def _validate_detectors_transformer(
         )
     absent = set(detectors_network) - set(detectors_event)
 
-    p_mask_012 = mask_detector_settings.get("p_mask_012_detectors")
-    # p_mask_012[k] = probability of masking k detectors during training.
-    if p_mask_012 is not None and (
-        len(absent) >= len(p_mask_012) or p_mask_012[len(absent)] == 0.0
+    p_num_masked = mask_detector_settings.get("p_num_masked")
+    # p_num_masked[k] = probability of masking k detectors during training.
+    if p_num_masked is not None and (
+        len(absent) >= len(p_num_masked) or p_num_masked[len(absent)] == 0.0
     ):
         raise ValueError(
             f"Event has detectors {detectors_event}, but model was trained with "
-            f"p_mask_012_detectors={p_mask_012}, not allowing "
+            f"p_num_masked={p_num_masked}, not allowing "
             f"{len(detectors_event)} active detectors."
         )
 
-    p_mask_hlv = mask_detector_settings.get("p_mask_hlv")
-    # p_mask_hlv[det] = probability that det is masked; zero means det was always
-    # present in training, so it must also be present in the event.
-    if p_mask_hlv is not None:
+    p_detector = mask_detector_settings.get("p_detector")
+    # p_detector[det] = probability of drawing det to be masked; zero means det was
+    # always present in training, so it must also be present in the event.
+    if p_detector is not None:
         for det in absent:
-            if p_mask_hlv.get(det, 0.0) == 0.0:
+            if p_detector.get(det, 0.0) == 0.0:
                 raise ValueError(
                     f"Detector {det} was never masked in training "
-                    f"(p_mask_hlv={p_mask_hlv}); cannot drop it at inference."
+                    f"(p_detector={p_detector}); cannot drop it at inference."
                 )
 
 

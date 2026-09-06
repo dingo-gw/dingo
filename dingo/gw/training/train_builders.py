@@ -186,6 +186,7 @@ def set_train_transforms(wfd, data_settings, asd_dataset_path, omit_transforms=N
         transforms.append(
             StrainTokenization(
                 domain=domain,
+                detectors=data_settings["detectors"],
                 token_size=tok.get("token_size"),
                 num_tokens_per_block=tok.get("num_tokens_per_block"),
                 drop_last_token=tok.get("drop_last_token", False),
@@ -194,7 +195,9 @@ def set_train_transforms(wfd, data_settings, asd_dataset_path, omit_transforms=N
         if "mask_random_tokens" in tok:
             transforms.append(MaskRandomTokens(**tok["mask_random_tokens"]))
         if "mask_detectors" in tok:
-            transforms.append(MaskDetectors(**tok["mask_detectors"]))
+            transforms.append(
+                MaskDetectors(data_settings["detectors"], **tok["mask_detectors"])
+            )
         if "mask_frequency_range" in tok:
             transforms.append(
                 MaskFrequencyRange(domain=domain, **tok["mask_frequency_range"])

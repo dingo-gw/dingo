@@ -179,7 +179,8 @@ def update_data_config(settings: dict):
     Update ``settings["train_settings"]["data"]`` to the current keys, in place.
     Renames the tokenization settings written by the dingo-t1 branch (e.g. the
     published Dingo-T1 network), filling in the constant defaults that branch
-    applied for absent keys. Idempotent.
+    applied for absent keys, and the ``mask_detectors`` keys of the interim
+    transformer-branch schema. Idempotent.
 
     Parameters
     ----------
@@ -200,10 +201,30 @@ def update_data_config(settings: dict):
     if "drop_detectors" in tok:
         old = tok.pop("drop_detectors")
         tok["mask_detectors"] = {
-            "num_blocks": len(data_settings["detectors"]),
             "p_mask_012_detectors": old.get("p_drop_012_detectors"),
             "p_mask_hlv": old.get("p_drop_hlv"),
         }
+    mask_detectors = tok.get("mask_detectors")
+    if mask_detectors is not None and (
+        {"num_blocks", "p_mask_012_detectors", "p_mask_hlv"} & set(mask_detectors)
+    ):
+        # Networks with these keys were trained with global detector indices
+        # (H1=0, L1=1, V1=2). The index is now the position in the training
+        # detector list, which agrees only if the list is ordered that way.
+        detectors = data_settings["detectors"]
+        if list(detectors) != ["H1", "L1", "V1"][: len(detectors)]:
+            raise ValueError(
+                f"Transformer networks trained with detectors {detectors} under the "
+                f"global detector indices H1=0, L1=1, V1=2 are not supported: the "
+                f"detector index is now the position in the training detector list."
+            )
+        mask_detectors.pop("num_blocks", None)
+        for new, old_key in (
+            ("p_num_masked", "p_mask_012_detectors"),
+            ("p_detector", "p_mask_hlv"),
+        ):
+            if old_key in mask_detectors:
+                mask_detectors[new] = mask_detectors.pop(old_key)
     if "drop_frequency_range" in tok:
         old = tok.pop("drop_frequency_range")
         if "f_cut" in old:

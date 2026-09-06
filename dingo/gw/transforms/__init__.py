@@ -13,5 +13,4 @@ from .tokenization_transforms import (
     MaskFrequencyRange,
     MaskFrequencyNotches,
     MaskTokensForFrequencyRangeUpdate,
-    DETECTOR_DICT,
 )

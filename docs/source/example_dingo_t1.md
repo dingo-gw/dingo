@@ -78,9 +78,8 @@ The key difference from the NPE model is the `tokenization` block inside
 tokenization:
   token_size: 16                  # number of frequency bins per token
   mask_detectors:                 # enables subset-detector inference
-    num_blocks: 3
-    p_mask_012_detectors: [0.6, 0.3, 0.1]
-    p_mask_hlv:
+    p_num_masked: [0.6, 0.3, 0.1]  # probabilities of masking 0, 1, 2 detectors
+    p_detector:                   # probabilities of which detector to mask
       H1: 0.3
       L1: 0.3
       V1: 0.4
