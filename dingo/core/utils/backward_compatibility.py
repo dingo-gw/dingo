@@ -171,6 +171,13 @@ def update_model_config(model_settings: dict):
         # [num_tokens, num_features] -> num_features (only the latter was used).
         if "input_dims" in tokenizer_kwargs:
             tokenizer_kwargs["input_dim"] = tokenizer_kwargs.pop("input_dims")[-1]
+        # num_blocks (one detector column after two frequency columns) -> the
+        # generic position layout; the GLU context width is unchanged.
+        if "num_blocks" in tokenizer_kwargs:
+            tokenizer_kwargs["position_category_sizes"] = [
+                tokenizer_kwargs.pop("num_blocks")
+            ]
+            tokenizer_kwargs["position_continuous_dim"] = 2
         (embedding_kwargs.get("final_net_kwargs") or {}).pop("input_dim", None)
 
 

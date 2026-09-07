@@ -293,7 +293,8 @@ def _make_transformer_embedding_kwargs():
     return {
         "tokenizer_kwargs": {
             "input_dim": _NUM_FEATURES,
-            "num_blocks": _NUM_BLOCKS,
+            "position_continuous_dim": 2,
+            "position_category_sizes": [_NUM_BLOCKS],
             "hidden_dims": [16],
             "activation": "elu",
             "batch_norm": False,

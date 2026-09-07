@@ -111,14 +111,13 @@ def _make_data_sample(
 
 
 def _make_transformer_model_kwargs(
-    final_net_output_dim=_CONTEXT_DIM, include_final_net=True
+    final_net_output_dim=_CONTEXT_DIM, include_final_net=True, layout=True
 ):
     kwargs = {
         "embedding_type": "transformer",
         "posterior_kwargs": {"input_dim": None, "context_dim": None},
         "embedding_kwargs": {
             "tokenizer_kwargs": {
-                "num_blocks": _NUM_BLOCKS,
                 "hidden_dims": [16],
                 "activation": "elu",
             },
@@ -126,6 +125,10 @@ def _make_transformer_model_kwargs(
             "pooling": "cls",
         },
     }
+    if layout:
+        kwargs["embedding_kwargs"]["tokenizer_kwargs"].update(
+            {"position_continuous_dim": 2, "position_category_sizes": [_NUM_BLOCKS]}
+        )
     if include_final_net:
         kwargs["embedding_kwargs"]["final_net_kwargs"] = {
             "activation": "elu",
@@ -180,27 +183,42 @@ def test_autocomplete_transformer_sets_input_dim():
     assert model_kwargs["posterior_kwargs"]["input_dim"] == 7
 
 
-def test_autocomplete_transformer_infers_num_blocks_from_position():
-    model_kwargs = _make_transformer_model_kwargs()
-    # position tensor: [num_tokens, 3], column 2 = detector index (0 or 1 → num_blocks=2)
-    f_min = torch.rand(_NUM_TOKENS)
-    f_max = f_min + 0.1
-    detector = torch.tensor([0.0, 0.0, 0.0, 1.0, 1.0, 1.0])
-    position = torch.stack([f_min, f_max, detector], dim=-1)
-    data_sample = _make_data_sample() + [position]
-    autocomplete_model_kwargs(model_kwargs, data_sample)
-    assert model_kwargs["embedding_kwargs"]["tokenizer_kwargs"]["num_blocks"] == 2
-
-
-def test_autocomplete_transformer_preserves_explicit_num_blocks():
-    model_kwargs = _make_transformer_model_kwargs()
-    model_kwargs["embedding_kwargs"]["tokenizer_kwargs"]["num_blocks"] = 3
+def test_autocomplete_transformer_infers_layout_from_position():
+    """Default layout: last position column categorical (0 or 1 → size 2), the two
+    leading columns continuous."""
+    model_kwargs = _make_transformer_model_kwargs(layout=False)
     f_min = torch.rand(_NUM_TOKENS)
     detector = torch.tensor([0.0, 0.0, 0.0, 1.0, 1.0, 1.0])
     position = torch.stack([f_min, f_min + 0.1, detector], dim=-1)
-    data_sample = _make_data_sample() + [position]
-    autocomplete_model_kwargs(model_kwargs, data_sample)
-    assert model_kwargs["embedding_kwargs"]["tokenizer_kwargs"]["num_blocks"] == 3
+    autocomplete_model_kwargs(model_kwargs, _make_data_sample() + [position])
+    tokenizer_kwargs = model_kwargs["embedding_kwargs"]["tokenizer_kwargs"]
+    assert tokenizer_kwargs["position_category_sizes"] == [2]
+    assert tokenizer_kwargs["position_continuous_dim"] == 2
+
+
+def test_autocomplete_transformer_preserves_explicit_category_sizes():
+    model_kwargs = _make_transformer_model_kwargs(layout=False)
+    model_kwargs["embedding_kwargs"]["tokenizer_kwargs"]["position_category_sizes"] = [
+        3
+    ]
+    f_min = torch.rand(_NUM_TOKENS)
+    detector = torch.tensor([0.0, 0.0, 0.0, 1.0, 1.0, 1.0])
+    position = torch.stack([f_min, f_min + 0.1, detector], dim=-1)
+    autocomplete_model_kwargs(model_kwargs, _make_data_sample() + [position])
+    tokenizer_kwargs = model_kwargs["embedding_kwargs"]["tokenizer_kwargs"]
+    assert tokenizer_kwargs["position_category_sizes"] == [3]
+    assert tokenizer_kwargs["position_continuous_dim"] == 2
+
+
+def test_autocomplete_transformer_two_categorical_columns():
+    """With position_continuous_dim given, every remaining column is categorical."""
+    model_kwargs = _make_transformer_model_kwargs(layout=False)
+    model_kwargs["embedding_kwargs"]["tokenizer_kwargs"]["position_continuous_dim"] = 1
+    position = torch.tensor([[0.1, 0.0, 2.0], [0.2, 1.0, 0.0], [0.3, 0.0, 1.0]])
+    autocomplete_model_kwargs(model_kwargs, _make_data_sample() + [position])
+    tokenizer_kwargs = model_kwargs["embedding_kwargs"]["tokenizer_kwargs"]
+    assert tokenizer_kwargs["position_category_sizes"] == [2, 3]
+    assert tokenizer_kwargs["position_continuous_dim"] == 1
 
 
 def test_autocomplete_transformer_does_not_set_added_context():

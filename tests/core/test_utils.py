@@ -131,18 +131,19 @@ def test_update_model_config_maps_dingo_t1_transformer_kwargs():
         "batch_norm": False,
         "layer_norm": True,
         "input_dim": 48,
-        "num_blocks": 3,
+        "position_continuous_dim": 2,
+        "position_category_sizes": [3],
     }
     assert embedding_kwargs["final_net_kwargs"] == {
         "activation": "elu",
         "output_dim": 128,
     }
     update_model_config(settings)  # idempotent
-    assert embedding_kwargs["tokenizer_kwargs"]["num_blocks"] == 3
+    assert embedding_kwargs["tokenizer_kwargs"]["position_category_sizes"] == [3]
 
 
 def test_update_model_config_rejects_unsupported_dingo_t1_tokenizer():
-    """Tokenizer variants that no longer exist must fail loudly, not load silently."""
+    """Token-embedding variants that no longer exist must fail loudly, not load silently."""
     settings = _dingo_t1_model_settings()
     settings["embedding_kwargs"]["tokenizer_kwargs"]["context_in_initial_layer"] = True
     with pytest.raises(ValueError, match="context_in_initial_layer"):

@@ -183,7 +183,8 @@ def test_transformer_training_path_builder_to_loss(tmp_path, posterior_model_typ
 
     autocomplete_model_kwargs(train_settings["model"], wfd[0])
     tokenizer_kwargs = train_settings["model"]["embedding_kwargs"]["tokenizer_kwargs"]
-    assert tokenizer_kwargs["num_blocks"] == len(DETECTORS)
+    assert tokenizer_kwargs["position_category_sizes"] == [len(DETECTORS)]
+    assert tokenizer_kwargs["position_continuous_dim"] == 2
     assert tokenizer_kwargs["input_dim"] == 3 * TOKEN_SIZE
 
     pm = build_model_from_kwargs(

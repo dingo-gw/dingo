@@ -6,7 +6,7 @@ from torch.nn import functional as F
 
 from dingo.core.nn.resnet import DenseResidualNet, LinearLayer
 from dingo.core.nn.transformer import (
-    Tokenizer,
+    TokenEmbedding,
     TransformerModel,
     create_transformer_enet,
 )
@@ -18,13 +18,16 @@ NUM_BLOCKS = 2
 OUTPUT_DIM = 8
 
 
-def make_tokenizer(num_blocks=NUM_BLOCKS, layer_norm=False, batch_norm=False):
-    return Tokenizer(
+def make_tokenizer(
+    num_blocks=NUM_BLOCKS, layer_norm=False, batch_norm=False, position_continuous_dim=2
+):
+    return TokenEmbedding(
         input_dim=NUM_FEATURES,
         hidden_dims=[16, 16],
         output_dim=OUTPUT_DIM,
         activation=F.elu,
-        num_blocks=num_blocks,
+        position_continuous_dim=position_continuous_dim,
+        position_category_sizes=[num_blocks],
         layer_norm=layer_norm,
         batch_norm=batch_norm,
     )
@@ -148,7 +151,8 @@ D_MODEL = 16
 def make_enet_kwargs():
     tokenizer_kwargs = {
         "input_dim": NUM_FEATURES,
-        "num_blocks": NUM_BLOCKS,
+        "position_continuous_dim": 2,
+        "position_category_sizes": [NUM_BLOCKS],
         "hidden_dims": [16],
         "activation": "elu",
         "batch_norm": False,
@@ -353,6 +357,41 @@ def test_average_pooling_all_masked_sample_is_finite():
 
     assert torch.isfinite(out).all()
     assert torch.allclose(out[:1], out_first_alone, atol=1e-6)
+
+
+def test_two_categorical_position_features():
+    """One continuous + two categorical columns: correct shape, and each categorical
+    column changes the output on its own."""
+    torch.manual_seed(0)
+    embedding = TokenEmbedding(
+        input_dim=NUM_FEATURES,
+        hidden_dims=[16],
+        output_dim=OUTPUT_DIM,
+        activation=F.elu,
+        position_continuous_dim=1,
+        position_category_sizes=[2, 3],
+    )
+    x = torch.randn(2, NUM_TOKENS, NUM_FEATURES)
+    position = torch.stack(
+        [
+            torch.rand(2, NUM_TOKENS),
+            torch.randint(0, 2, (2, NUM_TOKENS)).float(),
+            torch.zeros(2, NUM_TOKENS),
+        ],
+        dim=-1,
+    )
+    out = embedding(x, position)
+    assert out.shape == (2, NUM_TOKENS, OUTPUT_DIM)
+    other = position.clone()
+    other[..., 2] = 2.0
+    assert not torch.allclose(out, embedding(x, other))
+
+
+def test_wrong_position_width_raises():
+    embedding = make_tokenizer()
+    x = torch.randn(1, NUM_TOKENS, NUM_FEATURES)
+    with pytest.raises(ValueError, match="2 continuous"):
+        embedding(x, torch.zeros(1, NUM_TOKENS, 4))
 
 
 def test_tokenizer_refuses_batch_norm():

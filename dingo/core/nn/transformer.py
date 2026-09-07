@@ -1,4 +1,4 @@
-from typing import Callable, List, Optional
+from typing import Callable, List, Optional, Sequence
 
 import torch
 import torch.nn.functional as F
@@ -17,15 +17,16 @@ from dingo.core.utils import torchutils
 torch.backends.mha.set_fastpath_enabled(False)
 
 
-class Tokenizer(nn.Module):
+class TokenEmbedding(nn.Module):
     """
     Maps each token's raw features to a d_model-dimensional embedding via a shared
-    DenseResidualNet, conditioned on the token's position (f_min, f_max, detector).
+    DenseResidualNet, conditioned on the token's position.
 
-    The position consists of two continuous features (the token's lower and upper
-    frequency, used as given) and one categorical block index in [0, num_blocks)
-    (the detector, one-hot encoded); their concatenation is the GLU context of the
-    residual blocks. This 2 + 1 layout is the one domain assumption in this module.
+    A position is a vector of position_continuous_dim continuous features followed by
+    len(position_category_sizes) categorical indices, the i-th taking values in
+    [0, position_category_sizes[i]). The continuous features are used as given and the
+    categorical ones are one-hot encoded; their concatenation is the GLU context of
+    the residual blocks. (GW tokens: lower and upper frequency + detector index.)
 
     Methods
     -------
@@ -40,7 +41,8 @@ class Tokenizer(nn.Module):
         hidden_dims: List[int],
         output_dim: int,
         activation: Callable,
-        num_blocks: int,
+        position_continuous_dim: int,
+        position_category_sizes: Sequence[int],
         dropout: float = 0.0,
         batch_norm: bool = False,
         layer_norm: bool = False,
@@ -49,17 +51,18 @@ class Tokenizer(nn.Module):
         Parameters
         ----------
         input_dim : int
-            number of features per token (the last dimension of the tokenized
-            waveform)
+            number of features per token (the last dimension of the tokenized data)
         hidden_dims : List[int]
             dimensions of hidden layers for the underlying DenseResidualNet
         output_dim : int
             output dimension of the token embedding (typically d_model)
         activation : Callable
             activation function for the DenseResidualNet
-        num_blocks : int
-            number of blocks (detectors, in the GW use case); determines the size of
-            the one-hot detector encoding used as part of the conditioning context
+        position_continuous_dim : int
+            number of continuous position features (the leading position columns)
+        position_category_sizes : Sequence[int]
+            number of categories of each categorical position feature (the trailing
+            position columns, in order); each is one-hot encoded
         dropout : float
             dropout rate for the DenseResidualNet
         batch_norm : bool
@@ -71,18 +74,20 @@ class Tokenizer(nn.Module):
         super().__init__()
         if batch_norm:
             raise ValueError(
-                "batch_norm is not supported in the Tokenizer: nn.BatchNorm1d treats "
+                "batch_norm is not supported in TokenEmbedding: nn.BatchNorm1d treats "
                 "axis 1 of the [..., num_tokens, features] input as the channel axis, "
                 "i.e. it would normalize per token position. Use layer_norm instead."
             )
         self.num_features = input_dim
-        self.num_blocks = num_blocks
+        self.position_continuous_dim = position_continuous_dim
+        self.position_category_sizes = list(position_category_sizes)
         self.tokenizer_net = DenseResidualNet(
             input_dim=self.num_features,
             output_dim=output_dim,
             hidden_dims=tuple(hidden_dims),
             activation=activation,
-            context_features=2 + num_blocks,
+            context_features=position_continuous_dim
+            + sum(self.position_category_sizes),
             dropout=dropout,
             batch_norm=batch_norm,
             layer_norm=layer_norm,
@@ -95,7 +100,9 @@ class Tokenizer(nn.Module):
         x : Tensor
             shape [..., num_tokens, num_features]
         position : Tensor
-            shape [..., num_tokens, 3], last dim = [f_min, f_max, detector_index]
+            shape [..., num_tokens, position_dim] with position_dim =
+            position_continuous_dim + len(position_category_sizes): the continuous
+            features followed by the categorical indices
 
         Returns
         -------
@@ -108,18 +115,25 @@ class Tokenizer(nn.Module):
                 f"Expected last dimension to be {self.num_features}, got "
                 f"{x.shape[-1]}."
             )
-        detector_per_token = position[..., 2]
-        detector_one_hot = F.one_hot(detector_per_token.long(), self.num_blocks).to(
-            position.dtype
-        )
-        context = torch.cat((position[..., :2], detector_one_hot), dim=-1)
-        return self.tokenizer_net(x=x, context=context)
+        position_dim = self.position_continuous_dim + len(self.position_category_sizes)
+        if position.shape[-1] != position_dim:
+            raise ValueError(
+                f"Expected positions with {position_dim} features "
+                f"({self.position_continuous_dim} continuous + "
+                f"{len(self.position_category_sizes)} categorical), got "
+                f"{position.shape[-1]}."
+            )
+        context = [position[..., : self.position_continuous_dim]]
+        for i, size in enumerate(self.position_category_sizes):
+            index = position[..., self.position_continuous_dim + i].long()
+            context.append(F.one_hot(index, size).to(position.dtype))
+        return self.tokenizer_net(x=x, context=torch.cat(context, dim=-1))
 
 
 class TransformerModel(nn.Module):
     """
     Transformer encoder used as an embedding network for the normalizing flow. Each
-    token is embedded via a conditional Tokenizer (conditioned on position), then
+    token is embedded via a TokenEmbedding (conditioned on position), then
     processed by a standard TransformerEncoder. The resulting sequence of token
     embeddings is pooled (CLS token or average) into a single vector, optionally
     followed by a final network.
@@ -127,7 +141,7 @@ class TransformerModel(nn.Module):
 
     def __init__(
         self,
-        tokenizer: Tokenizer,
+        tokenizer: TokenEmbedding,
         d_model: int,
         dim_feedforward: int,
         nhead: int,
@@ -140,7 +154,7 @@ class TransformerModel(nn.Module):
         """
         Parameters
         ----------
-        tokenizer : Tokenizer
+        tokenizer : TokenEmbedding
             Maps raw per-token features (conditioned on position) to d_model-dim
             token embeddings.
         d_model : int
@@ -172,6 +186,7 @@ class TransformerModel(nn.Module):
                 f"['average', 'cls']."
             )
 
+        # Attribute name kept for state-dict compatibility with saved networks.
         self.tokenizer = tokenizer
         self.pooling = pooling
         self.final_net = final_net
@@ -276,10 +291,11 @@ def create_transformer_enet(
     Parameters
     ----------
     tokenizer_kwargs : dict
-        settings for the Tokenizer. Must contain input_dim and num_blocks (set
-        based on the data, not hardcoded in a settings file); activation is given
-        as a str and resolved to a Callable here; output_dim is set automatically
-        to transformer_kwargs["d_model"].
+        settings for the TokenEmbedding. Must contain input_dim,
+        position_continuous_dim and position_category_sizes (set from the data by
+        autocomplete_model_kwargs, not hardcoded in a settings file); activation is
+        given as a str and resolved to a Callable here; output_dim is set
+        automatically to transformer_kwargs["d_model"].
     transformer_kwargs : dict
         settings for the TransformerModel: d_model, dim_feedforward, nhead,
         num_layers, dropout, norm_first.
@@ -301,7 +317,7 @@ def create_transformer_enet(
     tokenizer_kwargs["activation"] = torchutils.get_activation_function_from_string(
         tokenizer_kwargs["activation"]
     )
-    tokenizer = Tokenizer(
+    tokenizer = TokenEmbedding(
         output_dim=transformer_kwargs["d_model"],
         **tokenizer_kwargs,
     )

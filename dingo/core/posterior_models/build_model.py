@@ -94,11 +94,27 @@ def autocomplete_model_kwargs(model_kwargs: dict, data_sample: list):
     if embedding_type == "transformer":
         tokenizer_kwargs = model_kwargs["embedding_kwargs"]["tokenizer_kwargs"]
         tokenizer_kwargs["input_dim"] = int(data_sample[1].shape[-1])
-        if "num_blocks" not in tokenizer_kwargs:
-            # position tensor is data_sample[2], shape [num_tokens, 3]; column 2
-            # holds the detector index (position in the training detector list),
-            # and every training sample contains all detectors.
-            tokenizer_kwargs["num_blocks"] = int(data_sample[2][:, 2].max().item()) + 1
+        # Position layout: position_continuous_dim continuous columns, then one
+        # column per categorical feature. Default: the last column is the single
+        # categorical feature (GW: the detector's position in the training detector
+        # list; every training sample contains all detectors, so max + 1 is its size).
+        if "position_category_sizes" not in tokenizer_kwargs or (
+            "position_continuous_dim" not in tokenizer_kwargs
+        ):
+            position = data_sample[2]  # [num_tokens, position_dim]
+            position_dim = int(position.shape[-1])
+            if "position_category_sizes" not in tokenizer_kwargs:
+                position_continuous_dim = tokenizer_kwargs.get(
+                    "position_continuous_dim", position_dim - 1
+                )
+                tokenizer_kwargs["position_category_sizes"] = [
+                    int(position[:, c].max()) + 1
+                    for c in range(position_continuous_dim, position_dim)
+                ]
+            tokenizer_kwargs.setdefault(
+                "position_continuous_dim",
+                position_dim - len(tokenizer_kwargs["position_category_sizes"]),
+            )
         embedding_kwargs = model_kwargs["embedding_kwargs"]
         if embedding_kwargs.get("final_net_kwargs"):
             context_dim = embedding_kwargs["final_net_kwargs"]["output_dim"]
