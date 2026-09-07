@@ -138,6 +138,12 @@ def set_train_transforms(wfd, data_settings, asd_dataset_path, omit_transforms=N
     for p in extra_context_parameters:
         if p not in data_settings["context_parameters"]:
             data_settings["context_parameters"].append(p)
+    if "tokenization" in data_settings and data_settings["context_parameters"]:
+        raise NotImplementedError(
+            "Tokenization with context parameters (GNPE proxies or other "
+            f"context_parameters {data_settings['context_parameters']}) is not yet "
+            "supported: the transformer embedding network does not take them."
+        )
 
     # If the standardization factors have already been set, use those. Otherwise,
     # calculate them, and save them within the data settings.

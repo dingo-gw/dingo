@@ -7,8 +7,8 @@ import torch.nn as nn
 
 from dingo.core.utils import torchutils
 from dingo.core.nn.enets import create_enet_with_projection_layer_and_dense_resnet
-
 from dingo.core.nn.resnet import DenseResidualNet
+from dingo.core.nn.transformer import create_transformer_enet
 
 
 class ContinuousFlow(nn.Module):
@@ -170,7 +170,10 @@ class ContinuousFlow(nn.Module):
 
 
 def create_cf(
-    posterior_kwargs: dict, embedding_kwargs: dict = None, initial_weights: dict = None
+    posterior_kwargs: dict,
+    embedding_kwargs: dict = None,
+    initial_weights: dict = None,
+    embedding_type: str = "resnet",
 ):
     """
     Build a continuous flow based on settings dictionaries.
@@ -183,6 +186,10 @@ def create_cf(
         Settings for the context embedding network.
     initial_weights: dict
         Initial weights for the embedding network (of SVD projection type).
+    embedding_type: str
+        "resnet" (SVD projection followed by a dense residual network) or
+        "transformer" (tokenized data; the context is then the list of waveform,
+        position and token_mask tensors, passed through to the embedding network).
 
     Returns
     -------
@@ -193,7 +200,13 @@ def create_cf(
     context_dim = posterior_kwargs["context_dim"]
 
     # get embeddings modules for context
-    if embedding_kwargs is not None:
+    if embedding_kwargs is None:
+        context_embedding = torch.nn.Identity()
+    elif embedding_type.lower() == "transformer":
+        context_embedding_kwargs = copy.deepcopy(embedding_kwargs)
+        context_embedding_kwargs.pop("allow_tf32", None)
+        context_embedding = create_transformer_enet(**context_embedding_kwargs)
+    else:
         context_embedding_kwargs = copy.deepcopy(embedding_kwargs)
         if initial_weights is not None:
             context_embedding_kwargs["V_rb_list"] = initial_weights["V_rb_list"]
@@ -203,8 +216,6 @@ def create_cf(
         context_embedding = create_enet_with_projection_layer_and_dense_resnet(
             **context_embedding_kwargs
         )
-    else:
-        context_embedding = torch.nn.Identity()
 
     # get embeddings modules for theta (which is actually cat(t, theta))
     if "theta_embedding_kwargs" in posterior_kwargs:

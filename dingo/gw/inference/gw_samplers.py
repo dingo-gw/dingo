@@ -514,6 +514,10 @@ class GWSamplerGNPE(GWSamplerMixin, GNPESampler):
         Builds the transforms that are used in the GNPE loop.
         """
         data_settings = self.metadata["train_settings"]["data"]
+        if data_settings.get("tokenization"):
+            raise NotImplementedError(
+                "GNPE with a transformer (tokenized) network is not yet supported."
+            )
         ifo_list = InterferometerList(data_settings["detectors"])
 
         gnpe_time_settings = data_settings.get("gnpe_time_shifts")

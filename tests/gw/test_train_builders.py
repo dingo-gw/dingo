@@ -2,9 +2,13 @@
 
 Everything the training pipeline does before the first gradient step, on a fabricated
 dataset: set_train_transforms with a full tokenization block, model autocompletion
-from a sample, model construction, and one loss/backward pass. The detector list is
+from a sample, model construction, and one loss/backward pass, for both the
+normalizing-flow and the flow-matching posterior model. The detector list is
 deliberately not in H1, L1, V1 order so that list-position indexing is exercised.
+Tokenization combined with GNPE must be refused up front.
 """
+
+import copy
 
 import h5py
 import numpy as np
@@ -91,6 +95,16 @@ MODEL_SETTINGS = {
         "final_net_kwargs": {"output_dim": 16},
     },
 }
+FMPE_POSTERIOR_KWARGS = {
+    "activation": "elu",
+    "batch_norm": False,
+    "hidden_dims": [32, 32],
+    "dropout": 0.0,
+    "sigma_min": 0.001,
+    "time_prior_exponent": 1,
+    "theta_with_glu": True,
+    "context_with_glu": False,
+}
 
 
 def _toy_waveform_dataset(num_samples=8):
@@ -135,13 +149,18 @@ def _toy_asd_file(path):
     return str(path)
 
 
-def test_transformer_training_path_builder_to_loss(tmp_path):
+@pytest.mark.parametrize("posterior_model_type", ["normalizing_flow", "flow_matching"])
+def test_transformer_training_path_builder_to_loss(tmp_path, posterior_model_type):
     np.random.seed(0)
     torch.manual_seed(0)
     wfd = _toy_waveform_dataset()
+    model_settings = copy.deepcopy(MODEL_SETTINGS)
+    model_settings["posterior_model_type"] = posterior_model_type
+    if posterior_model_type == "flow_matching":
+        model_settings["posterior_kwargs"] = dict(FMPE_POSTERIOR_KWARGS)
     train_settings = {
         "data": {"waveform_dataset_path": None, **DATA_SETTINGS},
-        "model": MODEL_SETTINGS,
+        "model": model_settings,
         "training": {
             "stage_0": {"asd_dataset_path": _toy_asd_file(tmp_path / "asds.hdf5")}
         },
@@ -178,3 +197,30 @@ def test_transformer_training_path_builder_to_loss(tmp_path):
     assert any(
         p.grad is not None and p.grad.abs().sum() > 0 for p in pm.network.parameters()
     )
+
+    # Inference entry point: one event's (waveform, position, token_mask) context.
+    pm.network.eval()
+    with torch.no_grad():
+        samples, log_prob = pm.sample_and_log_prob(
+            *[c[:1] for c in data[1:]], num_samples=3
+        )
+    assert samples.shape == (1, 3, len(DATA_SETTINGS["inference_parameters"]))
+    assert log_prob.shape == (1, 3)
+    assert torch.isfinite(log_prob).all()
+
+
+def test_tokenization_with_gnpe_is_refused(tmp_path):
+    data_settings = {
+        "waveform_dataset_path": None,
+        **DATA_SETTINGS,
+        "gnpe_time_shifts": {
+            "kernel": "bilby.core.prior.Uniform(minimum=-0.001, maximum=0.001)",
+            "exact_equiv": True,
+        },
+    }
+    with pytest.raises(NotImplementedError, match="GNPE"):
+        set_train_transforms(
+            _toy_waveform_dataset(),
+            data_settings,
+            _toy_asd_file(tmp_path / "asds.hdf5"),
+        )
