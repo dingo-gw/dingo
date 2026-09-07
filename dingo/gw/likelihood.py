@@ -175,11 +175,22 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
             else:
                 print("Using phase marginalization with (2,2) mode approximation.")
 
-        # Initialize calibration marginalization using the setter from GWSignal. For
-        # the likelihood, the calibration curves are attached to the signal instead of
-        # being multiplied into the waveform; see _log_likelihood_calibration_marginalized.
-        self._expand_calibration_curves = False
+        # Initialize calibration marginalization using the setter (overridden below).
         self.calibration_marginalization_kwargs = calibration_marginalization_kwargs
+
+    @property
+    def calibration_marginalization_kwargs(self):
+        return GWSignal.calibration_marginalization_kwargs.fget(self)
+
+    @calibration_marginalization_kwargs.setter
+    def calibration_marginalization_kwargs(self, value):
+        # When marginalizing over calibration, the calibration curves are attached to
+        # the signal instead of being multiplied into the waveform; see
+        # _log_likelihood_calibration_marginalized. When calibration parameters are
+        # instead sampled (i.e., part of theta), the single curve is multiplied into
+        # the waveform as usual and the plain likelihood applies.
+        self._expand_calibration_curves = not bool(value)
+        GWSignal.calibration_marginalization_kwargs.fset(self, value)
 
     def initialize_time_marginalization(self, t_lower, t_upper, n_fft=1):
         """

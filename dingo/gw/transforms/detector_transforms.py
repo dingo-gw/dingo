@@ -463,59 +463,31 @@ class ApplyCalibrationToWaveform(object):
 
     def _spline_matrix(self, ifo):
         """
-        Transposed matrix W.T of shape (num_nodes, num_masked_frequencies) such that
-        ``p @ W.T`` evaluates bilby's cubic spline with node values ``p`` at the sample
-        frequencies within the frequency mask. Mirrors
-        ``CubicSpline.get_calibration_factor`` / ``_evaluate_spline`` in bilby: with
-        ``s = M p`` the spline coefficients,
-
-            delta(f) = a p[k] + b p[k+1] + c s[k] + d s[k+1],
-
-        where k is the node index below f and a, b, c, d depend only on f. Cached per
-        detector and spline configuration.
+        Matrix W.T of shape (num_nodes, num_frequencies) such that ``p @ W.T`` evaluates
+        bilby's cubic spline with node values ``p`` at the sample frequencies from
+        ``min_idx`` on. Mirrors ``CubicSpline.get_calibration_factor`` in bilby, which
+        computes ``a p[k] + b p[k+1] + c s[k] + d s[k+1]`` with spline coefficients
+        ``s = M p``; here ``a, b, c, d, k`` depend only on frequency. Cached per detector.
         """
         model = ifo.calibration_model
-        key = (
-            ifo.name,
-            model.n_points,
-            model.minimum_frequency,
-            model.maximum_frequency,
-            len(self.data_domain),
-        )
+        key = (ifo.name, model.n_points)
         if key not in self._spline_matrices:
-            f = self.data_domain.sample_frequencies[self.data_domain.frequency_mask]
-            n_points = model.n_points
+            f = self.data_domain.sample_frequencies[self.data_domain.min_idx :]
+            n = model.n_points
             x = (np.log10(f) - model.log_spline_points[0]) / model.delta_log_spline_points
-            k = np.clip(np.floor(x).astype(int), a_min=0, a_max=n_points - 2)
+            k = np.clip(np.floor(x).astype(int), a_min=0, a_max=n - 2)
             b = x - k
             a = 1 - b
             c = (a**3 - a) / 6
             d = (b**3 - b) / 6
             M = model.nodes_to_spline_coefficients
-            W = np.zeros((len(f), n_points))
+            W = np.zeros((len(f), n))
             rows = np.arange(len(f))
             W[rows, k] += a
             W[rows, k + 1] += b
             W += c[:, np.newaxis] * M[k, :] + d[:, np.newaxis] * M[k + 1, :]
-            # Store the transpose contiguously, since the curves are computed as
-            # P @ W.T for P of shape (num_curves, num_nodes).
             self._spline_matrices[key] = np.ascontiguousarray(W.T)
         return self._spline_matrices[key]
-
-    def _mask_indexer(self):
-        """
-        Indexer selecting the frequency-mask region of an array along the last axis:
-        a slice if the mask is a contiguous run (UniformFrequencyDomain,
-        MultibandedFrequencyDomain), otherwise the boolean mask itself.
-        """
-        if not hasattr(self, "_mask_indexer_cache"):
-            mask = np.asarray(self.data_domain.frequency_mask)
-            idx = np.flatnonzero(mask)
-            if len(idx) > 0 and idx[-1] - idx[0] + 1 == len(idx):
-                self._mask_indexer_cache = slice(idx[0], idx[-1] + 1)
-            else:
-                self._mask_indexer_cache = mask
-        return self._mask_indexer_cache
 
     def calibration_curves(self, ifo, calib_params):
         """
@@ -526,46 +498,34 @@ class ApplyCalibrationToWaveform(object):
         ifo : Interferometer
         calib_params : dict
             Calibration parameters for this detector, keys like
-            "recalib_H1_amplitude_0", values arrays of shape (num_curves,) (or scalars).
+            "recalib_H1_amplitude_0", values arrays of shape (num_curves,) or scalars.
 
         Returns
         -------
-        np.ndarray of shape (num_curves, len(domain)), complex. Zero outside the
-        frequency mask.
+        np.ndarray of shape (num_curves, len(domain)), complex. Zero below f_min.
         """
         prefix = f"recalib_{ifo.name}_"
-        n_points = ifo.calibration_model.n_points
-        # (num_curves, num_nodes) node values for amplitude and phase
+        n = ifo.calibration_model.n_points
+        # Node values, shape (num_curves, num_nodes)
         amplitude = np.stack(
-            [np.atleast_1d(calib_params[f"{prefix}amplitude_{i}"]) for i in range(n_points)],
+            [np.atleast_1d(calib_params[f"{prefix}amplitude_{i}"]) for i in range(n)],
             axis=-1,
-        ).astype(float)
+        )
         phase = np.stack(
-            [np.atleast_1d(calib_params[f"{prefix}phase_{i}"]) for i in range(n_points)],
+            [np.atleast_1d(calib_params[f"{prefix}phase_{i}"]) for i in range(n)],
             axis=-1,
-        ).astype(float)
+        )
         WT = self._spline_matrix(ifo)
         delta_amplitude = amplitude @ WT
         delta_phase = phase @ WT
-        # Same expression as bilby's CubicSpline.get_calibration_factor,
-        #   (1 + dA) * (2 + i dphi) / (2 - i dphi),
-        # evaluated in real arithmetic: the ratio has unit modulus and equals
-        #   [(4 - dphi^2) + 4 i dphi] / (4 + dphi^2).
-        # Complex division and boolean-mask assignment on (num_curves, N) arrays are
-        # avoided since they dominated the runtime.
-        delta_phase2 = delta_phase * delta_phase
+        # bilby: (1 + dA) * (2 + i dphi) / (2 - i dphi). The ratio has unit modulus and
+        # equals [(4 - dphi^2) + 4 i dphi] / (4 + dphi^2); real arithmetic is used since
+        # complex operations on the (num_curves, num_frequencies) arrays dominate the cost.
+        delta_phase2 = delta_phase**2
         scale = (1 + delta_amplitude) / (4 + delta_phase2)
-        curves = np.empty((amplitude.shape[0], len(self.data_domain)), dtype=complex)
-        indexer = self._mask_indexer()
-        if isinstance(indexer, slice):
-            curves[:, : indexer.start] = 0.0
-            curves[:, indexer.stop :] = 0.0
-            view = curves[:, indexer]
-            np.multiply(scale, 4 - delta_phase2, out=view.real)
-            np.multiply(scale, 4 * delta_phase, out=view.imag)
-        else:
-            curves[:] = 0.0
-            curves[:, indexer] = scale * ((4 - delta_phase2) + 4j * delta_phase)
+        curves = np.zeros((len(amplitude), len(self.data_domain)), dtype=complex)
+        curves.real[:, self.data_domain.min_idx :] = scale * (4 - delta_phase2)
+        curves.imag[:, self.data_domain.min_idx :] = scale * (4 * delta_phase)
         return curves
 
     def __call__(self, input_sample):
@@ -577,55 +537,31 @@ class ApplyCalibrationToWaveform(object):
         if not any(k.startswith("recalib_") for k in extrinsic.keys()):
             return sample
 
-        # Shallow copies, so that the input sample is not modified.
-        waveform = sample["waveform"].copy()
-        calibration_curves = {}
-
+        curves = {}
         for ifo in self.ifo_list:
             prefix = f"recalib_{ifo.name}_"
-
-            # Extract calibration parameters for this ifo
-            calib_params = {
-                k: v for k, v in extrinsic.items() if k.startswith(prefix)
-            }
-
+            calib_params = {k: v for k, v in extrinsic.items() if k.startswith(prefix)}
             if not calib_params:
                 continue
 
             # Infer num_calibration_nodes from the number of amplitude parameters
             # Parameters are named like recalib_H1_amplitude_0, recalib_H1_amplitude_1, ...
-            amplitude_params = [k for k in calib_params if "amplitude" in k]
-            num_calibration_nodes = len(amplitude_params)
-
-            # Ensure calibration model is set up (lazy initialization)
+            num_calibration_nodes = len([k for k in calib_params if "amplitude" in k])
             self._ensure_calibration_model(ifo, num_calibration_nodes)
 
-            # Evaluate all calibration curves at once.
-            first_param = next(iter(calib_params.values()))
-            is_scalar = np.isscalar(first_param)
-            calibration_draws = self.calibration_curves(ifo, calib_params)
-
+            curves[ifo.name] = self.calibration_curves(ifo, calib_params)
             # Squeeze out leading dimension if input was scalar
-            if is_scalar:
-                calibration_draws = calibration_draws[0]
+            if np.isscalar(next(iter(calib_params.values()))):
+                curves[ifo.name] = curves[ifo.name][0]
 
-            # Multiplying the sample waveform in the interferometer according to
-            # the calibration curve.  This is done by following the perscription
-            # here:
-            #
-            # https://dcc.ligo.org/LIGO-T1400682 Eq 3 and 4
-            #
-            # We take the waveform h(f) and multiply it by C = (1 + \delta A(f))
-            # \exp(i \delta \psi) i.e. h_obs(f) = C * h(f)
-            # Here C is "calibration_draws"
-            if self.expand_waveform:
-                waveform[ifo.name] = waveform[ifo.name] * calibration_draws
-            else:
-                calibration_curves[ifo.name] = calibration_draws
-
+        # Following https://dcc.ligo.org/LIGO-T1400682 Eq 3 and 4, the observed waveform
+        # is h_obs(f) = C(f) * h(f) with C = (1 + \delta A(f)) \exp(i \delta \psi(f)).
         if self.expand_waveform:
-            sample["waveform"] = waveform
+            sample["waveform"] = {
+                k: v * curves[k] if k in curves else v
+                for k, v in sample["waveform"].items()
+            }
         else:
-            sample["calibration_curves"] = calibration_curves
+            sample["calibration_curves"] = curves
 
         return sample

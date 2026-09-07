@@ -98,3 +98,62 @@ def test_calibration_marginalized_likelihood_matches_expanded_form():
         per_curve = likelihood.log_Zn + kappa2 - 0.5 * rho2opt
         ref = np.logaddexp.reduce(per_curve) - np.log(len(per_curve))
         assert np.isclose(ll, ref, rtol=0.0, atol=1e-6)
+
+
+def test_sampled_calibration_parameters_are_applied():
+    """
+    Without calibration marginalization, calibration parameters inside theta (calibration
+    sampling) must be multiplied into the waveform, i.e. the plain likelihood must equal
+    the explicit computation with a calibrated waveform, and differ from the uncalibrated
+    likelihood.
+    """
+    from bilby.gw.detector import InterferometerList
+    from dingo.gw.transforms import SampleCalibrationParameters
+
+    domain = UniformFrequencyDomain(20.0, 512.0, delta_f=0.25)
+    likelihood = StationaryGaussianGWLikelihood(
+        wfg_kwargs={
+            "approximant": "IMRPhenomXPHM",
+            "f_ref": 20.0,
+            "spin_conversion_phase": 0.0,
+        },
+        wfg_domain=domain,
+        data_domain=domain,
+        event_data=_event_data(domain),
+        t_ref=1248242632.0,
+    )
+    # Draw one set of calibration parameters and put them into theta as scalars.
+    sampler = SampleCalibrationParameters(
+        InterferometerList(IFOS),
+        domain,
+        calibration_envelope={ifo: ENVELOPE for ifo in IFOS},
+        num_calibration_curves=1,
+        num_calibration_nodes=10,
+    )
+    bilby_random.seed(7)
+    calib = sampler({"extrinsic_parameters": {}})["extrinsic_parameters"]
+    calib = {k: float(v[0]) for k, v in calib.items()}
+    # Make the correction large enough to be visible in the likelihood.
+    calib = {k: (v * 10 if "frequency" not in k else v) for k, v in calib.items()}
+
+    theta = _theta(2).to_dict("records")[0]
+    ll_plain = likelihood.log_likelihood(theta)
+    ll_calibrated = likelihood.log_likelihood({**theta, **calib})
+    assert not np.isclose(ll_plain, ll_calibrated)
+
+    # Explicit reference: waveform times the single calibration curve.
+    signal = likelihood.signal(theta)
+    transform = likelihood.projection_transforms.transforms[-2]  # ApplyCalibrationToWaveform
+    d = likelihood.whitened_strains
+    rho2opt = 0.0
+    kappa2 = 0.0
+    for ifo in likelihood.ifo_list:
+        prefix = f"recalib_{ifo.name}_"
+        params = {k: v for k, v in calib.items() if k.startswith(prefix)}
+        transform._ensure_calibration_model(ifo, 10)
+        curve = transform.calibration_curves(ifo, params)[0]
+        mu = signal["waveform"][ifo.name] * curve
+        rho2opt += np.sum(np.abs(mu) ** 2)
+        kappa2 += np.sum(d[ifo.name].conj() * mu).real
+    ref = likelihood.log_Zn + kappa2 - 0.5 * rho2opt
+    assert np.isclose(ll_calibrated, ref, rtol=0.0, atol=1e-6)
