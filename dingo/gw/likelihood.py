@@ -175,7 +175,10 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
             else:
                 print("Using phase marginalization with (2,2) mode approximation.")
 
-        # Initialize calibration marginalization using the setter from GWSignal.
+        # Initialize calibration marginalization using the setter from GWSignal. For
+        # the likelihood, the calibration curves are attached to the signal instead of
+        # being multiplied into the waveform; see _log_likelihood_calibration_marginalized.
+        self._expand_calibration_curves = False
         self.calibration_marginalization_kwargs = calibration_marginalization_kwargs
 
     def initialize_time_marginalization(self, t_lower, t_upper, n_fft=1):
@@ -612,28 +615,33 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         log_likelihood: float
         """
 
-        # Step 1: Compute whitened GW strain mu(theta) for parameters theta.
-        mu = self.signal(theta)["waveform"]
+        # Step 1: Compute whitened GW strain mu(theta) for parameters theta, and the
+        # calibration curves C_ifo of shape (num_curves, len(domain)). Since
+        # self._expand_calibration_curves = False, the curves are attached to the
+        # signal instead of being multiplied into the waveform. The calibrated
+        # waveform for curve c would be mu_ifo * C_ifo[c].
+        signal = self.signal(theta)
+        mu = signal["waveform"]
+        curves = signal["calibration_curves"]
         d = self.whitened_strains
 
-        # In the calibration-marginalization case, the values of mu for each detector
-        # have an additional leading dimension, which corresponds to the calibration
-        # draws. These are averaged over in computing the likelihood.
-        # TODO: Combine with _log_likelihood() into a single method.
-
-        # Step 2: Compute likelihood. log_Zn is precomputed, so we only need to
-        # compute the remaining terms rho2opt and kappa2
-
-        rho2opt = np.sum(
-            [inner_product(mu_ifo.T, mu_ifo.T) for mu_ifo in mu.values()], axis=0
-        )
-        kappa2 = np.sum(
-            [
-                inner_product(d_ifo[:, None], mu_ifo.T)
-                for d_ifo, mu_ifo in zip(d.values(), mu.values())
-            ],
-            axis=0,
-        )
+        # Step 2: Compute likelihood for each calibration curve. log_Zn is
+        # precomputed, so we only need rho2opt and kappa2. Both are matrix-vector
+        # products with the curves, so the (num_curves, len(domain)) calibrated
+        # waveform never has to be formed:
+        #
+        #   rho2opt[c] = sum_f |mu_f C_cf|^2         = (|C|^2 @ |mu|^2)[c]
+        #   kappa2[c]  = Re sum_f conj(d_f) mu_f C_cf = Re (C @ (conj(d) * mu))[c]
+        rho2opt = 0.0
+        kappa2 = 0.0
+        for ifo in mu.keys():
+            C = curves[ifo]
+            mu2 = mu[ifo].real ** 2 + mu[ifo].imag ** 2
+            # |C|^2 @ mu2 without materializing the (num_curves, N) array |C|^2.
+            rho2opt = rho2opt + np.einsum(
+                "cf,cf,f->c", C.real, C.real, mu2
+            ) + np.einsum("cf,cf,f->c", C.imag, C.imag, mu2)
+            kappa2 = kappa2 + (C @ (d[ifo].conj() * mu[ifo])).real
 
         likelihoods = self.log_Zn + kappa2 - 1 / 2.0 * rho2opt
         # Return the average over calibration envelopes

@@ -77,6 +77,10 @@ class GWSignal(object):
         # When we set self.whiten, the projection transforms are automatically prepared.
         self._calibration_envelope = None
         self._calibration_marginalization_kwargs = None
+        # Whether ApplyCalibrationToWaveform multiplies the calibration curves into the
+        # waveform (True), or attaches them to the sample as "calibration_curves"
+        # (False; used by the calibration-marginalized likelihood).
+        self._expand_calibration_curves = True
         self.whiten = False
 
         self.asd = None
@@ -171,6 +175,7 @@ class GWSignal(object):
             ApplyCalibrationToWaveform(
                 self.ifo_list,
                 self.data_domain,
+                expand_waveform=self._expand_calibration_curves,
             )
         )
         if self.whiten:
