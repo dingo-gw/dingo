@@ -950,6 +950,38 @@ class MaskFrequencyNotches(object):
         return input_sample
 
 
+class NormalizePosition(object):
+    """
+    Rescale the frequency columns of the token positions from Hz to [0, 1] over a
+    fixed reference interval [f_min, f_max] (the training domain's bounds). Must run
+    after every mask transform, since those compare positions against frequencies
+    in Hz. The detector column is left unchanged.
+    """
+
+    def __init__(self, f_min: float, f_max: float):
+        self.f_min = f_min
+        self.f_max = f_max
+
+    def __call__(self, input_sample: dict) -> dict:
+        """
+        Parameters
+        ----------
+        input_sample: dict
+            with key 'position', shape [..., num_tokens, 3], last dim
+            [f_min, f_max, detector_index] in Hz.
+
+        Returns
+        -------
+        dict
+            input_sample with a new 'position' array whose first two columns are
+            rescaled to [0, 1].
+        """
+        position = input_sample["position"]
+        scaled = (position[..., :2] - self.f_min) / (self.f_max - self.f_min)
+        input_sample["position"] = np.concatenate((scaled, position[..., 2:]), axis=-1)
+        return input_sample
+
+
 class MaskTokensForFrequencyRangeUpdate(object):
     """
     Inference-time token-level counterpart to MaskDataForFrequencyRangeUpdate.

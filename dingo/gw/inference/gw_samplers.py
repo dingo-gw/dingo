@@ -36,6 +36,7 @@ from dingo.gw.transforms import (
     MaskDataForFrequencyRangeUpdate,
     StrainTokenization,
     MaskTokensForFrequencyRangeUpdate,
+    NormalizePosition,
     UnpackDict,
 )
 
@@ -406,6 +407,11 @@ class GWSampler(GWSamplerMixin, Sampler):
                         psd_notch_dict=self.psd_notch_dict,
                         training_detectors=training_detectors,
                     )
+                )
+            if tok.get("normalize_position", False):
+                # After all mask transforms, which compare positions in Hz.
+                transform_pre.append(
+                    NormalizePosition(self.domain.f_min, self.domain.f_max)
                 )
 
         transform_pre.append(ToTorch(device=self.model.device))

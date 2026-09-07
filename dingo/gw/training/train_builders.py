@@ -27,6 +27,7 @@ from dingo.gw.transforms import (
     MaskDetectors,
     MaskFrequencyRange,
     MaskFrequencyNotches,
+    NormalizePosition,
 )
 from dingo.gw.noise.asd_dataset import ASDDataset
 from dingo.gw.prior import default_inference_parameters
@@ -212,6 +213,9 @@ def set_train_transforms(wfd, data_settings, asd_dataset_path, omit_transforms=N
             transforms.append(
                 MaskFrequencyNotches(domain=domain, **tok["mask_frequency_notches"])
             )
+        if tok.get("normalize_position", False):
+            # After all mask transforms, which compare positions in Hz.
+            transforms.append(NormalizePosition(domain.f_min, domain.f_max))
 
     selected_keys = ["inference_parameters", "waveform"]
     if "tokenization" in data_settings:

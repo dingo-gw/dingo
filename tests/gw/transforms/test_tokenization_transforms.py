@@ -9,6 +9,7 @@ from dingo.gw.transforms import (
     MaskDetectors,
     MaskFrequencyRange,
     MaskFrequencyNotches,
+    NormalizePosition,
     MaskTokensForFrequencyRangeUpdate,
 )
 
@@ -989,6 +990,19 @@ def test_MaskFrequencyNotches_preserves_existing_mask():
 # MaskTokensForFrequencyRangeUpdate is an inference-time transform applied to a single
 # (non-batched) tokenized sample.  We use a UFD with a coarse token grid so
 # that we can reason about exact token counts.
+
+
+def test_NormalizePosition():
+    """Frequency columns map to [0, 1] over [f_min, f_max]; the detector column and
+    the (read-only, broadcast) input are untouched."""
+    position = np.broadcast_to(
+        np.array([[20.0, 30.0, 0.0], [30.0, 40.0, 1.0]]), (3, 2, 3)
+    )
+    sample = {"position": position, "token_mask": np.zeros((3, 2), dtype=bool)}
+    out = NormalizePosition(f_min=20.0, f_max=40.0)(sample)
+    expected = np.array([[0.0, 0.5, 0.0], [0.5, 1.0, 1.0]])
+    assert np.array_equal(out["position"], np.broadcast_to(expected, (3, 2, 3)))
+    assert position[0, 1, 0] == 30.0
 
 
 def _make_tokenized_sample_unbatched(domain, num_tokens_per_block=10):

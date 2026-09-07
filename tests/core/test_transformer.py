@@ -337,6 +337,29 @@ def test_average_pooling_ignores_fully_masked_token():
     assert torch.allclose(out_drop, out_noisy, atol=1e-5)
 
 
+def test_average_pooling_all_masked_sample_is_finite():
+    """A sample with every token masked averages to zero, not NaN, and leaves the
+    other samples of the batch untouched."""
+    model = make_full_enet(pooling="average")
+    model.eval()
+    x, position = make_enet_inputs(batch_size=2)
+    mask = torch.zeros(2, NUM_TOKENS, dtype=torch.bool)
+    mask[1] = True
+
+    out = model(x=x, position=position, src_key_padding_mask=mask)
+    out_first_alone = model(
+        x=x[:1], position=position[:1], src_key_padding_mask=mask[:1]
+    )
+
+    assert torch.isfinite(out).all()
+    assert torch.allclose(out[:1], out_first_alone, atol=1e-6)
+
+
+def test_tokenizer_refuses_batch_norm():
+    with pytest.raises(ValueError, match="batch_norm"):
+        make_tokenizer(batch_norm=True)
+
+
 def test_create_transformer_enet_backward_pass():
     tokenizer_kwargs, transformer_kwargs = make_enet_kwargs()
     final_net_kwargs = {"activation": "elu", "output_dim": 5}

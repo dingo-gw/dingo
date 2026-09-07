@@ -209,6 +209,26 @@ def test_transformer_training_path_builder_to_loss(tmp_path, posterior_model_typ
     assert torch.isfinite(log_prob).all()
 
 
+def test_normalize_position_runs_after_masking(tmp_path):
+    """With normalize_position the sample's positions are in [0, 1] (up to the padded
+    last token) while the masks, drawn in Hz, still apply."""
+    np.random.seed(0)
+    wfd = _toy_waveform_dataset()
+    data_settings = copy.deepcopy(DATA_SETTINGS)
+    data_settings["tokenization"]["normalize_position"] = True
+    data_settings["tokenization"]["mask_frequency_range"]["p_mask"] = 1.0
+    set_train_transforms(
+        wfd,
+        {"waveform_dataset_path": None, **data_settings},
+        _toy_asd_file(tmp_path / "asds.hdf5"),
+    )
+    _, _, position, token_mask = wfd[0]
+    assert position[:, 0].min() == 0.0
+    assert 1.0 <= position[:, 1].max() < 1.0 + TOKEN_SIZE * DOMAIN["delta_f"] / 44.0
+    assert np.array_equal(position[:, 2], np.repeat([0, 1], len(position) // 2))
+    assert token_mask.any() and not token_mask.all()
+
+
 def test_tokenization_with_gnpe_is_refused(tmp_path):
     data_settings = {
         "waveform_dataset_path": None,

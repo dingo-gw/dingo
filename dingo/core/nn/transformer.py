@@ -22,6 +22,11 @@ class Tokenizer(nn.Module):
     Maps each token's raw features to a d_model-dimensional embedding via a shared
     DenseResidualNet, conditioned on the token's position (f_min, f_max, detector).
 
+    The position consists of two continuous features (the token's lower and upper
+    frequency, used as given) and one categorical block index in [0, num_blocks)
+    (the detector, one-hot encoded); their concatenation is the GLU context of the
+    residual blocks. This 2 + 1 layout is the one domain assumption in this module.
+
     Methods
     -------
     forward:
@@ -58,11 +63,18 @@ class Tokenizer(nn.Module):
         dropout : float
             dropout rate for the DenseResidualNet
         batch_norm : bool
-            whether to use batch normalization in the DenseResidualNet
+            not supported (raises): the residual net runs on [..., num_tokens,
+            features] and nn.BatchNorm1d normalizes over axis 1, the token axis
         layer_norm : bool
             whether to use layer normalization in the DenseResidualNet
         """
         super().__init__()
+        if batch_norm:
+            raise ValueError(
+                "batch_norm is not supported in the Tokenizer: nn.BatchNorm1d treats "
+                "axis 1 of the [..., num_tokens, features] input as the channel axis, "
+                "i.e. it would normalize per token position. Use layer_norm instead."
+            )
         self.num_features = input_dim
         self.num_blocks = num_blocks
         self.tokenizer_net = DenseResidualNet(
@@ -232,7 +244,10 @@ class TransformerModel(nn.Module):
 
         if self.pooling == "average":
             if src_key_padding_mask is not None:
-                denominator = torch.sum(~src_key_padding_mask, dim=-1, keepdim=True)
+                # A sample with every token masked averages to zero instead of NaN.
+                denominator = torch.sum(
+                    ~src_key_padding_mask, dim=-1, keepdim=True
+                ).clamp(min=1)
                 x = (
                     torch.sum(x * (~src_key_padding_mask).unsqueeze(-1), dim=-2)
                     / denominator
