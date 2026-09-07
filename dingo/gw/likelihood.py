@@ -382,22 +382,11 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         pol_m = self.signal_m({**theta, "phase": 0})
         pol_m = {k: pol["waveform"] for k, pol in pol_m.items()}
 
-        # For TEOB, generate_hplus_hcross_m applies a phase-dependent time shift
-        # bookkept in wfg._deferred_timeshift_data. The analytical precomputation
-        # below assumes mu(phi) = sum_m mu_m(0) * exp(-i m phi), which is only
-        # valid when that timeshift is absent. When it's present we fall back to
-        # a per-phase resum so the phase-grid likelihood stays consistent with
-        # the full direct likelihood.
-        dts = getattr(self.waveform_generator, "_deferred_timeshift_data", None)
-        if dts is not None:
-            return self._log_likelihood_phase_grid_mode_decomposed_with_dts(
-                pol_m, d, phases, dts
-            )
-
-        # Step 2: Precompute complex inner products (mu, mu) and (d, mu) for the
-        # individual modes m.
+        # Step 2: Precompute the pieces of the likelihood that do not depend on the
+        # phase. Restricting to frequencies >= f_min (min_idx) matches inner_product.
         min_idx = self.data_domain.min_idx
         m_vals = sorted(pol_m.keys())
+        phases = np.atleast_1d(np.asarray(phases, dtype=float))
 
         # rho2opt is defined as the inner product of the waveform mu with itself.
         # Since we work with whitened data, the inner product simply reads
@@ -411,25 +400,32 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         #   (mu^_m, mu^_n) = [(mu_m.conj() * mu_n) * exp(-i * (n - m) * phi)].real.
         #
         # Below we precompute the cross terms sum(mu_m.conj() * mu_n) and the constant
-        # contribution for m = n.
+        # contribution for m = n. Both are invariant under a common time shift of all
+        # modes, since exp(-2 pi i f dt) has unit modulus.
         rho2opt_const = 0
-        rho2opt_crossterms = {}
+        cross_pairs = []
+        cross_values = []
         for idx, m in enumerate(m_vals):
             mu_m = pol_m[m]
-            # contribution to rho2opt_const
             rho2opt_const += sum(
                 [inner_product(mu_ifo, mu_ifo, min_idx) for mu_ifo in mu_m.values()]
             )
-            # cross terms
             for n in m_vals[idx + 1 :]:
                 mu_n = pol_m[n]
                 # factor 2, since (m, n) and (n, m) cross terms contribute symmetrically
-                rho2opt_crossterms[(m, n)] = 2 * sum(
-                    [
-                        inner_product_complex(mu_m_ifo, mu_n_ifo, min_idx)
-                        for mu_m_ifo, mu_n_ifo in zip(mu_m.values(), mu_n.values())
-                    ]
+                cross_pairs.append(n - m)
+                cross_values.append(
+                    2
+                    * sum(
+                        [
+                            inner_product_complex(mu_m_ifo, mu_n_ifo, min_idx)
+                            for mu_m_ifo, mu_n_ifo in zip(mu_m.values(), mu_n.values())
+                        ]
+                    )
                 )
+        cross_pairs = np.array(cross_pairs)
+        cross_values = np.array(cross_values)
+
         # kappa2 is given by
         #
         #   (d, mu) = sum(d.conj() * mu).real.
@@ -439,103 +435,59 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         #
         #   (d, mu^_m) = [(d.conj() * mu_m) * exp(-i * m * phi)].real.
         #
-        # Below we precompute (d.conj() * mu_m) for the different modes m.
-        kappa2_modes = {}
-        for m in m_vals:
-            mu_m = pol_m[m]
-            kappa2_modes[m] = sum(
-                [
-                    inner_product_complex(d_ifo, mu_ifo, min_idx)
-                    for d_ifo, mu_ifo in zip(d.values(), mu_m.values())
-                ]
-            )
-
-        log_likelihoods = np.ones(len(phases))
-        kappa2_all = []
-        rho2opt_all = []
-        for idx, phase in enumerate(phases):
-            # get rho2opt
-            rho2opt = rho2opt_const
-            for (m, n), c in rho2opt_crossterms.items():
-                rho2opt += (c * np.exp(-1j * (n - m) * phase)).real
-            # get kappa2
-            kappa2 = 0
-            for m in m_vals:
-                kappa2 += (kappa2_modes[m] * np.exp(-1j * m * phase)).real
-            rho2opt_all.append(rho2opt)
-            kappa2_all.append(kappa2)
-
-            log_likelihoods[idx] = self.log_Zn + kappa2 - 1 / 2.0 * rho2opt
-
-            # # comment out for cross check:
-            # mu = sum_contributions_m(pol_m, phase_shift=phase)
-            # rho2opt_ref = sum([inner_product(mu_ifo, mu_ifo) for mu_ifo in mu.values()])
-            # kappa2_ref = sum(
-            #     [
-            #         inner_product(d_ifo, mu_ifo)
-            #         for d_ifo, mu_ifo in zip(d.values(), mu.values())
-            #     ]
-            # )
-            # assert rho2opt - rho2opt_ref < 1e-10
-            # assert kappa2 - kappa2_ref < 1e-10
-
-        # # Test that this works:
-        # idx = len(phases) // 3
-        # phase = phases[idx]
-        # log_likelihood_ref = self.log_likelihood({**theta, "phase": phase})
-        # print(log_likelihoods[idx] - log_likelihood_ref)
-
-        return log_likelihoods
-
-    def _log_likelihood_phase_grid_mode_decomposed_with_dts(
-        self, pol_m, d, phases, dts
-    ):
-        """Variant of _log_likelihood_phase_grid_mode_decomposed for approximants
-        (currently TEOB) whose mode decomposition carries a phase-dependent time
-        shift recorded in `dts` (= wfg._deferred_timeshift_data).
-
-        We cannot use the analytical precomputation trick because the timeshift
-        depends on the argmax of the TD-resummed h+, which varies with phase.
-        Instead we resum modes per phase and apply the exp(-2 pi i f dt(phi))
-        correction before computing inner products. The geocenter-level time
-        shift commutes with detector projection, so we can apply it directly to
-        the per-detector signals returned by signal_m.
-        """
-        m_vals = sorted(pol_m.keys())
-        ifos = list(d.keys())
-        freqs = self.data_domain()
-
-        log_likelihoods = np.empty(len(phases))
-        for idx, phi in enumerate(phases):
-            # Analytical resum of per-detector mode contributions.
-            mu = {
-                ifo: sum(
-                    pol_m[m][ifo] * np.exp(-1j * m * phi) for m in m_vals
+        # Below we precompute d.conj() * mu_m for the different modes m, summed over
+        # detectors but kept per frequency bin so that a time shift can still be
+        # applied (needed for the TEOB deferred time shift, see below).
+        d_mu_m = np.stack(
+            [
+                sum(
+                    [
+                        d_ifo[min_idx:].conj() * mu_ifo[min_idx:]
+                        for d_ifo, mu_ifo in zip(d.values(), pol_m[m].values())
+                    ]
                 )
-                for ifo in ifos
-            }
-            # Deferred-timeshift correction (no-op when phi == 0.0).
-            if phi != 0.0:
-                target_phase = dts["phase_ref"] + phi
-                epoch_target = wfg_utils.compute_epoch_from_resized_td_modes(
-                    dts["resized_td_modes"], dts["iota"], target_phase,
-                    dts["delta_t"],
-                )
-                dt_target = 1.0 / dts["delta_f"] + epoch_target
-                dt_correction = dt_target - dts["dt_ref"]
-                shift = np.exp(-2j * np.pi * dt_correction * freqs)
-                for ifo in ifos:
-                    mu[ifo] = mu[ifo] * shift
+                for m in m_vals
+            ],
+            axis=1,
+        )  # shape (num_frequencies, num_modes)
 
-            rho2opt = sum(
-                inner_product(mu_ifo, mu_ifo) for mu_ifo in mu.values()
+        # For TEOB, generate_hplus_hcross_m applies a phase-dependent time shift
+        # bookkept in wfg._deferred_timeshift_data: the epoch is set by the peak of
+        # h+ (as in gwsignal), which moves with the phase. The full signal at phase
+        # phi is then
+        #
+        #   mu(phi) = exp(-2 pi i f dt(phi)) * sum_m mu_m * exp(-i m phi),
+        #
+        # where dt(phi) = -argmax(hp(phi)) * delta_t (relative to the reference
+        # epoch) is quantized to the time grid and hence takes only a handful of
+        # distinct values across the phase grid. We compute dt for all phases at
+        # once and evaluate (d, mu_m) once per distinct time shift.
+        dts = getattr(self.waveform_generator, "_deferred_timeshift_data", None)
+        if dts is None:
+            kappa2_modes = d_mu_m.sum(axis=0)[np.newaxis, :]  # (1, num_modes)
+            shift_index = np.zeros(len(phases), dtype=int)
+        else:
+            epochs = wfg_utils.compute_epochs_from_resized_td_modes(
+                dts["resized_td_modes"],
+                dts["iota"],
+                dts["phase_ref"] + phases,
+                dts["delta_t"],
             )
-            kappa2 = sum(
-                inner_product(d_ifo, mu_ifo)
-                for d_ifo, mu_ifo in zip(d.values(), mu.values())
-            )
-            log_likelihoods[idx] = self.log_Zn + kappa2 - 0.5 * rho2opt
-        return log_likelihoods
+            dt_correction = (1.0 / dts["delta_f"] + epochs) - dts["dt_ref"]
+            unique_dt, shift_index = np.unique(dt_correction, return_inverse=True)
+            time_shifts = np.exp(
+                -2j * np.pi * np.outer(unique_dt, self.data_domain()[min_idx:])
+            )  # (num_shifts, num_frequencies)
+            kappa2_modes = time_shifts @ d_mu_m  # (num_shifts, num_modes)
+
+        # Step 3: Evaluate on the phase grid.
+        phase_factors = np.exp(-1j * np.outer(np.array(m_vals), phases))  # (M, P)
+        kappa2 = (kappa2_modes[shift_index] * phase_factors.T).sum(axis=1).real
+        rho2opt = (
+            rho2opt_const
+            + (cross_values @ np.exp(-1j * np.outer(cross_pairs, phases))).real
+        )
+        return self.log_Zn + kappa2 - 1 / 2.0 * rho2opt
 
     def _log_likelihood_phase_marginalized(self, theta):
         """
