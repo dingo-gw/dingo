@@ -393,6 +393,16 @@ class DataGenerationInput(BilbyDataGenerationInput):
             # minimum frequency.
             strain = domain.update_data(strain)
             asd = domain.update_data(asd, low_value=1.0)
+            # A NaN ASD (e.g. estimated from a segment with gaps) would silently
+            # poison the whitened data; inf (bilby's fill beyond a PSD file's range)
+            # whitens to zero and is handled as a notch, so only NaN is rejected.
+            if np.isnan(asd[domain.min_idx :]).any():
+                raise ValueError(
+                    f"The ASD for {ifo.name} contains NaN within the model band. If "
+                    "it was estimated from strain, choose a PSD segment without gaps "
+                    "(psd-start-time, psd-length); otherwise check the PSD file "
+                    "(psd-dict)."
+                )
 
             if self.psd_notch_dict is not None and ifo.name in self.psd_notch_dict:
                 notch = self.psd_notch_dict[ifo.name]
