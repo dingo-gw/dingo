@@ -1,3 +1,4 @@
+from collections import defaultdict
 from multiprocessing import Pool
 from typing import Optional
 
@@ -442,9 +443,18 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         #   rho2opt(ph) = rho2opt_const
         #       + sum_{(m,n)} (crossterm_{m,n} * exp(-i*(n-m)*ph)).real
         #   kappa2(ph)  = sum_m (kappa2_modes[m] * exp(-i*m*ph)).real
+        #
+        # The cross terms only depend on the mode difference delta = n - m, so we
+        # accumulate them by delta before touching the grid. For m in -4..4 this
+        # collapses 36 pairs onto 8 distinct deltas, i.e. a 4.5x smaller
+        # exponential matrix for identical arithmetic.
         phases_arr = np.asarray(phases)
-        deltas = np.array([n - m for (m, n) in rho2opt_crossterms])
-        cs = np.array(list(rho2opt_crossterms.values()))
+
+        crossterms_by_delta = defaultdict(complex)
+        for (m, n), c in rho2opt_crossterms.items():
+            crossterms_by_delta[n - m] += c
+        deltas = np.array(sorted(crossterms_by_delta))
+        cs = np.array([crossterms_by_delta[delta] for delta in deltas])
         rho2opt = rho2opt_const + (
             cs[:, None] * np.exp(-1j * deltas[:, None] * phases_arr[None, :])
         ).real.sum(axis=0)
