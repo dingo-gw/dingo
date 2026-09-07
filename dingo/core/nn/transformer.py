@@ -8,6 +8,14 @@ from torch.nn import TransformerEncoder, TransformerEncoderLayer
 from dingo.core.nn.resnet import DenseResidualNet, LinearLayer
 from dingo.core.utils import torchutils
 
+# Disable the fused TransformerEncoderLayer fast path (_transformer_encoder_layer_fwd).
+# It raises a CUDA illegal memory access on sm_100 (B200) for fp32 eval-mode forwards
+# (torch 2.13.0+cu130; the same code runs on sm_90/H100). The fast path is only
+# reachable in eval mode without autocast, and its nested-tensor optimization is off
+# anyway for norm_first=True and for token masks that are not left-aligned, so
+# disabling it costs nothing here.
+torch.backends.mha.set_fastpath_enabled(False)
+
 
 class Tokenizer(nn.Module):
     """
@@ -155,9 +163,6 @@ class TransformerModel(nn.Module):
         self.tokenizer = tokenizer
         self.pooling = pooling
         self.final_net = final_net
-
-        # The fast path is incompatible with some CUDA kernels (e.g. B200).
-        torch.backends.mha.set_fastpath_enabled(False)
 
         encoder_layer = TransformerEncoderLayer(
             d_model=d_model,
