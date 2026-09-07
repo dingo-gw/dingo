@@ -189,6 +189,26 @@ class TestDDPStateDictStripping:
 
 
 class TestBuildTrainAndTestLoaders:
+    def test_drop_last_default_keeps_partial_batch(self):
+        dataset = TensorDataset(torch.randn(100, 4))
+        train_loader, test_loader, _ = build_train_and_test_loaders(
+            dataset=dataset, train_fraction=0.8, batch_size=30, num_workers=0
+        )
+        assert [len(b[0]) for b in train_loader] == [30, 30, 20]
+        assert not train_loader.drop_last and not test_loader.drop_last
+
+    def test_drop_last_drops_partial_batch(self):
+        dataset = TensorDataset(torch.randn(100, 4))
+        train_loader, test_loader, _ = build_train_and_test_loaders(
+            dataset=dataset,
+            train_fraction=0.8,
+            batch_size=30,
+            num_workers=0,
+            drop_last=True,
+        )
+        assert [len(b[0]) for b in train_loader] == [30, 30]
+        assert train_loader.drop_last and test_loader.drop_last
+
     def test_single_gpu_returns_none_sampler(self):
         dataset = TensorDataset(torch.randn(100, 4))
         train_loader, test_loader, sampler = build_train_and_test_loaders(

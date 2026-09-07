@@ -17,6 +17,7 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 
 from dingo.core.nn.compile_utils import (
     compile_network,
+    eager_mode,
     spline_is_compile_friendly,
 )
 from dingo.core.nn.nsf import create_nsf_model
@@ -104,6 +105,21 @@ class TestUnwrapNetwork:
         pm.save_model(str(path), save_training_info=False)
         saved = torch.load(path, weights_only=False)
         assert set(saved["model_state_dict"].keys()) == expected_keys
+
+
+class TestEagerMode:
+    def test_compiled_module_runs_without_tracing(self):
+        import torch._dynamo
+
+        torch._dynamo.reset()
+        net = torch.compile(nn.Linear(2, 2))
+        x = torch.randn(3, 2)
+        with eager_mode():
+            out = net(x)
+        assert torch.allclose(out, unwrap_network(net)(x))
+        assert torch._dynamo.utils.counters["frames"]["total"] == 0
+        net(x)  # outside the context the module is traced and compiled
+        assert torch._dynamo.utils.counters["frames"]["total"] > 0
 
 
 class TestCompileNetwork:

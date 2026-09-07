@@ -39,6 +39,7 @@ except ImportError:
 
 import dingo.core.utils as utils
 import dingo.core.utils.trainutils
+from dingo.core.nn.compile_utils import eager_mode
 from dingo.core.utils.backward_compatibility import update_model_config
 from dingo.core.utils.misc import get_version
 from dingo.core.utils.torchutils import get_ddp_module, unwrap_network
@@ -725,7 +726,9 @@ def test_epoch(
     float
         Average loss over the test set.
     """
-    with torch.no_grad():
+    # eager_mode: evaluating a compiled network in eval mode would trigger another
+    # full compilation, which a short test epoch never amortizes.
+    with torch.no_grad(), eager_mode():
         pm.network.eval()
 
         if pm.rank is None:

@@ -175,13 +175,13 @@ Notes:
   ```
   Dingo raises an error if `torch_compile: true` is set without it. The rewrite is numerically
   identical, so checkpoints are interchangeable.
-- Compilation is slow: 4–12 minutes per graph for a production-size network, and the network
-  is compiled once per distinct batch shape and mode. In practice that is four compilations in
-  the first epoch (the training graph, the smaller last batch of the epoch, and the same two
-  for the test epoch), i.e. 10–40 minutes of overhead per run, plus a recompilation at every
-  stage boundary that changes which parameters are trainable. The compiled steps that follow
-  are the fast ones, so `torch_compile` pays off for trainings of tens of epochs or more, not
-  for short runs.
+- Compilation is slow: 4–12 minutes for a production-size network, paid on the first training
+  step of a run and again at every stage boundary that changes which parameters are trainable.
+  The compiled steps that follow are the fast ones, so `torch_compile` pays off for trainings
+  of tens of epochs or more, not for short runs. To avoid further compilations the last,
+  smaller batch of each epoch is dropped (the compiled graph is specialized to the batch
+  shape) and the test epoch runs the network eagerly (an eval-mode graph would cost another
+  compilation that a short test epoch never amortizes).
 - Under DDP each rank compiles into its own on-disk Inductor/Triton cache. That cache must live
   on **node-local** disk. If the system temp directory is a shared network filesystem, set
   `torch_compile_cache_dir` to a node-local path (e.g. the HTCondor scratch directory);

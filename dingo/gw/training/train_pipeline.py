@@ -215,6 +215,7 @@ def initialize_stage(
     world_size: Optional[int] = None,
     rank: Optional[int] = None,
     resume: bool = False,
+    drop_last: bool = False,
 ) -> Tuple[DataLoader, DataLoader, Optional[DistributedSampler]]:
     """
     Initializes training based on PosteriorModel metadata and current stage:
@@ -280,6 +281,7 @@ def initialize_stage(
         num_workers=num_workers_per_gpu,
         world_size=world_size,
         rank=rank,
+        drop_last=drop_last,
     )
 
     if not resume:
@@ -346,6 +348,9 @@ def train_stages(
     rank = local_settings.get("rank", None)
     world_size = local_settings.get("world_size", None)
     print_primary = rank is None or rank == 0
+    # A compiled network is specialized to the batch shape; skip the smaller last
+    # batch of each epoch rather than compiling a second graph for it.
+    drop_last = bool(local_settings.get("torch_compile", False))
 
     # Extract list of stages from settings dict
     stages = []
@@ -375,6 +380,7 @@ def train_stages(
                 world_size=world_size,
                 rank=rank,
                 resume=False,
+                drop_last=drop_last,
             )
         else:
             if print_primary:
@@ -388,6 +394,7 @@ def train_stages(
                 world_size=world_size,
                 rank=rank,
                 resume=True,
+                drop_last=drop_last,
             )
 
         early_stopping = None

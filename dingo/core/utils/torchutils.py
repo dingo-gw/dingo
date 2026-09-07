@@ -355,6 +355,7 @@ def build_train_and_test_loaders(
     num_workers: int,
     world_size: Optional[int] = None,
     rank: Optional[int] = None,
+    drop_last: bool = False,
 ) -> Tuple[DataLoader, DataLoader, Optional[DistributedSampler]]:
     """
     Split the dataset into train and test sets, and build corresponding DataLoaders.
@@ -376,6 +377,9 @@ def build_train_and_test_loaders(
         Total number of DDP processes (GPUs).
     rank : int, optional
         Rank of the current DDP process.
+    drop_last : bool
+        Drop the last, smaller batch of each epoch. Used with ``torch.compile``,
+        which would otherwise recompile the network for the odd batch shape.
 
     Returns
     -------
@@ -406,6 +410,7 @@ def build_train_and_test_loaders(
             num_workers=num_workers,
             worker_init_fn=fix_random_seeds,
             persistent_workers=persistent_workers,
+            drop_last=drop_last,
         )
         test_loader = DataLoader(
             test_dataset,
@@ -415,6 +420,7 @@ def build_train_and_test_loaders(
             num_workers=num_workers,
             worker_init_fn=fix_random_seeds,
             persistent_workers=persistent_workers,
+            drop_last=drop_last,
         )
     else:
         train_sampler = None
@@ -426,6 +432,7 @@ def build_train_and_test_loaders(
             num_workers=num_workers,
             worker_init_fn=fix_random_seeds,
             persistent_workers=persistent_workers,
+            drop_last=drop_last,
         )
         test_loader = DataLoader(
             test_dataset,
@@ -435,6 +442,7 @@ def build_train_and_test_loaders(
             num_workers=num_workers,
             worker_init_fn=fix_random_seeds,
             persistent_workers=persistent_workers,
+            drop_last=drop_last,
         )
 
     return train_loader, test_loader, train_sampler

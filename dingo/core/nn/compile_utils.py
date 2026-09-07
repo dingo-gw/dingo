@@ -15,6 +15,7 @@ https://github.com/nihargupte-ph/nflows (vendored by the matching branch of
 https://github.com/nihargupte-ph/glasflow) until it is merged upstream.
 """
 
+import contextlib
 import inspect
 import os
 import tempfile
@@ -36,6 +37,22 @@ def spline_is_compile_friendly() -> bool:
     from glasflow.nflows.transforms.splines import rational_quadratic as rq
 
     return "check_domain" in inspect.signature(rq.rational_quadratic_spline).parameters
+
+
+@contextlib.contextmanager
+def eager_mode():
+    """Run compiled networks eagerly inside the block, without (re)compiling.
+
+    The test epoch runs the network in eval mode, which would otherwise trigger a
+    second full compilation (several minutes for a production-size network) that
+    a test epoch of a few hundred steps never amortizes.
+    """
+    set_stance = getattr(torch.compiler, "set_stance", None)
+    if set_stance is None:  # torch < 2.6
+        yield
+        return
+    with set_stance("force_eager"):
+        yield
 
 
 def compile_network(
