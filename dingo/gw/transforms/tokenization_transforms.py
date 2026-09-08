@@ -483,13 +483,13 @@ class MaskFrequencyRange(object):
     Randomly mask tokens at the lower and/or upper frequency edges so that the network
     learns that f_min and f_max of the frequency range can vary.
 
-    This transform does the following things:
-    * Decides whether to apply masking to each element of the batch based on p_mask.
-    * Decides whether to treat the detectors individually or apply the same mask to all detectors.
-    * Decides whether to mask the upper or lower frequency end or both (potentially per detector).
-    * Samples a boundary from [f_min, f_min_upper] and/or [f_max_lower, f_max] in UFD (potentially per detector).
-    * Converts frequency values to tokens and creates a token mask removing the lower and/or upper
-      frequency range (potentially per detector).
+    For each sample, with probability p_mask, cut the lower end, the upper end, or
+    both (p_lower_upper_both). With probability p_same_all_detectors the same cut is
+    applied to every detector; otherwise each detector gets its own draw. The lower
+    boundary is drawn from the base-domain frequencies in [f_min, f_min_upper], the
+    upper boundary from [f_max_lower, f_max], and every token overlapping the cut
+    region is masked. A sample that would lose every token keeps only its lower or
+    its upper cut instead.
     """
 
     def __init__(
@@ -528,16 +528,24 @@ class MaskFrequencyRange(object):
         self.p_mask = p_mask
         self.f_min_upper = f_min_upper
         self.f_max_lower = f_max_lower
-        self.prevent_zero_information = (
-            True if self.f_min_upper >= self.f_max_lower else False
-        )
         self.p_same_all_detectors = p_same_all_detectors
         if p_lower_upper_both is None:
-            p_lower_upper_both = np.array([0.4, 0.4, 0.2])
-        self.p_lower_upper_both = p_lower_upper_both
+            p_lower_upper_both = [0.4, 0.4, 0.2]
+        self.p_lower_upper_both = np.asarray(p_lower_upper_both, dtype=float)
         if not np.isclose(np.sum(self.p_lower_upper_both), 1.0, rtol=1e-6, atol=1e-12):
             raise ValueError(
                 f"p_lower_upper_both {self.p_lower_upper_both} does not sum to 1. "
+            )
+        # Boundaries are drawn from the base-domain grid (for a multibanded domain,
+        # the uniform grid before decimation).
+        base_domain = getattr(domain, "base_domain", domain)
+        f_values = base_domain.sample_frequencies[base_domain.frequency_mask]
+        self._lower_candidates = f_values[f_values <= f_min_upper]
+        self._upper_candidates = f_values[f_values >= f_max_lower]
+        if len(self._lower_candidates) == 0 or len(self._upper_candidates) == 0:
+            raise ValueError(
+                f"No base-domain frequencies in [{domain.f_min}, {f_min_upper}] or in "
+                f"[{f_max_lower}, {domain.f_max}] to draw a cut boundary from."
             )
         if print_output:
             print(
@@ -547,267 +555,82 @@ class MaskFrequencyRange(object):
                 f"    - Upper boundary sampled from [{self.f_max_lower}, {self.domain.f_max}]\n"
                 f"    - Probability to apply the same mask on all detectors: {self.p_same_all_detectors} "
             )
-            if self.prevent_zero_information:
-                print(
-                    f"\n    - Preventing zero information is activated since [{self.domain.f_min}, {self.f_min_upper}]"
-                    f"overlaps with [{self.f_max_lower}, {self.domain.f_max}] "
-                )
 
     def __call__(self, input_sample: dict) -> dict:
         """
         Parameters
         ----------
-        input_sample: Dict
-            Values for keys
-            - 'waveform':
-                Sample of shape [batch_size, num_tokens, num_features]
-            - 'position', shape [batch_size, num_tokens, 3]
-               contains information [f_min, f_max, detector_index]
-            - 'token_mask', shape [batch_size, num_tokens]
+        input_sample: dict
+            Tokenized sample with 'position' and 'token_mask' (see StrainTokenization),
+            with or without a leading batch dimension.
 
         Returns
-        ----------
-        sample: Dict
-            input_sample with modified value for key
-            - 'token_mask', shape [batch_size, num_tokens]
-
+        -------
+        dict
+            input_sample with the cut tokens set to True in 'token_mask'.
         """
-        num_tokens = input_sample["waveform"].shape[-2]
-        detector_indices = input_sample["position"][..., 2]
-        num_detectors = len(np.unique(detector_indices))
+        position = input_sample["position"]
+        token_mask = input_sample["token_mask"]
+        unbatched = token_mask.ndim == 1
+        if unbatched:
+            position, token_mask = position[None], token_mask[None]
+        num_batch, num_tokens = token_mask.shape
+        num_detectors = len(np.unique(position[..., 2]))
         num_tokens_per_detector = num_tokens // num_detectors
+        p = self.p_lower_upper_both
 
-        # Mask in frequency domain, where we remove the upper, lower or both part(s),
-        #     i.e. [f_min, f_lower], [f_upper, f_max], or both
-        # - Decide whether to apply masking for each sample
-        # - Decide whether to treat the detectors individually or apply the same mask to all detectors
-        # - Decide whether to mask upper or lower range or both (potentially for each detector)
-        # - Sample boundary from [f_min, f_min_upper] and/or [f_max_lower, f_max]
-        #   in uniform frequency domain (potentially for each detector)
-        # - Convert frequency values to token mask
-
-        batch_size = (
-            [*detector_indices.shape[:-1]] if detector_indices.shape[:-1] != () else [1]
-        )
-        # Decide whether to apply masking for each sample
         apply_cut = np.random.choice(
-            [True, False], p=[self.p_mask, 1 - self.p_mask], size=batch_size
+            [True, False], p=[self.p_mask, 1 - self.p_mask], size=[num_batch]
         )
-
-        # Decide whether to treat the detectors individually or apply the same mask to all detectors
-        same_cut_all_detectors = np.where(
+        same_cut = np.where(
             apply_cut,
             np.random.choice(
                 [True, False],
                 p=[self.p_same_all_detectors, 1 - self.p_same_all_detectors],
-                size=batch_size,
+                size=[num_batch],
             ),
             False,
-        )
-        batch_block_size = (
-            [*detector_indices.shape[:-1], num_detectors]
-            if detector_indices.shape[:-1] != ()
-            else [1, num_detectors]
-        )
-        # (1) Different mask applied to every detector
-        # Decide whether to mask upper or lower range or both (potentially for each detector)
-        lower_upper_both_separate = np.random.choice(
-            ["lower", "upper", "both"], p=self.p_lower_upper_both, size=batch_block_size
-        )
-        mask_lower_separate = np.logical_or(
-            lower_upper_both_separate == "lower", lower_upper_both_separate == "both"
-        )
-        mask_upper_separate = np.logical_or(
-            lower_upper_both_separate == "upper", lower_upper_both_separate == "both"
-        )
-        # Combine with masks (a) whether we apply masking and (b) whether we apply it to a single detector
-        ones_vec = np.ones((1, num_detectors), dtype=bool)
-        mask_lower_separate_combined = np.logical_and.reduce(
-            (
-                mask_lower_separate,
-                apply_cut[..., None] * ones_vec,
-                ~same_cut_all_detectors[..., None] * ones_vec,
-            )
-        )
-        mask_upper_separate_combined = np.logical_and.reduce(
-            (
-                mask_upper_separate,
-                apply_cut[..., None] * ones_vec,
-                ~same_cut_all_detectors[..., None] * ones_vec,
-            )
-        )
-        # Sample boundary from [f_min, f_min_upper] and/or [f_max_lower, f_max] in UFD for each detector
-        if isinstance(self.domain, UniformFrequencyDomain):
-            f_values_base_domain = self.domain.sample_frequencies[
-                self.domain.frequency_mask
-            ]
-        elif isinstance(self.domain, MultibandedFrequencyDomain):
-            f_values_base_domain = self.domain.base_domain.sample_frequencies[
-                self.domain.base_domain.frequency_mask
-            ]
-        else:
-            raise ValueError(f"Unknown domain type: {self.domain}")
-        f_lower_separate = np.where(
-            mask_lower_separate_combined,
-            np.random.choice(
-                f_values_base_domain[f_values_base_domain <= self.f_min_upper],
-                replace=True,
-                size=batch_block_size,
-            ),
-            -1,
-        )
-        f_upper_separate = np.where(
-            mask_upper_separate_combined,
-            np.random.choice(
-                f_values_base_domain[f_values_base_domain >= self.f_max_lower],
-                replace=True,
-                size=batch_block_size,
-            ),
-            np.inf,
-        )
+        )[:, None]
+        # Draw one cut per detector and one cut per sample, then pick per sample
+        # according to same_cut. Both sets are always drawn, in this order, so the
+        # random stream matches the earlier two-branch implementation.
+        per_detector = [num_batch, num_detectors]
+        ends = ["lower", "upper", "both"]
+        which_sep = np.random.choice(ends, p=p, size=per_detector)
+        f_lower_sep = np.random.choice(self._lower_candidates, size=per_detector)
+        f_upper_sep = np.random.choice(self._upper_candidates, size=per_detector)
+        which_same = np.random.choice(ends, p=p, size=[num_batch])
+        f_lower_same = np.random.choice(self._lower_candidates, size=[num_batch])
+        f_upper_same = np.random.choice(self._upper_candidates, size=[num_batch])
+        which = np.where(same_cut, which_same[:, None], which_sep)
+        f_lower = np.where(same_cut, f_lower_same[:, None], f_lower_sep)
+        f_upper = np.where(same_cut, f_upper_same[:, None], f_upper_sep)
+        cut_lower = apply_cut[:, None] & (which != "upper")
+        cut_upper = apply_cut[:, None] & (which != "lower")
 
-        # Construct mask: f_lower >= f_min_per_token and f_upper <= f_max_per_token
-        token_mask_separate_lower = (
-            np.repeat(f_lower_separate, repeats=num_tokens_per_detector, axis=-1)
-            >= input_sample["position"][..., 0]
+        # Mask the tokens overlapping [f_min, f_lower] or [f_upper, f_max] on each
+        # detector; per-detector values are repeated over that detector's tokens.
+        rep = dict(repeats=num_tokens_per_detector, axis=-1)
+        mask_lower = (
+            np.repeat(np.where(cut_lower, f_lower, -1), **rep) >= position[..., 0]
         )
-        token_mask_separate_upper = (
-            np.repeat(f_upper_separate, repeats=num_tokens_per_detector, axis=-1)
-            <= input_sample["position"][..., 1]
+        mask_upper = (
+            np.repeat(np.where(cut_upper, f_upper, np.inf), **rep) <= position[..., 1]
         )
+        mask = mask_lower | mask_upper
 
-        # Combine into one mask
-        token_mask_separate = np.logical_or(
-            token_mask_separate_lower, token_mask_separate_upper
-        )
-        if self.prevent_zero_information:
-            # If all tokens are masked in one sample, only apply upper or lower mask
-            replace_mask = np.where(
-                np.sum(token_mask_separate, axis=-1) == num_tokens, True, False
+        # A sample that lost every token keeps only its lower or its upper cut.
+        all_masked = mask.all(axis=-1)
+        if all_masked.any():
+            keep_lower = np.random.choice(
+                [True, False], p=p[:2] / p[:2].sum(), size=all_masked.sum()
             )
-            repl_mask = np.repeat(
-                replace_mask[..., np.newaxis], repeats=num_tokens, axis=-1
-            )
-            # Decide whether to choose lower or upper instead of both
-            lower_upper_probs = self.p_lower_upper_both[:2] / np.sum(
-                self.p_lower_upper_both[:2]
-            )
-            lower_upper_global = np.random.choice(
-                ["lower", "upper"], p=lower_upper_probs, size=batch_size
-            )
-            mask_lower_separate_replace = np.where(
-                lower_upper_global == "lower", True, False
-            )
-            mask_lower_sep_repl = np.repeat(
-                mask_lower_separate_replace[..., np.newaxis],
-                repeats=num_tokens,
-                axis=-1,
-            )
-            # Create replace mask
-            mask_combined_separate_replace = np.where(
-                mask_lower_sep_repl,
-                token_mask_separate_lower,
-                token_mask_separate_upper,
-            )
-            # Combine with token_mask_separate
-            token_mask_separate = np.where(
-                repl_mask, mask_combined_separate_replace, token_mask_separate
+            mask[all_masked] = np.where(
+                keep_lower[:, None], mask_lower[all_masked], mask_upper[all_masked]
             )
 
-        # (2) Same mask applied to all detectors
-        # Decide whether to mask upper or lower or both
-        lower_upper_both_same = np.random.choice(
-            ["lower", "upper", "both"], p=self.p_lower_upper_both, size=batch_size
-        )
-        mask_lower_same = np.logical_or(
-            lower_upper_both_same == "lower", lower_upper_both_same == "both"
-        )
-        mask_upper_same = np.logical_or(
-            lower_upper_both_same == "upper", lower_upper_both_same == "both"
-        )
-        # Combine with masks (a) whether we apply masking and (b) whether we apply it to all detectors
-        mask_lower_combined = np.logical_and.reduce(
-            (mask_lower_same, apply_cut, same_cut_all_detectors)
-        )
-        mask_upper_combined = np.logical_and.reduce(
-            (mask_upper_same, apply_cut, same_cut_all_detectors)
-        )
-        # Sample boundary from [f_min, f_min_upper] and/or [f_max_lower, f_max] in UFD
-        f_lower_same = np.where(
-            mask_lower_combined,
-            np.random.choice(
-                f_values_base_domain[f_values_base_domain <= self.f_min_upper],
-                replace=True,
-                size=batch_size,
-            ),
-            -1,
-        )
-        f_upper_same = np.where(
-            mask_upper_combined,
-            np.random.choice(
-                f_values_base_domain[f_values_base_domain >= self.f_max_lower],
-                replace=True,
-                size=batch_size,
-            ),
-            np.inf,
-        )
-        # Construct mask: f_lower >= f_min_per_token and f_upper <= f_max_per_token
-        # (Assume that all detectors have same f_min and f_max values)
-        f_mins = input_sample["position"][..., 0:num_tokens_per_detector, 0]
-        f_maxs = input_sample["position"][..., 0:num_tokens_per_detector, 1]
-        token_mask_same_lower = f_lower_same[:, np.newaxis] >= f_mins
-        token_mask_same_upper = f_upper_same[:, np.newaxis] <= f_maxs
-
-        # Combine into one mask
-        token_mask_same_one_detector = np.logical_or(
-            token_mask_same_lower, token_mask_same_upper
-        )
-        if self.prevent_zero_information:
-            # If all tokens are masked in one detector, only apply upper or lower mask
-            replace_mask = np.where(
-                np.sum(token_mask_same_one_detector, axis=-1)
-                == num_tokens_per_detector,
-                True,
-                False,
-            )
-            repl_mask = np.repeat(
-                replace_mask[..., np.newaxis], repeats=num_tokens_per_detector, axis=-1
-            )
-            # Decide whether to choose lower or upper instead of both
-            lower_upper_probs = self.p_lower_upper_both[:2] / np.sum(
-                self.p_lower_upper_both[:2]
-            )
-            lower_upper_global = np.random.choice(
-                ["lower", "upper"], p=lower_upper_probs, size=batch_size
-            )
-            mask_lower_same_replace = np.where(
-                lower_upper_global == "lower", True, False
-            )
-            mask_lower_same_repl = np.repeat(
-                mask_lower_same_replace[..., np.newaxis],
-                repeats=num_tokens_per_detector,
-                axis=-1,
-            )
-            # Create replace mask
-            mask_combined_same_replace = np.where(
-                mask_lower_same_repl, token_mask_same_lower, token_mask_same_upper
-            )
-            # Combine with token_mask_same_one_detector
-            token_mask_same_one_detector = np.where(
-                repl_mask, mask_combined_same_replace, token_mask_same_one_detector
-            )
-
-        # Duplicate for number of detectors
-        token_mask_same = np.tile(token_mask_same_one_detector, reps=num_detectors)
-
-        # Modify mask
-        if len(input_sample["token_mask"].shape) == 1:
-            token_mask_separate = token_mask_separate.squeeze()
-            token_mask_same = token_mask_same.squeeze()
-        input_sample["token_mask"] = np.logical_or.reduce(
-            (input_sample["token_mask"], token_mask_separate, token_mask_same)
-        )
-
+        token_mask = token_mask | mask
+        input_sample["token_mask"] = token_mask[0] if unbatched else token_mask
         return input_sample
 
 

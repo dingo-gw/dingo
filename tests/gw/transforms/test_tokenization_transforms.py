@@ -832,6 +832,41 @@ def test_MaskFrequencyRange_p_lower_upper_both_not_summing_to_one():
         )
 
 
+def test_MaskFrequencyRange_fallback_keeps_one_cut():
+    """With overlapping cut intervals, a sample whose two cuts would cover every
+    token keeps only one of them: no sample is fully masked, the kept tokens of a
+    detector are contiguous, and one-sided masks are far more frequent than the
+    p_lower + p_upper = 0.2 they would have without the fallback."""
+    domain = make_ufd()
+    num_tokens = 40
+    sample = StrainTokenization(
+        domain,
+        detectors=["H1", "L1"],
+        num_tokens_per_block=num_tokens,
+        print_output=False,
+    )({"waveform": np.zeros((4000, 2, 3, domain.frequency_mask_length))})
+    np.random.seed(0)
+    out = MaskFrequencyRange(
+        domain=domain,
+        p_mask=1.0,
+        f_min_upper=900.0,
+        f_max_lower=100.0,
+        p_same_all_detectors=1.0,
+        p_lower_upper_both=[0.1, 0.1, 0.8],
+        print_output=False,
+    )(sample)
+    mask = out["token_mask"]
+    assert not mask.all(axis=-1).any()
+    # The same cut on both detectors, so the shape of a row is read off detector 0.
+    assert np.array_equal(mask[:, :num_tokens], mask[:, num_tokens:])
+    mask = mask[:, :num_tokens]
+    for row in mask:
+        assert np.all(np.diff(np.flatnonzero(~row)) == 1)
+    # A lower cut always masks the first token and an upper cut the last one.
+    one_sided = mask[:, 0] != mask[:, -1]
+    assert one_sided.mean() > 0.35
+
+
 # ---------------------------------------------------------------------------
 # MaskFrequencyNotches tests
 # ---------------------------------------------------------------------------
