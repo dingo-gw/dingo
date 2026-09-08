@@ -81,10 +81,9 @@ class StrainTokenization:
             self.num_bins_per_token = token_size
             n_full = num_f // token_size
             remainder = num_f % token_size
-            num_tokens_per_block = (
-                n_full
-                if (drop_last_token and remainder)
-                else (n_full if remainder == 0 else n_full + 1)
+            # An incomplete last token is padded unless it is dropped.
+            num_tokens_per_block = n_full + (
+                1 if remainder and not drop_last_token else 0
             )
         else:
             remainder = num_f % num_tokens_per_block
@@ -268,71 +267,36 @@ class MaskRandomTokens(object):
         """
         Parameters
         ----------
-        input_sample: Dict
-            Values for keys
-            - 'waveform':
-            Sample of shape [batch_size, num_tokens, num_features]
-            - 'position', shape [batch_size, num_tokens, 3]
-               contains information [f_min, f_max, detector_index]
-            - 'token_mask', shape [batch_size, num_tokens]
+        input_sample: dict
+            Tokenized sample with 'token_mask' (see StrainTokenization), with or
+            without a leading batch dimension.
 
         Returns
-        ----------
-        sample: Dict
-            input_sample with modified value for key
-            - 'token_mask', shape [batch_size, num_tokens]
-
+        -------
+        dict
+            input_sample with the drawn tokens set to True in 'token_mask'.
         """
-        sample_without_channel = input_sample["waveform"][..., 0]
-        num_tokens = sample_without_channel.shape[-1]
+        token_mask = input_sample["token_mask"]
+        unbatched = token_mask.ndim == 1
+        if unbatched:
+            token_mask = token_mask[None]
+        num_batch, num_tokens = token_mask.shape
 
-        batch_size = (
-            [*sample_without_channel.shape[:-1]]
-            if sample_without_channel.shape[:-1] != ()
-            else [1]
-        )
-        probs = [self.p_mask, 1 - self.p_mask]
         apply_mask = np.random.choice(
-            [True, False],
-            p=probs,
-            replace=True,
-            size=batch_size,
+            [True, False], p=[self.p_mask, 1 - self.p_mask], size=[num_batch]
         )
         num_tokens_to_mask = np.random.choice(
-            np.arange(1, self.max_num_tokens + 1), size=batch_size
+            np.arange(1, self.max_num_tokens + 1), size=[num_batch]
         )
+        # Mask the num_tokens_to_mask tokens with the lowest random scores.
+        ranks = np.argsort(np.random.uniform(size=[num_batch, num_tokens]), axis=-1)
+        masked_rank = np.arange(num_tokens) < num_tokens_to_mask[:, None]
+        mask = np.zeros([num_batch, num_tokens], dtype=bool)
+        mask[np.arange(num_batch)[:, None], ranks] = masked_rank
+        mask &= apply_mask[:, None]
 
-        batch_token_size = (
-            [*sample_without_channel.shape]
-            if sample_without_channel.shape[:-1] != ()
-            else [1, num_tokens]
-        )
-        # Generate random values for all tokens
-        random_scores = np.random.uniform(size=batch_token_size)
-        # Sort the scores in ascending order and get indices
-        sorted_indices = np.argsort(random_scores, axis=-1)
-        # Create an index mask for selecting top-k per row
-        row_indices = np.arange(batch_size[0])[:, np.newaxis]
-        token_ranks = np.arange(num_tokens)
-        # For each row, get threshold index
-        thresholds = num_tokens_to_mask[:, np.newaxis] > token_ranks
-        # Build boolean mask
-        token_mask = np.zeros(batch_token_size, dtype=bool)
-        token_mask[row_indices, sorted_indices] = thresholds
-
-        # Combine masks
-        token_mask = np.logical_and(
-            np.repeat(apply_mask[..., np.newaxis], repeats=num_tokens, axis=-1),
-            token_mask,
-        )
-
-        # Modify mask
-        if len(input_sample["token_mask"].shape) == 1:
-            token_mask = token_mask.squeeze()
-        input_sample["token_mask"] = np.logical_or(
-            input_sample["token_mask"], token_mask
-        )
-
+        token_mask = token_mask | mask
+        input_sample["token_mask"] = token_mask[0] if unbatched else token_mask
         return input_sample
 
 
@@ -406,75 +370,43 @@ class MaskDetectors(object):
         """
         Parameters
         ----------
-        input_sample: Dict
-            Values for keys
-            - 'waveform':
-            Sample of shape [batch_size, num_tokens, num_features] =
-            [batch_size, num_detectors * num_tokens_per_detector, num_channels * num_bins_per_token]
-            where num_detectors = number of detectors in GW use case,
-            num_channels>=3 (real, imag, auxiliary channels, e.g. asd),
-            and num_bins = number of frequency bins.
-            - 'position', shape [batch_size, num_tokens, 3]
-               contains information [f_min, f_max, detector_index]
-            - 'token_mask', shape [batch_size, num_tokens]
+        input_sample: dict
+            Tokenized sample with 'position' and 'token_mask' (see StrainTokenization),
+            with or without a leading batch dimension.
 
         Returns
-        ----------
-        sample: Dict
-            input_sample with modified value for key
-            - 'token_mask', shape [batch_size, num_tokens]
-
+        -------
+        dict
+            input_sample with the tokens of the drawn detectors set to True in
+            'token_mask'.
         """
-        detector_indices = input_sample["position"][..., 2]
+        position = input_sample["position"]
+        token_mask = input_sample["token_mask"]
+        unbatched = token_mask.ndim == 1
+        if unbatched:
+            position, token_mask = position[None], token_mask[None]
+        detector_indices = position[..., 2]
         detectors = np.unique(detector_indices)
-        num_detectors = len(detectors)
         p_detector = self._p_detector_by_index[detectors.astype(int)]
 
-        # Decide how many detectors to mask (either none, or one less than the number of detectors present)
-        # for each element in batch_size
-        mask_n_blocks = np.random.choice(
-            [i for i in range(num_detectors)],
-            p=self.p_num_masked,
-            size=[*detector_indices.shape[:-1]],
+        num_masked = np.random.choice(
+            len(detectors), p=self.p_num_masked, size=[len(token_mask)]
         )
-        if np.sum(mask_n_blocks) != 0:
-            # Treat mask 1 vs. 2 detectors separately because which detectors to mask varies
-            # with the number of detectors to mask
-            for n in [i for i in np.unique(mask_n_blocks) if i > 0]:
-                # Construct mask for which batch indices require updates
-                mask_mod = mask_n_blocks == n
-                # Decide which detectors
-                detectors_to_mask = np.apply_along_axis(
-                    np.random.choice,
-                    axis=1,
-                    arr=np.repeat(
-                        np.expand_dims(detectors, 0), repeats=np.sum(mask_mod), axis=0
-                    ),
-                    p=p_detector,
-                    size=n,
-                    replace=False,
-                )
-                # Create mask such that tokens corresponding to masked detectors are True
-                # (1) Mask one detector
-                mask_detectors = np.where(
-                    detector_indices[mask_mod].T == detectors_to_mask[:, 0], True, False
-                ).T
-                if detectors_to_mask.shape[-1] > 1:
-                    # (2) Update mask to include masking of any further detector
-                    for i in range(1, detectors_to_mask.shape[-1]):
-                        mask_detectors_i = np.where(
-                            detector_indices[mask_mod].T == detectors_to_mask[:, i],
-                            True,
-                            False,
-                        ).T
-                        mask_detectors = np.logical_or(mask_detectors_i, mask_detectors)
-                # Keep mask=True from previous transforms with logical OR
-                mask_detectors = np.logical_or(
-                    input_sample["token_mask"][mask_mod], mask_detectors
-                )
-                # Update mask
-                input_sample["token_mask"][mask_mod] = mask_detectors
+        # The samples masking n detectors draw them without replacement, one
+        # sample at a time.
+        for n in np.unique(num_masked[num_masked > 0]):
+            rows = num_masked == n
+            drawn = np.stack(
+                [
+                    np.random.choice(detectors, p=p_detector, size=n, replace=False)
+                    for _ in range(rows.sum())
+                ]
+            )
+            token_mask[rows] |= np.any(
+                detector_indices[rows][:, :, None] == drawn[:, None, :], axis=-1
+            )
 
+        input_sample["token_mask"] = token_mask[0] if unbatched else token_mask
         return input_sample
 
 
@@ -707,71 +639,51 @@ class MaskFrequencyNotches(object):
         """
         Parameters
         ----------
-        input_sample: Dict
-            Values for keys
-            - 'waveform':
-                Sample of shape [batch_size, num_tokens, num_features]
-            - 'position', shape [batch_size, num_tokens, 3]
-               contains information [f_min, f_max, detector_index]
-            - 'token_mask', shape [batch_size, num_tokens]
+        input_sample: dict
+            Tokenized sample with 'position' and 'token_mask' (see StrainTokenization),
+            with or without a leading batch dimension.
 
         Returns
-        ----------
-        sample: Dict
-            input_sample with modified value for key
-            - 'token_mask', shape [batch_size, num_tokens]
-
+        -------
+        dict
+            input_sample with the notched tokens set to True in 'token_mask'.
         """
-        num_tokens = input_sample["waveform"].shape[-2]
-        detector_indices = input_sample["position"][..., 2]
-        num_detectors = len(np.unique(detector_indices))
+        position = input_sample["position"]
+        token_mask = input_sample["token_mask"]
+        unbatched = token_mask.ndim == 1
+        if unbatched:
+            position, token_mask = position[None], token_mask[None]
+        num_batch, num_tokens = token_mask.shape
+        num_detectors = len(np.unique(position[..., 2]))
         num_tokens_per_detector = num_tokens // num_detectors
+        per_detector = [num_batch, num_detectors]
 
-        # Mask frequency notch per detector:
-        # - Decide whether to apply a mask for each detector
-        # - Sample f_lower and f_upper from the base domain frequencies
-        # - Mask all tokens whose frequency range overlaps [f_lower, f_upper]
-
-        batch_block_size = (
-            [*detector_indices.shape[:-1], num_detectors]
-            if detector_indices.shape[:-1] != ()
-            else [1, num_detectors]
-        )
-        # Decide whether to mask a frequency notch for each detector
         apply_notch = np.random.choice(
             [True, False],
             p=[self.p_per_detector, 1 - self.p_per_detector],
-            size=batch_block_size,
+            size=per_detector,
         )
-
         # f_lower from the candidate grid points; f_upper a number of grid steps
         # above it, rather than from per-row candidate arrays, whose counts differ
         # by one for non-dyadic delta_f (float rounding) and cannot be stacked.
-        f_lower = np.random.choice(self._lower_candidates, size=batch_block_size)
+        f_lower = np.random.choice(self._lower_candidates, size=per_detector)
         f_upper = (
             f_lower
-            + np.random.randint(0, self._num_steps + 1, size=batch_block_size)
+            + np.random.randint(0, self._num_steps + 1, size=per_detector)
             * self._delta_f
         )
 
         # Mask the tokens overlapping [f_lower, f_upper] on the detectors drawn for
-        # a notch. Per-detector values are repeated over that detector's tokens.
-        f_mins = input_sample["position"][..., 0]
-        f_maxs = input_sample["position"][..., 1]
+        # a notch; per-detector values are repeated over that detector's tokens.
         rep = dict(repeats=num_tokens_per_detector, axis=-1)
-        token_mask = (
+        mask = (
             np.repeat(apply_notch, **rep)
-            & (np.repeat(f_lower, **rep) <= f_maxs)
-            & (np.repeat(f_upper, **rep) >= f_mins)
+            & (np.repeat(f_lower, **rep) <= position[..., 1])
+            & (np.repeat(f_upper, **rep) >= position[..., 0])
         )
 
-        # Modify mask
-        if len(input_sample["token_mask"].shape) == 1:
-            token_mask = token_mask.squeeze()
-        input_sample["token_mask"] = np.logical_or(
-            input_sample["token_mask"], token_mask
-        )
-
+        token_mask = token_mask | mask
+        input_sample["token_mask"] = token_mask[0] if unbatched else token_mask
         return input_sample
 
 
