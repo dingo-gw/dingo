@@ -77,6 +77,7 @@ The key difference from the NPE model is the `tokenization` block inside
 ```yaml
 tokenization:
   token_size: 16                  # number of frequency bins per token
+  normalize_position: true        # token positions rescaled from Hz to [0, 1]
   mask_detectors:                 # enables subset-detector inference
     p_num_masked: [0.6, 0.3, 0.1]  # probabilities of masking 0, 1, 2 detectors
     p_detector:                   # probabilities of which detector to mask
@@ -98,7 +99,10 @@ tokenization:
 frequency cutoff per detector.  `mask_frequency_notches` trains it to handle
 masked interior intervals (used for PSD notching at inference time).
 `mask_detectors` trains it to cope with missing detectors.  All three
-augmentations are optional and independent of each other.
+augmentations are optional and independent of each other.  `normalize_position`
+rescales the token positions from Hz to [0, 1] before they enter the network; it
+defaults to `true`, and networks saved before the option existed are read as
+trained on positions in Hz.
 
 ```{important}
 The ranges set by `f_min_upper` and `f_max_lower` in `mask_frequency_range` define

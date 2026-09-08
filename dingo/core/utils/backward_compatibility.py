@@ -203,6 +203,9 @@ def update_data_config(settings: dict):
             "Networks trained with normalize_frequency_for_positional_encoding=True "
             "(dingo-t1 branch) are not supported."
         )
+    # Training records normalize_position since it defaulted to True; networks
+    # saved before that were trained on positions in Hz.
+    tok.setdefault("normalize_position", False)
     if "num_tokens" in tok:
         tok["num_tokens_per_block"] = tok.pop("num_tokens")
     if "drop_detectors" in tok:

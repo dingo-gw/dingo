@@ -477,6 +477,8 @@ TOK_SETTINGS = {
     "token_size": 16,
     "num_tokens_per_block": None,
     "drop_last_token": False,
+    # Recorded by training, or backfilled by the loader; stubs bypass both.
+    "normalize_position": False,
 }
 
 

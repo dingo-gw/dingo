@@ -29,6 +29,7 @@ data:
     - psi
   tokenization:
     token_size: 16
+    normalize_position: true
     mask_detectors:
       p_num_masked: [0.6, 0.3, 0.1]
       p_detector:

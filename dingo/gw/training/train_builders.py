@@ -213,7 +213,10 @@ def set_train_transforms(wfd, data_settings, asd_dataset_path, omit_transforms=N
             transforms.append(
                 MaskFrequencyNotches(domain=domain, **tok["mask_frequency_notches"])
             )
-        if tok.get("normalize_position", False):
+        # Recorded in the settings so the saved network states what it was trained
+        # with; the loader backfills False for networks saved before this key.
+        tok["normalize_position"] = tok.get("normalize_position", True)
+        if tok["normalize_position"]:
             # After all mask transforms, which compare positions in Hz.
             transforms.append(NormalizePosition(domain.f_min, domain.f_max))
 

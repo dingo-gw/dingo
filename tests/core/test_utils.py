@@ -208,6 +208,7 @@ DINGO_T1_TOKENIZATION_CONVERTED = {
         "f_max": 1800.0,
         "max_width": 10.0,
     },
+    "normalize_position": False,
 }
 
 
@@ -278,7 +279,22 @@ def test_update_data_config_fills_dingo_t1_constant_defaults():
         },
         "mask_frequency_notches": {"p_per_detector": 0.2, "max_width": 5.0},
         "mask_random_tokens": {"p_mask": 0.4, "max_num_tokens": 40},
+        "normalize_position": False,
     }
+
+
+def test_update_data_config_backfills_normalize_position():
+    """Networks saved before training recorded normalize_position were trained on
+    positions in Hz; a recorded value is left alone."""
+    for stored, expected in ((None, False), (True, True), (False, False)):
+        tok = {"token_size": 16}
+        if stored is not None:
+            tok["normalize_position"] = stored
+        settings = {
+            "train_settings": {"data": {"detectors": ["H1"], "tokenization": tok}}
+        }
+        update_data_config(settings)
+        assert tok["normalize_position"] is expected
 
 
 def test_update_data_config_rejects_normalized_positions():

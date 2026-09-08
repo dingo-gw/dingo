@@ -408,7 +408,7 @@ class GWSampler(GWSamplerMixin, Sampler):
                         training_detectors=training_detectors,
                     )
                 )
-            if tok.get("normalize_position", False):
+            if tok["normalize_position"]:
                 # After all mask transforms, which compare positions in Hz.
                 transform_pre.append(
                     NormalizePosition(self.domain.f_min, self.domain.f_max)

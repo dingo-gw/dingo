@@ -230,6 +230,30 @@ def test_normalize_position_runs_after_masking(tmp_path):
     assert token_mask.any() and not token_mask.all()
 
 
+@pytest.mark.parametrize("setting", [None, False])
+def test_normalize_position_default_is_recorded(tmp_path, setting):
+    """An absent normalize_position resolves to True and is written back into the
+    settings, so the saved network records it; an explicit False is kept and leaves
+    the positions in Hz."""
+    wfd = _toy_waveform_dataset()
+    data_settings = copy.deepcopy(DATA_SETTINGS)
+    data_settings["tokenization"].pop("normalize_position", None)
+    if setting is not None:
+        data_settings["tokenization"]["normalize_position"] = setting
+    set_train_transforms(
+        wfd,
+        {"waveform_dataset_path": None, **data_settings},
+        _toy_asd_file(tmp_path / "asds.hdf5"),
+    )
+    _, _, position, _ = wfd[0]
+    if setting is None:
+        assert data_settings["tokenization"]["normalize_position"] is True
+        assert position[:, 0].min() == 0.0
+    else:
+        assert data_settings["tokenization"]["normalize_position"] is False
+        assert position[:, 0].min() == DOMAIN["f_min"]
+
+
 def test_tokenization_with_gnpe_is_refused(tmp_path):
     data_settings = {
         "waveform_dataset_path": None,
