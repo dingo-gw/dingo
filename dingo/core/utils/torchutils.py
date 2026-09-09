@@ -166,6 +166,8 @@ def unwrap_network(network: nn.Module) -> nn.Module:
 
     Used to save checkpoints whose state-dict keys carry no wrapper prefixes, so
     they load on any number of GPUs with or without compilation."""
+    # we need a while loop here because the network can be wrapped twice
+    # once by the DDP and once by torch.compile
     while True:
         if isinstance(network, DDP):
             network = network.module

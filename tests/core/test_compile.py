@@ -1,10 +1,4 @@
-"""
-Tests for the optional ``torch.compile`` support (``local.torch_compile``).
-
-The compile path needs a glasflow whose rational-quadratic spline is written with
-static shapes; tests that exercise it are skipped when the installed glasflow does
-not provide it.
-"""
+"""Tests for the optional ``torch.compile`` support (``local.torch_compile``)."""
 
 import os
 from datetime import timedelta
@@ -15,19 +9,10 @@ import torch.distributed as dist
 import torch.nn as nn
 from torch.nn.parallel import DistributedDataParallel as DDP
 
-from dingo.core.nn.compile_utils import (
-    compile_network,
-    eager_mode,
-    spline_is_compile_friendly,
-)
+from dingo.core.nn.compile_utils import compile_network, eager_mode
 from dingo.core.nn.nsf import create_nsf_model
 from dingo.core.posterior_models.normalizing_flow import NormalizingFlowPosteriorModel
 from dingo.core.utils.torchutils import get_ddp_module, unwrap_network
-
-needs_static_spline = pytest.mark.skipif(
-    not spline_is_compile_friendly(),
-    reason="installed glasflow lacks the static-shape RQ spline",
-)
 
 _TINY_NSF_KWARGS = {
     "input_dim": 2,
@@ -123,20 +108,11 @@ class TestEagerMode:
 
 
 class TestCompileNetwork:
-    def test_raises_without_static_spline(self, monkeypatch):
-        monkeypatch.setattr(
-            "dingo.core.nn.compile_utils.spline_is_compile_friendly", lambda: False
-        )
-        with pytest.raises(RuntimeError, match="glasflow"):
-            compile_network(nn.Linear(2, 2))
-
-    @needs_static_spline
     def test_returns_compiled_module(self):
         net = nn.Linear(2, 2)
         compiled = compile_network(net)
         assert unwrap_network(compiled) is net
 
-    @needs_static_spline
     def test_per_rank_cache_dirs(self, monkeypatch, tmp_path):
         monkeypatch.delenv("TORCHINDUCTOR_CACHE_DIR", raising=False)
         monkeypatch.delenv("TRITON_CACHE_DIR", raising=False)
@@ -146,7 +122,6 @@ class TestCompileNetwork:
         assert "rank3" in inductor
         assert os.environ["TRITON_CACHE_DIR"].startswith(inductor)
 
-    @needs_static_spline
     def test_flow_compiles_without_graph_breaks(self):
         """The full NSF (coupling transforms + RQ splines) must trace as one graph."""
         torch.manual_seed(0)

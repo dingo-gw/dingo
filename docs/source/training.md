@@ -72,6 +72,7 @@ training:
     optimizer:
       type: adam
       lr: 0.0001
+#     fused: false         # True selects the fused CUDA kernel; see the multi-GPU guide.
     scheduler:
       type: cosine
       T_max: 300

@@ -167,14 +167,6 @@ local:
 
 Notes:
 
-- Compilation requires a `glasflow` whose rational-quadratic spline is written with static
-  shapes (the released version uses data-dependent indexing, which breaks the compiled graph
-  and makes `torch.compile` a net slowdown). Until the rewrite is merged upstream, install
-  ```
-  pip install git+https://github.com/nihargupte-ph/glasflow@compile-friendly-rqs
-  ```
-  Dingo raises an error if `torch_compile: true` is set without it. The rewrite is numerically
-  identical, so checkpoints are interchangeable.
 - Compilation is slow: 4–12 minutes for a production-size network, paid on the first training
   step of a run and again at every stage boundary that changes which parameters are trainable.
   The compiled steps that follow are the fast ones, so `torch_compile` pays off for trainings
@@ -205,20 +197,30 @@ float32 is kept, and accumulation, weights, gradients and optimizer state stay f
 the `npe_model` network (`hidden_dim` 1024) this roughly doubles the speed of the network step
 and combines with `torch_compile`: with both (and the fused optimizer below) the network step
 drops from 0.85 s to 0.28 s per 4096 samples on an A100, a 3× gain in GPU time. All non-matmul
-operations (splines, normalization, the optimizer) are unaffected. In a 3-epoch production
-training the train and test losses matched full-precision training to within run-to-run noise;
-validate longer trainings before adopting it as a default, since the reduced input precision is
-a numerical change.
+operations (splines, normalization, the optimizer) are unaffected. 
 
-Once the network step is this fast, the data pipeline usually becomes the limit: each worker
-decompresses and whitens its batch on the CPU at a few milliseconds per sample, so with 24
-workers per GPU the realised step was 0.40 s on one GPU (2.1× over fp32) and 0.62 s on four GPUs
-(1.4×), where a slow batch on any rank stalls all ranks at the gradient all-reduce. Watch
-`Time Dataloader` and give each GPU as many workers as the node allows.
+### Fused optimizer (`fused`)
 
-For the optimizer, `fused: true` under the `optimizer` settings selects the fused CUDA Adam
-kernel, which is about 10% faster per step for large networks.
+Unlike the settings above, this one is not in the `local` section: it belongs to the
+`optimizer` block of an individual training stage, and is passed straight through to the
+PyTorch optimizer. Setting `fused: true` selects the fused CUDA kernel, which performs the
+whole optimizer update in one kernel instead of one per step of the update math, and is about
+10% faster per step for large networks:
 
+```yaml
+training:
+  stage_0:
+    optimizer:
+      type: adam
+      lr: 0.0001
+      fused: true   # default: false
+```
+
+Each stage builds its own optimizer, so this has to be repeated in every stage that should use
+it. It is supported by `adam`, `adamw` and `sgd` (not `lbfgs` or `adagrad`) and requires all
+network parameters to be on the GPU.
+
+### Freezing layers
 
 It is currently not possible to set `freeze_rb_layer: True` in DDP. The reason is that when starting the separate 
 DDP processes, it is fixed which network parameters have to be synced across GPUs and GPU memory is allocated 
