@@ -102,6 +102,7 @@ local:
                 # dingo_train_condor, request_gpus is set automatically.
 # ddp_port: 12355  # Rendezvous port for DDP; change when running several jobs on one node.
 # torch_compile: False  # Fuse the network kernels with torch.compile; see the multi-GPU guide.
+# float32_matmul_precision: highest  # 'high' enables TensorFloat-32 matmuls (A100+); see the multi-GPU guide.
 #  wandb:
 #    project: dingo
 #    group: my_project

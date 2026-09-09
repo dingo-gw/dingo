@@ -190,7 +190,35 @@ Notes:
 - Once the network step is faster, the dataloader can become the bottleneck: watch
   `Time Dataloader` in the log and raise `num_workers` if needed.
 
-### Freezing layers
+### TensorFloat-32 matrix multiplications (`float32_matmul_precision`)
+
+PyTorch runs float32 matrix multiplications at full precision by default, which leaves the
+tensor cores of Ampere and newer GPUs unused. Setting
+
+```yaml
+local:
+  float32_matmul_precision: high   # default: highest
+```
+
+lets them use TensorFloat-32: matmul inputs are rounded to 10 mantissa bits (the range of
+float32 is kept, and accumulation, weights, gradients and optimizer state stay float32). For
+the `npe_model` network (`hidden_dim` 1024) this roughly doubles the speed of the network step
+and combines with `torch_compile`: with both (and the fused optimizer below) the network step
+drops from 0.85 s to 0.28 s per 4096 samples on an A100, a 3× gain in GPU time. All non-matmul
+operations (splines, normalization, the optimizer) are unaffected. In a 3-epoch production
+training the train and test losses matched full-precision training to within run-to-run noise;
+validate longer trainings before adopting it as a default, since the reduced input precision is
+a numerical change.
+
+Once the network step is this fast, the data pipeline usually becomes the limit: each worker
+decompresses and whitens its batch on the CPU at a few milliseconds per sample, so with 24
+workers per GPU the realised step was 0.40 s on one GPU (2.1× over fp32) and 0.62 s on four GPUs
+(1.4×), where a slow batch on any rank stalls all ranks at the gradient all-reduce. Watch
+`Time Dataloader` and give each GPU as many workers as the node allows.
+
+For the optimizer, `fused: true` under the `optimizer` settings selects the fused CUDA Adam
+kernel, which is about 10% faster per step for large networks.
+
 
 It is currently not possible to set `freeze_rb_layer: True` in DDP. The reason is that when starting the separate 
 DDP processes, it is fixed which network parameters have to be synced across GPUs and GPU memory is allocated 

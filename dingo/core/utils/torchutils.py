@@ -21,6 +21,26 @@ def fix_random_seeds(_):
         pass
 
 
+def set_float32_matmul_precision(local_settings: dict) -> None:
+    """Apply ``local.float32_matmul_precision`` (``highest`` | ``high`` | ``medium``).
+
+    ``high`` lets float32 matrix multiplications use TensorFloat-32 on Ampere and
+    newer GPUs (10-bit mantissa inputs, fp32 accumulation), roughly doubling the
+    speed of the network's linear layers; ``medium`` additionally allows bfloat16
+    inputs. PyTorch's default, ``highest``, keeps full fp32 and is left unchanged
+    when the setting is absent.
+    """
+    precision = local_settings.get("float32_matmul_precision")
+    if precision is None:
+        return
+    if precision not in ("highest", "high", "medium"):
+        raise ValueError(
+            f"float32_matmul_precision must be 'highest', 'high' or 'medium', "
+            f"got {precision!r}."
+        )
+    torch.set_float32_matmul_precision(precision)
+
+
 def get_cuda_info() -> dict[str, Any]:
     """Get information about the CUDA devices available in the system."""
     if not torch.cuda.is_available():

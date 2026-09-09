@@ -32,6 +32,7 @@ from dingo.core.utils.torchutils import (
     contains_BatchNorm,
     document_gpus,
     replace_BatchNorm_with_SyncBatchNorm,
+    set_float32_matmul_precision,
     set_seed_based_on_rank,
     setup_ddp,
 )
@@ -538,6 +539,7 @@ def run_training(
     -------
     (complete, resume, epoch) : (bool, bool, int)
     """
+    set_float32_matmul_precision(local_settings)
     if not resume:
         pm, wfd = prepare_training_new(train_settings, train_dir, local_settings)
     else:
@@ -598,6 +600,7 @@ def run_training_ddp(
         # avoid collisions between their process groups.
         setup_ddp(rank, world_size, port=local_settings.get("ddp_port", 12355))
         set_seed_based_on_rank(rank)
+        set_float32_matmul_precision(local_settings)
 
         if rank == 0:
             document_gpus(train_dir)
