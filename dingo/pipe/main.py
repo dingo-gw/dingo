@@ -203,6 +203,7 @@ class MainInput(BilbyMainInput):
 
         self.model = args.model
         self.model_init = args.model_init
+        self.model_args = args.model_args
         self.num_gnpe_iterations = args.num_gnpe_iterations
         self.importance_sampling_updates = importance_sampling_updates
         self.prior_dict_updates = args.prior_dict_updates
@@ -280,6 +281,7 @@ class MainInput(BilbyMainInput):
         self.prior_dict = args.prior_dict
         self.default_prior = "BBHPriorDict"
         self.minimum_frequency = args.minimum_frequency
+        self.sampling_frequency = args.sampling_frequency
         self.enforce_signal_duration = args.enforce_signal_duration
 
         self.run_local = args.local
@@ -619,6 +621,7 @@ def main():
     args, unknown_args = parse_args(get_command_line_arguments(), parser)
 
     importance_sampling_updates, model_args = fill_in_arguments_from_model(args)
+    args.model_args = model_args
     inputs = MainInput(args, unknown_args, importance_sampling_updates)
     write_complete_config_file(parser, args, inputs)
 

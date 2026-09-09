@@ -18,6 +18,29 @@ from .nodes.sampling_node import SamplingNode
 logger.name = "dingo_pipe"
 
 
+def _importance_sampling_updates_require_new_domain(inputs):
+    # Get original settings
+    original_f_max = inputs.model_args["maximum_frequency"]
+    original_f_s = inputs.sampling_frequency
+
+    f_max = inputs.importance_sampling_updates.get("maximum_frequency", None)
+    if f_max is not None:
+        if isinstance(f_max, dict):
+            f_max = max(f_max.values())
+        # One could also check whether f_min/f_max is outside of the masking range.
+        # However, at some level it is the user's responsibility?
+        if f_max > original_f_max:
+            return True
+
+    f_s = inputs.importance_sampling_updates.get("sampling_frequency", None)
+    if f_s is not None:
+        if f_s != original_f_s:
+            return True
+
+    # f_min should be handled with masking
+    return False
+
+
 def get_trigger_time_list(inputs):
     """Returns a list of GPS trigger times for each data segment"""
     if (inputs.gaussian_noise or inputs.zero_noise) and inputs.trigger_time is None:
@@ -84,13 +107,20 @@ def generate_dag(inputs):
 
     if inputs.importance_sample:
         #
-        # 3. Generate new data for importance sampling **if different settings requested**.
+        # 3. Generate new data for importance sampling **if different domain is required**.
         #
         # If injecting into simulated noise, be sure to use consistent noise
         # realization. Currently simulated noise + importance_sampling_updates is
         # prohibited in MainInput.
 
-        if len(inputs.importance_sampling_updates) > 0:
+        # Check if the changes can be done via masking
+        requires_new_domain = False
+        if inputs.importance_sampling_updates:
+            requires_new_domain = _importance_sampling_updates_require_new_domain(
+                inputs
+            )
+
+        if len(inputs.importance_sampling_updates) > 0 and requires_new_domain:
             # Iterate over all generation nodes and store them in a list
             importance_sampling_generation_node_list = []
             for idx, trigger_time in enumerate(trigger_times):
