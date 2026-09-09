@@ -8,13 +8,16 @@ import copy
 from typing import Optional, Union
 import numpy as np
 import torch
-import yaml
 from bilby.core.prior import PriorDict, Uniform
 from torchvision.transforms import Compose
 from dingo.core.inference.steps import _n_rows
 from dingo.core.posterior_models import BasePosteriorModel
 from dingo.core.transforms import GetItem
-from dingo.gw.domains import build_domain, MultibandedFrequencyDomain
+from dingo.gw.domains import (
+    MultibandedFrequencyDomain,
+    UniformFrequencyDomain,
+    build_domain,
+)
 from dingo.gw.frequency_updates import (
     _validate_maximum_frequency,
     _validate_minimum_frequency,
@@ -64,10 +67,12 @@ class GWSamplerContext:
     the likelihood reference time and the right-ascension frame correction, and any
     per-event analysis settings such as a frequency-range update.
 
-    A context is treated as immutable: the data representation is part of its
-    identity. To evaluate the likelihood under a different representation (an
-    updated duration, the undecimated base domain), derive a new context with
-    `derive` rather than passing arguments to `likelihood()`.
+    A context is immutable. It is built once from an event dataset and the model
+    metadata. The likelihood works on whatever frequency grid the event data are
+    on: for importance sampling, the pipe generates data for the requested
+    frequency range and duration and builds a new context from them. Whether a
+    multibanded model's likelihood uses the base domain is an argument of
+    `likelihood()`, like the marginalizations.
 
     The representation vocabulary here (frequency domains, multibanded decimation,
     the base-domain likelihood view, frequency-range masking) is specific to this
@@ -83,15 +88,14 @@ class GWSamplerContext:
         event_metadata: Optional[dict] = None,
         model_metadata: Optional[dict] = None,
         device: Union[torch.device, str] = "cpu",
-        use_base_domain: bool = False,
-        wfg_delta_f: Optional[float] = None,
         data_prep_conditioning: Optional[list[str]] = None,
     ):
         """
         Parameters
         ----------
         domain : Domain
-            The data frequency domain.
+            The frequency domain the network was trained on, used to prepare the
+            network input. The likelihood uses the grid of the event data instead.
         data_prep : Compose
             The one-time data-preprocessing transform chain (whiten / decimate /
             repackage).
@@ -99,8 +103,8 @@ class GWSamplerContext:
             The raw event data `d` (strain + ASDs per detector), i.e. `EventDataset.data`.
             Consumed lazily by `prepared_data()` and reused for the likelihood.
         event_metadata : dict, optional
-            Per-event metadata; drives frequency cropping, the RA correction, and the
-            likelihood reference time.
+            Per-event metadata: the grid the event data are on, the per-detector
+            frequency range, the RA correction, and the likelihood reference time.
         model_metadata : dict, optional
             The metadata of the model defining this analysis (dataset + train
             settings); the source for the prior, the likelihood, the detector
@@ -108,13 +112,6 @@ class GWSamplerContext:
         device : torch.device or str, default "cpu"
             The torch device the chain runs on (the model device); steps that create
             fresh tensors (e.g. `DeltaFactor`) create them here.
-        use_base_domain : bool, default False
-            For a multibanded domain, evaluate the likelihood on the base
-            (undecimated) frequency domain rather than the decimated one. Set via
-            `derive`.
-        wfg_delta_f : float, optional
-            Override for the waveform-generator domain `delta_f` (an updated
-            `T = 1/delta_f` cannot be handled by domain projection). Set via `derive`.
         data_prep_conditioning : list[str], optional
             Names of the chain-conditioning parameters the data preparation is a
             function of (e.g. `["chirp_mass_proxy"]` for a heterodyning model).
@@ -128,8 +125,6 @@ class GWSamplerContext:
         self.event_data = event_data
         self.event_metadata = event_metadata
         self.device = device
-        self.use_base_domain = use_base_domain
-        self.wfg_delta_f = wfg_delta_f
         self.data_prep_conditioning = list(data_prep_conditioning or [])
         self._prepared_key: Optional[dict] = None
         self._prepared: Optional[torch.Tensor] = None
@@ -279,88 +274,6 @@ class GWSamplerContext:
             device=model.device,
         )
 
-    def derive(
-        self,
-        updates: Optional[dict] = None,
-        use_base_domain: Optional[bool] = None,
-    ) -> "GWSamplerContext":
-        """Derive a context for the same event under a different data representation.
-
-        The derived context shares the event payload (`event_data`, `event_metadata`),
-        the analysis metadata, and the reference time by construction -- parameter
-        meaning is preserved, so importance weights between the two representations
-        remain well-defined. Only the representation changes: an updated duration `T`
-        rebuilds the data domain at `delta_f = 1/T` (and enters waveform generation as
-        `wfg_delta_f`), and `use_base_domain` switches a multibanded likelihood to the
-        undecimated domain. A frequency-range update (`minimum_frequency`,
-        `maximum_frequency`) rebuilds the data domain with the new bounds (not
-        implemented for a multibanded domain); the likelihood additionally masks the
-        ASDs to the event's range through `event_metadata`. A derived context whose
-        domain changed carries no network-input preparation. Caches start fresh.
-
-        Parameters
-        ----------
-        updates : dict, optional
-            Importance-sampling settings updates, as recorded in
-            `Result.importance_sampling_metadata["updates"]`. May contain `T`,
-            `minimum_frequency`, `maximum_frequency` (and non-domain keys, which are
-            ignored here), but no other quantities that define a new domain.
-        use_base_domain : bool, optional
-            For a multibanded domain, evaluate the likelihood on the base
-            (undecimated) frequency domain. `None` keeps this context's setting.
-
-        Returns
-        -------
-        GWSamplerContext
-        """
-        domain = self.domain
-        wfg_delta_f = self.wfg_delta_f
-        if updates and any(
-            k in updates for k in ("minimum_frequency", "maximum_frequency", "T")
-        ):
-            # TODO: Make compatible with MultibandedFrequencyDomain.
-            if isinstance(domain, MultibandedFrequencyDomain):
-                raise NotImplementedError()
-
-            updates = updates.copy()
-            # A duration update is generation-level on both sides: the pipe
-            # regenerates the event data at the new T, and the waveform must be
-            # generated natively at delta_f = 1/T (a resolution change is not a
-            # projection of existing samples). wfg_delta_f persists on the derived
-            # context, reaching every downstream likelihood build and further
-            # derivations.
-            if "T" in updates:
-                updates["delta_f"] = 1.0 / updates["T"]
-                wfg_delta_f = updates["delta_f"]
-                print(
-                    f"Updating waveform generation delta_f from "
-                    f'{self.model_metadata["dataset_settings"]["domain"]["delta_f"]} '
-                    f"to {wfg_delta_f}."
-                )
-
-            domain_dict = domain.domain_dict  # Existing settings
-            domain_dict.update(
-                (k, updates[k]) for k in set(domain_dict).intersection(updates)
-            )
-            print("Rebuilding domain as follows:")
-            print(yaml.dump(domain_dict, default_flow_style=False, sort_keys=False))
-            domain = build_domain(domain_dict)
-
-        return type(self)(
-            domain=domain,
-            # The preparation is bound to the domain it was built for.
-            data_prep=self._data_prep if domain is self.domain else None,
-            event_data=self.event_data,
-            event_metadata=self.event_metadata,
-            model_metadata=self.model_metadata,
-            device=self.device,
-            use_base_domain=(
-                self.use_base_domain if use_base_domain is None else use_base_domain
-            ),
-            wfg_delta_f=wfg_delta_f,
-            data_prep_conditioning=self.data_prep_conditioning,
-        )
-
     def prepared_data(self, conditioning=None) -> torch.Tensor:
         """The event data in the representation the networks condition on.
 
@@ -389,10 +302,13 @@ class GWSamplerContext:
         torch.Tensor
         """
         if self._data_prep is None:
+            raise ValueError("This context carries no network-input preparation.")
+        if self._event_grid() != getattr(self.domain, "base_domain", self.domain):
             raise ValueError(
-                "This context carries no network-input preparation (it was derived "
-                "for a different data domain, which the network cannot consume); "
-                "use the context it was derived from for the network-input view."
+                "These event data are not on the network's grid; they were "
+                "generated for a different frequency range or duration, for "
+                "importance sampling. Preparing network input needs the event data "
+                "from the sampling stage."
             )
         if not self.data_prep_conditioning:
             if self._prepared is None:
@@ -496,18 +412,21 @@ class GWSamplerContext:
         time_marginalization_kwargs: Optional[dict] = None,
         phase_marginalization_kwargs: Optional[dict] = None,
         calibration_marginalization_kwargs: Optional[dict] = None,
+        use_base_domain: bool = False,
     ) -> StationaryGaussianGWLikelihood:
         """
         Build the exact GW likelihood on this event's data, in physical parameter
         space.
 
-        The likelihood does not reuse the network-input view: it takes the raw
-        event data and builds its own representation, decimated to the multibanded
-        domain unless `use_base_domain`, with the ASDs masked to the event's
-        frequency range. Its reference time is the event time, or the training
-        reference time when no event time is set. The representation is context
-        state (change it by deriving a new context); the marginalizations are
-        chosen per call.
+        The likelihood does not depend on the network. It works on the frequency
+        grid of the event data, which the pipe generates to cover the requested
+        frequency range, whether inside the network's band or beyond it. Each
+        detector's frequency range comes from the event metadata: the ASDs are
+        masked outside it, and the calibration spline nodes are placed across it.
+        For a multibanded model the data are decimated onto the bands unless
+        `use_base_domain` is set; decimation needs the data on the network's own
+        grid. The reference time is the event time, or the training reference
+        time when no event time is set.
 
         The most recently built likelihood is cached: a repeated call with the
         same arguments returns the shared instance, and a call with different
@@ -524,6 +443,8 @@ class GWSamplerContext:
             Analytically marginalize over `phase`. Requires a uniform [0, 2 pi) phase prior.
         calibration_marginalization_kwargs : dict, optional
             Marginalize over detector calibration uncertainty.
+        use_base_domain : bool, default False
+            For a multibanded model, evaluate on the undecimated base domain.
 
         Returns
         -------
@@ -538,6 +459,7 @@ class GWSamplerContext:
                 "time_marginalization_kwargs": time_marginalization_kwargs,
                 "phase_marginalization_kwargs": phase_marginalization_kwargs,
                 "calibration_marginalization_kwargs": calibration_marginalization_kwargs,
+                "use_base_domain": use_base_domain,
             }
         )
         if settings == self._likelihood_settings:
@@ -581,17 +503,34 @@ class GWSamplerContext:
                 )
 
         dataset_settings = self.model_metadata["dataset_settings"]
-        # WaveformGenerator domain -- deliberately the dataset domain WITHOUT any
-        # domain_update, so waveform generation mirrors how the training set was
-        # generated (possibly wider than the network's data domain); the likelihood
-        # projects the generated waveform onto the data domain. An updated
-        # T = 1/delta_f enters here: unlike range masking or decimation, a
-        # resolution change needs samples that do not exist on the old grid, so it
-        # cannot be handled by domain projection and must apply at generation.
-        wfg_domain_dict = dataset_settings["domain"]
-        if self.wfg_delta_f is not None:
-            wfg_domain_dict = {**wfg_domain_dict, "delta_f": self.wfg_delta_f}
-        wfg_domain = build_domain(wfg_domain_dict)
+        # The pipe records the grid it generated the event data on: the network's
+        # grid, or a wider one if importance sampling asked for a wider frequency
+        # range or a different duration.
+        # Waveforms are generated as for the training set: on the dataset's domain,
+        # before any domain_update.
+        wfg_domain = build_domain(dataset_settings["domain"])
+        network = getattr(self.domain, "base_domain", self.domain)
+        grid = self._event_grid()
+        if grid == network:
+            data_domain = self.domain
+        else:
+            if (
+                isinstance(self.domain, MultibandedFrequencyDomain)
+                and not use_base_domain
+            ):
+                raise ValueError(
+                    "Data generated for another frequency range or duration cannot "
+                    "be decimated onto the network's bands; evaluate on the base "
+                    "domain (use_base_domain=True)."
+                )
+            data_domain = grid
+            # The waveform generator has to cover the data grid at its resolution.
+            wfg_domain = getattr(wfg_domain, "base_domain", wfg_domain)
+            wfg_domain = UniformFrequencyDomain(
+                min(wfg_domain.f_min, grid.f_min),
+                max(wfg_domain.f_max, grid.f_max),
+                grid.delta_f,
+            )
 
         # Likelihood reference time: the event time (the training-frame RA correction has
         # already been applied to the samples), falling back to the training reference.
@@ -601,25 +540,38 @@ class GWSamplerContext:
             t_ref = self.t_ref
 
         frequency_update = dict(
-            minimum_frequency=self._frequency("minimum_frequency", self.domain.f_min),
-            maximum_frequency=self._frequency("maximum_frequency", self.domain.f_max),
+            minimum_frequency=self._frequency("minimum_frequency", data_domain.f_min),
+            maximum_frequency=self._frequency("maximum_frequency", data_domain.f_max),
         )
 
         likelihood = StationaryGaussianGWLikelihood(
             wfg_kwargs=dataset_settings["waveform_generator"],
             wfg_domain=wfg_domain,
-            data_domain=self.domain,
+            data_domain=data_domain,
             event_data=self.event_data,
             t_ref=t_ref,
             time_marginalization_kwargs=time_marginalization_kwargs,
             phase_marginalization_kwargs=phase_marginalization_kwargs,
             calibration_marginalization_kwargs=calibration_marginalization_kwargs,
-            use_base_domain=self.use_base_domain,
+            use_base_domain=use_base_domain,
             frequency_update=frequency_update,
         )
         self._likelihood = likelihood
         self._likelihood_settings = settings
         return likelihood
+
+    def _event_grid(self) -> UniformFrequencyDomain:
+        """The grid the event data are on, as recorded in the event metadata by the
+        pipe. Older event files carry no record: they are on the network's grid, or,
+        after a duration update, on the network's band at the new resolution."""
+        metadata = self.event_metadata or {}
+        if metadata.get("domain") is not None:
+            return build_domain(metadata["domain"])
+        network = getattr(self.domain, "base_domain", self.domain)
+        T = metadata.get("T")
+        if T is not None and abs(1.0 / T - network.delta_f) > 1e-12:
+            return UniformFrequencyDomain(network.f_min, network.f_max, 1.0 / T)
+        return network
 
     def _frequency(self, key: str, default: float):
         """The event's frequency-range override for `key` (min/max), else `default`."""

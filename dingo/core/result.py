@@ -200,8 +200,7 @@ class Result(DingoDataset):
         self.event_metadata = event_metadata
 
         # The old context described the data the samples were drawn from; rebuild it
-        # around the new (possibly regenerated) event payload -- recorded settings
-        # updates enter as a derived representation -- and re-alias the domain.
+        # around the new (possibly regenerated) event payload and re-alias the domain.
         self.sampler_context = self._build_context()
         self._build_domain()
 

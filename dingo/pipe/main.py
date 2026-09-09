@@ -28,7 +28,10 @@ from .utils import dict_to_string
 
 from ..gw.domains.build_domain import build_domain_from_model_metadata
 from dingo.core.posterior_models.build_model import build_model_from_kwargs
-from ..gw.frequency_updates import check_frequency_updates
+from ..gw.frequency_updates import (
+    check_frequency_updates,
+    check_importance_sampling_frequency_range,
+)
 from ..gw.injection import Injection
 from ..gw.noise.asd_dataset import ASDDataset
 
@@ -192,7 +195,41 @@ def fill_in_arguments_from_model(args, perform_arg_checks=True):
         importance_sampling_updates = {
             k.replace("-", "_"): v for k, v in importance_sampling_updates.items()
         }
-    return {**changed_args, **importance_sampling_updates}, model_args
+    # A frequency range under importance-sampling-updates applies to the likelihood
+    # only, so the strain-cropping check above (for the [data] keys) does not apply.
+    sampling_frequency = importance_sampling_updates.get(
+        "sampling_frequency", args.sampling_frequency
+    )
+    check_importance_sampling_frequency_range(
+        model_metadata,
+        importance_sampling_updates.get("minimum_frequency"),
+        importance_sampling_updates.get("maximum_frequency"),
+        sampling_frequency=(
+            float(sampling_frequency) if sampling_frequency is not None else None
+        ),
+    )
+    updates = {**changed_args, **importance_sampling_updates}
+    # A Dingo injection is generated on the network's band, so its data cannot be
+    # regenerated for a wider range or another duration.
+    if args.injection and (
+        "duration" in updates
+        or _outside(updates.get("minimum_frequency"), domain.f_min, min)
+        or _outside(updates.get("maximum_frequency"), domain.f_max, max)
+    ):
+        raise ValueError(
+            "Importance sampling of a Dingo injection at a wider frequency range or "
+            "another duration than the network's is not supported."
+        )
+    return updates, model_args
+
+
+def _outside(requested, bound, pick):
+    """Whether a requested frequency (a float or a per-detector dict) lies beyond
+    `bound` on the side `pick` selects (`min` below f_min, `max` above f_max)."""
+    if requested is None:
+        return False
+    value = pick(requested.values()) if isinstance(requested, dict) else requested
+    return value < bound if pick is min else value > bound
 
 
 class MainInput(BilbyMainInput):

@@ -78,12 +78,14 @@ class DataGenerationInput(BilbyDataGenerationInput):
         self.importance_sampling = args.importance_sampling_generation
         self.importance_sampling_updates = args.importance_sampling_updates
         if self.importance_sampling:
-            # Updates to frequency range should not affect the data generation for importance sampling
-            if "minimum_frequency" in self.importance_sampling_updates:
-                self.importance_sampling_updates.pop("minimum_frequency")
-            if "maximum_frequency" in self.importance_sampling_updates:
-                self.importance_sampling_updates.pop("maximum_frequency")
-            vars(args).update(self.importance_sampling_updates)
+            # bilby_pipe's frequency setters parse strings, so a per-detector dict
+            # is passed in its string form.
+            vars(args).update(
+                {
+                    k: str(v) if isinstance(v, dict) else v
+                    for k, v in self.importance_sampling_updates.items()
+                }
+            )
 
         # Data arguments
         self.ignore_gwpy_data_quality_check = args.ignore_gwpy_data_quality_check
@@ -349,8 +351,16 @@ class DataGenerationInput(BilbyDataGenerationInput):
             model = build_model_from_kwargs(
                 filename=self.model, device="cpu", load_training_info=False
             )
+        # The frequency grid of the saved data: the network's band, extended if
+        # importance sampling asked for a wider range, at the requested duration.
+        # A range inside the band is applied later by masking, not here.
         domain = build_domain_from_model_metadata(model.metadata, base=True)
         assert isinstance(domain, UniformFrequencyDomain)
+        domain = UniformFrequencyDomain(
+            min(domain.f_min, min(self.minimum_frequency_dict.values())),
+            max(domain.f_max, max(self.maximum_frequency_dict.values())),
+            1.0 / self.duration,
+        )
 
         if self.save_bilby_data_dump:
             # this is needed because we want bilby to use the updated DINGO
@@ -409,6 +419,7 @@ class DataGenerationInput(BilbyDataGenerationInput):
             "roll_off": self.tukey_roll_off,
             "minimum_frequency": self.minimum_frequency_dict,
             "maximum_frequency": self.maximum_frequency_dict,
+            "domain": domain.domain_dict,
         }
 
         for k in [

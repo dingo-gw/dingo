@@ -69,9 +69,10 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
             When the domain is a MultibandedFrequencyDomain, whether to use the
             associated base UniformFrequencyDomain for likelihood computations.
         frequency_update: dict
-            Specifies settings for updating the frequency range
-            example: {'minimum_frequency': {'H1': 30., 'L1': 20.},
-                       maximum_frequency: 1024.}
+            The event's frequency range: the ASDs are masked outside it, and the
+            calibration spline nodes are placed across it, per detector. Values
+            are floats or per-detector dicts, e.g.
+            {'minimum_frequency': {'H1': 30., 'L1': 20.}, 'maximum_frequency': 1024.}
         """
         super().__init__(
             wfg_kwargs=wfg_kwargs,
@@ -79,6 +80,7 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
             data_domain=data_domain,
             ifo_list=list(event_data["waveform"].keys()),
             t_ref=t_ref,
+            frequency_update=frequency_update,
         )
 
         if isinstance(data_domain, MultibandedFrequencyDomain) and not use_base_domain:

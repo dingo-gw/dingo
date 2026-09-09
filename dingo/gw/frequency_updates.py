@@ -1,12 +1,16 @@
 """
-Validation of event- and importance-sampling-time frequency-range updates against a
-model's frequency domain.
+Frequency-range updates against a model's frequency domain.
 
-A frequency range narrower than the network's domain is only permitted when the
-network was trained with random strain cropping (`random_strain_cropping` in the
-training data settings), within the bounds that the cropping covered. These
-functions are called at INI-parse time (`dingo_pipe`, on the model metadata) and by
-the samplers when event metadata carries `minimum_frequency` / `maximum_frequency`.
+A frequency range in the event metadata (`minimum_frequency` / `maximum_frequency`)
+is applied to the network input, so a range narrower than the network's domain is
+only allowed when the network was trained with random strain cropping
+(`random_strain_cropping` in the training data settings) that covers it.
+`check_frequency_updates` checks this when `dingo_pipe` parses its INI file, and
+the sampler context checks it again before preparing network input. A range given
+under `importance-sampling-updates` applies to the likelihood only and needs no
+such check. The likelihood masks the ASDs outside each detector's range and places
+the calibration spline nodes across it; `resolve_frequency_bounds` gives those
+per-detector bounds.
 """
 
 import numpy as np
@@ -183,3 +187,57 @@ def check_frequency_updates(
         _validate_minimum_frequency(f_min, detectors, domain, crop_settings)
     if f_max is not None:
         _validate_maximum_frequency(f_max, detectors, domain, crop_settings)
+
+
+def resolve_frequency_bounds(
+    detectors: list[str],
+    domain: UniformFrequencyDomain | MultibandedFrequencyDomain,
+    minimum_frequency: dict[str, float] | float | None = None,
+    maximum_frequency: dict[str, float] | float | None = None,
+) -> dict[str, tuple[float, float]]:
+    """Return `(f_min, f_max)` for each detector from an event's frequency range,
+    given as one float for all detectors or as one value per detector. Missing
+    values default to the domain bounds."""
+
+    def expand(value, default):
+        if value is None:
+            return {d: float(default) for d in detectors}
+        if isinstance(value, dict):
+            if set(value) != set(detectors):
+                raise ValueError(
+                    f"Frequency bounds must have exactly detectors {detectors}, got "
+                    f"{sorted(value)}."
+                )
+            return {d: float(value[d]) for d in detectors}
+        return {d: float(value) for d in detectors}
+
+    f_min = expand(minimum_frequency, domain.f_min)
+    f_max = expand(maximum_frequency, domain.f_max)
+    return {d: (f_min[d], f_max[d]) for d in detectors}
+
+
+def check_importance_sampling_frequency_range(
+    model_metadata: dict,
+    minimum_frequency: dict[str, float] | float | None = None,
+    maximum_frequency: dict[str, float] | float | None = None,
+    sampling_frequency: float | None = None,
+):
+    """Check a frequency range given under `importance-sampling-updates`. It changes
+    the likelihood only, never the network input, so the strain-cropping rules do
+    not apply. Each detector's range must be positive, non-empty, and at most the
+    Nyquist frequency of the data (when `sampling_frequency` is given)."""
+    if minimum_frequency is None and maximum_frequency is None:
+        return
+    detectors = model_metadata["train_settings"]["data"]["detectors"]
+    network = build_domain_from_model_metadata(model_metadata, base=True)
+    f_nyquist = sampling_frequency / 2 if sampling_frequency else np.inf
+    bounds = resolve_frequency_bounds(
+        detectors, network, minimum_frequency, maximum_frequency
+    )
+    for d, (f_min, f_max) in bounds.items():
+        if not 0 < f_min < f_max <= f_nyquist:
+            raise ValueError(
+                f"Importance-sampling frequency range [{f_min}, {f_max}] Hz for {d} "
+                f"must be positive, non-empty, and at most the Nyquist frequency "
+                f"{f_nyquist} Hz."
+            )

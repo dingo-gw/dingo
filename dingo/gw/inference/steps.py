@@ -78,6 +78,7 @@ class SyntheticPhaseFactor(Factor):
         approximation_22_mode: bool = False,
         uniform_weight: float = 0.01,
         num_processes: int = 1,
+        use_base_domain: bool = False,
     ):
         """
         Parameters
@@ -93,6 +94,9 @@ class SyntheticPhaseFactor(Factor):
             Weight of the uniform floor added to the phase distribution for mass coverage.
         num_processes : int, default 1
             Parallel processes for the per-sample likelihood evaluation and phase sampling.
+        use_base_domain : bool, default False
+            For a multibanded model, evaluate the likelihood on the undecimated base
+            domain (passed on to `SamplerContext.likelihood`).
         """
         self.parameters = ["phase"]
         self.conditioning = list(conditioning)
@@ -100,6 +104,7 @@ class SyntheticPhaseFactor(Factor):
         self.approximation_22_mode = approximation_22_mode
         self.uniform_weight = uniform_weight
         self.num_processes = num_processes
+        self.use_base_domain = use_base_domain
 
     def sample_and_log_prob(self, num_samples, context, given=None):
         """Draw one phase per `theta_rest` row (`num_samples` must be 1); return the phases
@@ -142,6 +147,7 @@ class SyntheticPhaseFactor(Factor):
             "n_grid": self.n_grid,
             "approximation_22_mode": self.approximation_22_mode,
             "uniform_weight": self.uniform_weight,
+            "use_base_domain": self.use_base_domain,
         }
 
     def _phase_profile(self, given, context):
@@ -149,9 +155,7 @@ class SyntheticPhaseFactor(Factor):
         per sample: evaluate `log L` on the grid, exponentiate (shifted by the per-row
         max), and add the uniform floor."""
         theta = pd.DataFrame({k: _to_numpy(v) for k, v in given.items()})
-        # The context (possibly derived for importance sampling) carries the
-        # representation; the phase-full likelihood needs no arguments.
-        likelihood = context.likelihood()
+        likelihood = context.likelihood(use_base_domain=self.use_base_domain)
         phases = np.linspace(0, 2 * np.pi, self.n_grid)
         if self.approximation_22_mode:
             # Assume the waveform is (2, 2)-dominated (transforms as exp(2i phase)), so the

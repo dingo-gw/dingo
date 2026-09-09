@@ -1,8 +1,9 @@
 """
-Unit tests for ``GWSamplerContext`` plumbing: the likelihood cache, derived
-contexts (importance-sampling representations), the device attribute, and the
-metadata constructors. The likelihood itself is stubbed (no waveform generation);
-the model-based construction parity lives in the local harnesses.
+Unit tests for ``GWSamplerContext`` plumbing: the likelihood cache and its
+base-domain keyword, the grid the likelihood takes from the event record, the
+device attribute, and the metadata constructors. The likelihood itself is stubbed
+(no waveform generation); the model-based construction parity lives in the local
+harnesses.
 """
 
 import copy
@@ -12,7 +13,7 @@ import pytest
 import torch
 
 import dingo.gw.inference.context as context_module
-from dingo.gw.domains import build_domain
+from dingo.gw.domains import UniformFrequencyDomain, build_domain
 from dingo.gw.inference.context import GWSamplerContext
 
 _DOMAIN_SETTINGS = {
@@ -56,9 +57,13 @@ def context(monkeypatch):
     return GWSamplerContext(
         domain=build_domain(_DOMAIN_SETTINGS),
         data_prep=None,
-        event_data={},
+        event_data=_event_data(_bins(_DOMAIN_SETTINGS["f_max"])),
         model_metadata=_BASE_METADATA,
     )
+
+
+def _bins(f_max, delta_f=_DOMAIN_SETTINGS["delta_f"]):
+    return int(f_max / delta_f) + 1
 
 
 def test_likelihood_rebuilt_only_when_settings_change(context):
@@ -85,47 +90,108 @@ def test_domain_eq_is_none_safe():
     assert (domain == 3) is False
 
 
-def test_derived_context_has_independent_likelihood_cache(context):
-    # The representation is context state: a derived context builds its own
-    # likelihood (fresh cache) without disturbing the original's.
+def test_likelihood_cache_keyed_on_base_domain_choice(context):
+    # The base-domain choice is a likelihood argument like the marginalizations,
+    # keyed into the cache; nothing about the context changes.
     default = context.likelihood()
-    derived = context.derive(use_base_domain=True)
-    base = derived.likelihood()
+    base = context.likelihood(use_base_domain=True)
     assert base is not default
     assert base.kwargs["use_base_domain"] is True
-    assert derived.likelihood() is base
-    assert context.likelihood() is default
-    assert context.use_base_domain is False
+    assert context.likelihood(use_base_domain=True) is base
+    assert _StubLikelihood.constructions == 2
 
 
-def test_derive_with_updated_duration_rebuilds_domain(context):
-    # An updated duration T rebuilds the data domain at delta_f = 1/T and enters
-    # waveform generation as wfg_delta_f; the event payload and metadata are
-    # shared with the original context.
-    derived = context.derive(updates={"T": 2.0})
-    assert derived.domain.delta_f == 0.5
-    assert derived.wfg_delta_f == 0.5
-    assert derived.event_data is context.event_data
-    assert derived.model_metadata is context.model_metadata
-    assert derived.t_ref == context.t_ref
-    likelihood = derived.likelihood()
-    assert likelihood.kwargs["data_domain"] is derived.domain
-    assert likelihood.kwargs["wfg_domain"].delta_f == 0.5
-    # The original context is untouched.
-    assert context.domain.delta_f == _DOMAIN_SETTINGS["delta_f"]
-    assert context.wfg_delta_f is None
-    assert context.likelihood().kwargs["wfg_domain"].delta_f == (
-        _DOMAIN_SETTINGS["delta_f"]
+def _grid(f_min, f_max, delta_f):
+    return {
+        "type": "UniformFrequencyDomain",
+        "f_min": f_min,
+        "f_max": f_max,
+        "delta_f": delta_f,
+    }
+
+
+def test_likelihood_grid_comes_from_the_event_record(monkeypatch):
+    # The pipe records the grid it generated the data on; the likelihood uses
+    # that grid, and the waveform generator extends to contain it. Without a
+    # record (older files) the data are on the network's grid.
+    monkeypatch.setattr(
+        context_module, "StationaryGaussianGWLikelihood", _StubLikelihood
+    )
+    delta_f = _DOMAIN_SETTINGS["delta_f"]
+    for event_metadata in (None, {"domain": _grid(20.0, 1024.0, delta_f)}):
+        same = GWSamplerContext.from_model_metadata(
+            _BASE_METADATA, _event_data(_bins(1024.0)), event_metadata
+        )
+        kwargs = same.likelihood().kwargs
+        assert kwargs["data_domain"] is same.domain
+        assert kwargs["wfg_domain"] == same.domain
+    # Data generated for a wider range, from a lower bound, for importance sampling.
+    wide = GWSamplerContext.from_model_metadata(
+        _BASE_METADATA,
+        _event_data(_bins(2048.0)),
+        event_metadata={
+            "domain": _grid(15.0, 2048.0, delta_f),
+            "maximum_frequency": 2048.0,
+        },
+    )
+    kwargs = wide.likelihood().kwargs
+    assert wide.domain.f_max == 1024.0  # the network's, unchanged
+    assert kwargs["data_domain"] == build_domain(_grid(15.0, 2048.0, delta_f))
+    assert (kwargs["wfg_domain"].f_min, kwargs["wfg_domain"].f_max) == (15.0, 2048.0)
+    assert kwargs["frequency_update"]["maximum_frequency"] == 2048.0
+    # Data generated at another duration.
+    longer = GWSamplerContext.from_model_metadata(
+        _BASE_METADATA,
+        _event_data(_bins(1024.0, 0.125)),
+        event_metadata={"domain": _grid(20.0, 1024.0, 0.125), "T": 8.0},
+    )
+    kwargs = longer.likelihood().kwargs
+    assert kwargs["data_domain"].delta_f == 0.125
+    assert kwargs["wfg_domain"].delta_f == 0.125
+
+
+def test_multibanded_decimated_likelihood_needs_the_network_grid(monkeypatch):
+    # A multibanded model decimates data on its base grid; data generated for
+    # another range must be evaluated on the base domain.
+    monkeypatch.setattr(
+        context_module, "StationaryGaussianGWLikelihood", _StubLikelihood
+    )
+    metadata = copy.deepcopy(_BASE_METADATA)
+    metadata["dataset_settings"]["domain"] = {
+        "type": "MultibandedFrequencyDomain",
+        "nodes": [20.0, 26.0, 34.0, 46.0, 62.0, 78.0, 1038.0],
+        "delta_f_initial": 0.0625,
+        "base_domain": _grid(20.0, 2048.0, 0.0625),
+    }
+    on_grid = GWSamplerContext.from_model_metadata(
+        metadata,
+        _event_data(_bins(2048.0, 0.0625)),
+        event_metadata={"domain": _grid(20.0, 2048.0, 0.0625)},
+    )
+    assert on_grid.likelihood().kwargs["data_domain"] is on_grid.domain
+    # On the network's grid the likelihood class does the base-domain switch.
+    base = on_grid.likelihood(use_base_domain=True).kwargs
+    assert base["data_domain"] is on_grid.domain and base["use_base_domain"] is True
+    off_grid = GWSamplerContext.from_model_metadata(
+        metadata,
+        _event_data(_bins(4096.0, 0.0625)),
+        event_metadata={"domain": _grid(20.0, 4096.0, 0.0625)},
+    )
+    with pytest.raises(ValueError, match="base domain"):
+        off_grid.likelihood()
+    assert off_grid.likelihood(use_base_domain=True).kwargs["data_domain"].f_max == (
+        4096.0
     )
 
 
-def test_derive_with_frequency_updates_keeps_domain_grid(context):
-    # min/max frequency updates apply via ASD masking (through the event
-    # metadata), not the domain grid: the rebuild triggers but reproduces the
-    # same domain settings.
-    derived = context.derive(updates={"minimum_frequency": 25.0})
-    assert derived.domain is not context.domain
-    assert derived.domain.domain_dict == context.domain.domain_dict
+def test_prepared_data_refuses_data_off_the_network_grid():
+    wide = GWSamplerContext.from_model_metadata(
+        _MODEL_METADATA,
+        _event_data(_bins(2048.0)),
+        event_metadata={"domain": _grid(20.0, 2048.0, _DOMAIN_SETTINGS["delta_f"])},
+    )
+    with pytest.raises(ValueError, match="network's grid"):
+        wide.prepared_data()
 
 
 def test_likelihood_frequency_range_follows_event_metadata(context):
@@ -139,7 +205,7 @@ def test_likelihood_frequency_range_follows_event_metadata(context):
     with_event = GWSamplerContext(
         domain=build_domain(_DOMAIN_SETTINGS),
         data_prep=None,
-        event_data={},
+        event_data=_event_data(_bins(_DOMAIN_SETTINGS["f_max"])),
         event_metadata={"minimum_frequency": 21.0, "maximum_frequency": 512.0},
         model_metadata=_BASE_METADATA,
     )

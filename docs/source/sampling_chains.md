@@ -215,9 +215,11 @@ analysis settings. This allows for some settings to be changed at inference time
 * A *frequency-range update* allows for per-detector minimum or maximum frequencies. The update is validated against the training-time random
 strain cropping, which must cover the requested range. The likelihood applies the
 same range independently, through ASD masking.
-* A *representation update* (an
-updated duration or choice of domain for importance sampling) produces a
-derived context, described below.
+* A *duration or frequency-range update for importance sampling* regenerates the
+event data on the requested grid, wider than the network's band if asked, which
+the pipe records with them; the likelihood works on that grid. For a multibanded
+model, whether the likelihood uses the base domain or the decimated bands is the
+`use_base_domain` argument of `likelihood()`.
 * A *prior update* is applied at the
 importance-sampling stage and never modifies the context.
 
@@ -229,14 +231,13 @@ domain, and likelihood from its stored settings. The chain's torch device is
 `DeltaFactor`, create them on this device, so that their outputs can join a chain
 running on a GPU.
 
-A context is treated as **immutable**. To change the representation (e.g., to change the duration), use the `derive()` method to generate a new context. The derived context shares the event data and metadata
-with the original, but with updated `domain`, `use_base_domain`, or `wfg_delta_f` values. Samples drawn under the original context can therefore be importance sampled under the derived one.
+A context is **immutable**: it is built once from an event dataset and the model metadata. To analyze the same event with different data (for importance sampling), build a new context from the new event dataset. The parameters keep their meaning, so samples drawn under one context can be importance sampled under another.
 
 ```{note}
 The representation vocabulary in this section (frequency domains, multibanded
 decimation, base-domain likelihoods) is specific to this domain family. To support
 a new domain family, write a new context class implementing the same interface
-(the `dingo.core.inference.context.SamplerContext` protocol: `prepared_data` and `likelihood`, plus the `prior` and `derive` methods used by importance sampling) rather than extending this one.
+(the `dingo.core.inference.context.SamplerContext` protocol: `prepared_data` and `likelihood`, plus the `prior` used by importance sampling) rather than extending this one.
 ```
 
 ## Sampling mechanics
@@ -344,8 +345,8 @@ DataFrame runner (`run_sampler`) and the `Result` export (`to_result` / `to_hdf5
      the map is not measure-preserving). The inverse must rebuild exactly the
      `inputs`, since `ChainComposer.log_prob` relies on it to restore them.
    * A target correction implements `correction`.
-4. **Read data only through the context.** This keeps the step valid under a
-   derived context.
+4. **Read data only through the context.** This keeps the step valid under
+   another context for the same event.
 5. **Override `describe()`** if the step has configuration worth recording, and
    keep the descriptor literal-only.
 

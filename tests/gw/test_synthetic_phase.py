@@ -129,9 +129,8 @@ def test_context_frequency_override():
 
 
 def test_factor_builds_likelihood_from_context():
-    # The factor takes the likelihood from the context with no arguments -- the
-    # data representation lives on the (possibly derived) context, not on the
-    # factor.
+    # The factor takes the likelihood from the context, passing only its
+    # base-domain choice (the same one importance sampling evaluates with).
     recorded = []
 
     class _RecordingContext(_MockContext):
@@ -139,11 +138,13 @@ def test_factor_builds_likelihood_from_context():
             recorded.append(kwargs)
             return super().likelihood()
 
-    factor = SyntheticPhaseFactor(
-        conditioning=["chirp_mass"],
-        n_grid=11,
-        approximation_22_mode=True,
-    )
-    _seed()
-    factor.sample_and_log_prob(1, _RecordingContext(), _given())
-    assert recorded == [{}]
+    for use_base_domain in (False, True):
+        factor = SyntheticPhaseFactor(
+            conditioning=["chirp_mass"],
+            n_grid=11,
+            approximation_22_mode=True,
+            use_base_domain=use_base_domain,
+        )
+        _seed()
+        factor.sample_and_log_prob(1, _RecordingContext(), _given())
+        assert recorded[-1] == {"use_base_domain": use_base_domain}

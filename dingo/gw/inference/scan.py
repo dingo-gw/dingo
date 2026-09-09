@@ -164,13 +164,9 @@ def chirp_mass_scan(
 
     # Exact likelihood on the event data -- on the base domain for multibanded
     # models -- marginalized over the (unsampled) phase.
-    likelihood_context = (
-        context.derive(use_base_domain=True)
-        if hasattr(context.domain, "base_domain")
-        else context
-    )
-    likelihood = likelihood_context.likelihood(
-        phase_marginalization_kwargs={"approximation_22_mode": True}
+    likelihood = context.likelihood(
+        phase_marginalization_kwargs={"approximation_22_mode": True},
+        use_base_domain=hasattr(context.domain, "base_domain"),
     )
     likelihood.return_aux_snr = True
     theta_likelihood = theta[prior_keys]

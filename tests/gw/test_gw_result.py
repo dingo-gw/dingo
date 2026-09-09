@@ -282,9 +282,7 @@ def test_update_prior_reweights_samples_before_importance_sampling():
     # weights proportional to exp(log_prior_new - log_prior_old).
     result = _seeded_result()
     assert result.log_evidence is None
-    param_keys = [
-        k for k, v in result.prior.items() if not isinstance(v, Constraint)
-    ]
+    param_keys = [k for k, v in result.prior.items() if not isinstance(v, Constraint)]
     # ln-prior of the samples under the training prior, evaluated exactly as
     # update_prior does internally (same PriorDict instance, so the stochastic
     # constraint-normalization factor is cached and cancels in differences).
@@ -314,9 +312,7 @@ def test_update_prior_reweights_importance_sampled_result():
     # sample columns (_calculate_evidence only reads log_prob / log_likelihood /
     # log_prior), so no likelihood evaluation is needed.
     result = _seeded_result()
-    param_keys = [
-        k for k, v in result.prior.items() if not isinstance(v, Constraint)
-    ]
+    param_keys = [k for k, v in result.prior.items() if not isinstance(v, Constraint)]
     result.samples["log_prior"] = result.prior.ln_prob(
         result.samples[param_keys], axis=0
     )
@@ -443,3 +439,56 @@ def test_sample_calibration_parameters_correction_type_variants(
         _calibration_kwargs(tmp_path, correction_type=correction_type)
     )
     assert any(c.startswith("recalib_") for c in result.samples.columns)
+
+
+def test_sample_calibration_parameters_nodes_span_event_range(tmp_path):
+    # The calibration nodes follow the event's per-detector analysis range (the
+    # range the likelihood masks its ASDs to), as Bilby's do, not the domain bounds.
+    from bilby.gw.prior import CalibrationPriorDict
+
+    event_metadata = {
+        "minimum_frequency": {"H1": 30.0, "L1": 25.0},
+        "maximum_frequency": 200.0,
+    }
+    result = make_gw_result(event_metadata=event_metadata)
+    n_nodes = 5
+    kwargs = _calibration_kwargs(tmp_path, num_nodes=n_nodes)
+    result.sample_calibration_parameters(kwargs)
+    for ifo in DETECTORS:
+        expected = CalibrationPriorDict.from_envelope_file(
+            kwargs["calibration_envelope"][ifo],
+            event_metadata["minimum_frequency"][ifo],
+            event_metadata["maximum_frequency"],
+            n_nodes,
+            ifo,
+            correction_type="data",
+        )
+        for i in range(n_nodes):
+            for quantity in ("amplitude", "phase"):
+                name = f"recalib_{ifo}_{quantity}_{i}"
+                assert result.prior[name].mu == expected[name].mu
+                assert result.prior[name].sigma == expected[name].sigma
+
+
+def test_reset_event_with_wider_data_gives_the_likelihood_the_recorded_grid():
+    # The importance-sampling stage hands the Result an event dataset generated for
+    # a wider range; the Result's context builds the likelihood on the recorded
+    # grid while its own domain stays the network's.
+    from dingo.gw.data.event_dataset import EventDataset
+
+    result = make_gw_result()
+    wide = UniformFrequencyDomain(20.0, 512.0, 0.5)
+    mask = wide.frequency_mask
+    data = {
+        "waveform": {d: np.where(mask, (1.0 + 1j) * 1e-21, 0.0) for d in DETECTORS},
+        "asds": {d: np.where(mask, 1e-21, 1.0) for d in DETECTORS},
+    }
+    settings = {"domain": wide.domain_dict, "maximum_frequency": 512.0}
+    result.reset_event(EventDataset(dictionary={"data": data, "settings": settings}))
+    assert result.importance_sampling_metadata["updates"]["maximum_frequency"] == 512.0
+    assert result.domain.f_max == DOMAIN_SETTINGS["f_max"]
+    likelihood = result.sampler_context.likelihood(
+        use_base_domain=result.use_base_domain
+    )
+    assert likelihood.data_domain == wide
+    assert likelihood.waveform_generator.domain.f_max >= 512.0

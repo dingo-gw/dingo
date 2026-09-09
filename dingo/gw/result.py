@@ -9,6 +9,7 @@ from bilby_pipe.utils import CALIBRATION_CORRECTION_TYPE_LOOKUP
 
 from dingo.core.result import Result as CoreResult
 from dingo.core.utils.backward_compatibility import check_minimum_version
+from dingo.gw.frequency_updates import resolve_frequency_bounds
 
 
 RANDOM_STATE = 150914
@@ -107,16 +108,6 @@ class Result(CoreResult):
     def use_base_domain(self, value: bool):
         if hasattr(self.domain, "base_domain"):
             self.importance_sampling_metadata["use_base_domain"] = value
-            # The representation is context state: re-derive rather than mutate, so
-            # the fresh context starts with an empty likelihood cache and a
-            # previously built likelihood cannot leak across the change.
-            if (
-                self.sampler_context is not None
-                and self.sampler_context.use_base_domain != value
-            ):
-                self.sampler_context = self.sampler_context.derive(
-                    use_base_domain=value
-                )
 
     @property
     def f_ref(self):
@@ -144,7 +135,7 @@ class Result(CoreResult):
 
     @property
     def minimum_frequency(self) -> dict[str, float] | float:
-        return self.event_metadata.get("minimum_frequency", self.domain.f_min)
+        return (self.event_metadata or {}).get("minimum_frequency", self.domain.f_min)
 
     @minimum_frequency.setter
     def minimum_frequency(self, value: dict[str, float] | float):
@@ -152,16 +143,15 @@ class Result(CoreResult):
 
     @property
     def maximum_frequency(self) -> dict[str, float] | float:
-        return self.event_metadata.get("maximum_frequency", self.domain.f_max)
+        return (self.event_metadata or {}).get("maximum_frequency", self.domain.f_max)
 
     @maximum_frequency.setter
     def maximum_frequency(self, value: dict[str, float] | float):
         self.event_metadata["maximum_frequency"] = value
 
     def _build_domain(self):
-        """Take the data domain from the sampler context -- its single owner. A
-        context derived with importance-sampling updates already carries the
-        rebuilt domain. Called by __init__() and after reset_event()."""
+        """Take the network's data domain from the sampler context -- its single
+        owner. Called by __init__() and after reset_event()."""
         check_minimum_version(self.version, raise_exception=False)
         if self.sampler_context is None:
             self.domain = None
@@ -182,18 +172,12 @@ class Result(CoreResult):
         from dingo.gw.inference.context import GWSamplerContext
 
         # base_metadata resolves the unconditional ("base") indirection, so
-        # density-recovery results reconstruct from the analysis metadata.
-        context = GWSamplerContext.from_model_metadata(
+        # density-recovery results reconstruct from the analysis metadata. The
+        # event data and metadata determine the likelihood's grid and frequency
+        # range; after reset_event they are those of the importance-sampling event.
+        return GWSamplerContext.from_model_metadata(
             self.base_metadata, self.context, self.event_metadata
         )
-        # Importance-sampling settings updates change the data representation, which
-        # lives on a derived context (same event, different representation).
-        metadata = self.importance_sampling_metadata or {}
-        updates = metadata.get("updates")
-        use_base_domain = metadata.get("use_base_domain", False)
-        if updates or use_base_domain:
-            context = context.derive(updates=updates, use_base_domain=use_base_domain)
-        return context
 
     def _build_prior(self):
         """Take the static prior from the sampler context (its single owner), then
@@ -343,8 +327,7 @@ class Result(CoreResult):
                 "does not carry full model metadata."
             )
 
-        # Construction is owned by the sampler context; its (possibly derived)
-        # representation already encodes the importance-sampling settings updates.
+        # The sampler context builds the likelihood on the event data it holds.
         # Validated marginalization bounds enter as arguments.
         #
         # TODO: Add functionality to update other waveform settings, i.e.,
@@ -354,6 +337,7 @@ class Result(CoreResult):
             time_marginalization_kwargs=time_marginalization_kwargs,
             phase_marginalization_kwargs=phase_marginalization_kwargs,
             calibration_marginalization_kwargs=calibration_marginalization_kwargs,
+            use_base_domain=self.use_base_domain,
         )
 
     def sample_calibration_parameters(self, calibration_sampling_kwargs: dict):
@@ -406,13 +390,23 @@ class Result(CoreResult):
         else:
             raise ValueError(f"{correction_type} not understood")
 
-        # Build calibration priors for sampling
+        # Build the calibration priors. As in Bilby, the spline nodes are placed
+        # across each detector's frequency range, the same range the likelihood
+        # masks the ASDs to. Without a range in the event metadata the domain
+        # bounds are used.
+        frequency_bounds = resolve_frequency_bounds(
+            self.interferometers,
+            self.domain,
+            minimum_frequency=self.minimum_frequency,
+            maximum_frequency=self.maximum_frequency,
+        )
         calibration_priors = {}
         for ifo in self.interferometers:
+            f_min, f_max = frequency_bounds[ifo]
             calibration_priors[ifo] = CalibrationPriorDict.from_envelope_file(
                 self.calibration_sampling_kwargs["calibration_envelope"][ifo],
-                self.domain.f_min,
-                self.domain.f_max,
+                f_min,
+                f_max,
                 self.calibration_sampling_kwargs["num_calibration_nodes"],
                 ifo,
                 correction_type=correction_type_dict[ifo],
@@ -573,6 +567,7 @@ class Result(CoreResult):
             approximation_22_mode=approximation_22_mode,
             uniform_weight=self.synthetic_phase_kwargs.get("uniform_weight", 0.01),
             num_processes=num_processes,
+            use_base_domain=self.use_base_domain,
         )
         chain = ChainComposer([table, factor])
         # One phase draw per proposal sample (the table root is emitted once).
