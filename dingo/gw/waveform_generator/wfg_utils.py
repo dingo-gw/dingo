@@ -326,6 +326,82 @@ def compute_epoch_from_resized_td_modes(resized_td_modes, iota, phase, delta_t):
     return -np.argmax(hp) * delta_t
 
 
+def compute_epochs_from_resized_td_modes(
+    resized_td_modes, iota, phases, delta_t, num_candidates=64, chunk_size=1024
+):
+    """Vectorized version of compute_epoch_from_resized_td_modes for many phases.
+
+    Returns exactly the same epochs as calling the scalar routine for each phase,
+    but evaluates the peak search for all phases at once. Two observations make
+    this cheap:
+
+    1. Spin-weighted spherical harmonics satisfy Y_lm(iota, pi/2 - phase)
+       = Y_lm(iota, pi/2) exp(-i m phase). Hence, with
+       H_m(t) = sum_l Y_lm(iota, pi/2) h_lm(t) collapsed over l once,
+       hp(t, phase) = Re sum_m exp(-i m phase) H_m(t) is a small matrix product.
+    2. hp(t, phase) <= A(t) := sum_m |H_m(t)| for every phase, so the argmax of hp
+       at a given phase can only lie where A(t) >= max_t hp(t, phase). A lower
+       bound for that maximum is obtained from a few candidate samples near the
+       peak of A, which restricts the search to a short window around the merger.
+
+    Parameters
+    ----------
+    resized_td_modes: dict
+        Dictionary with (l,m) keys and numpy complex arrays of resized TD modes.
+    iota: float
+        Inclination angle in radians.
+    phases: array_like
+        Reference phases for spherical harmonic evaluation (scalar or 1D array).
+    delta_t: float
+        Time step of the TD data.
+    num_candidates: int
+        Number of largest-envelope samples used to bound the peak from below.
+    chunk_size: int
+        Number of phases processed per block, to bound memory use.
+
+    Returns
+    -------
+    epochs: np.ndarray, shape (len(phases),)
+        The epoch values (negative of peak index times delta_t), one per phase.
+    """
+    phases = np.atleast_1d(np.asarray(phases, dtype=float))
+
+    # Collapse the l-dependence: H_m(t) = sum_l Y_lm(iota, pi/2) h_lm(t).
+    H = {}
+    for (l, m), h_data in resized_td_modes.items():
+        ylm = lal.SpinWeightedSphericalHarmonic(iota, np.pi / 2, -2, l, m)
+        H[m] = H.get(m, 0.0) + ylm * np.asarray(h_data)
+    m_vals = np.array(sorted(H))
+    H = np.stack([H[m] for m in m_vals])  # (M, T)
+
+    # Phase factors exp(-i m phase), shape (M, P); hp = Re(H^T E) evaluated below via
+    # real arithmetic as Re(H)^T Re(E) - Im(H)^T Im(E).
+    E = np.exp(-1j * np.outer(m_vals, phases))
+    H_re, H_im = np.ascontiguousarray(H.real), np.ascontiguousarray(H.imag)
+    E_re, E_im = np.ascontiguousarray(E.real), np.ascontiguousarray(E.imag)
+
+    def hp_at(indices, phase_slice):
+        return H_re[:, indices].T @ E_re[:, phase_slice] - H_im[:, indices].T @ E_im[
+            :, phase_slice
+        ]
+
+    # Envelope bound and lower bound of the per-phase maximum.
+    envelope = np.abs(H).sum(axis=0)
+    num_candidates = min(num_candidates, len(envelope))
+    candidates = np.sort(np.argpartition(envelope, -num_candidates)[-num_candidates:])
+    lower_bound = hp_at(candidates, slice(None)).max(axis=0)  # (P,)
+    # Samples that can host the argmax for at least one of the phases. Sorted so that
+    # ties resolve to the first index, as in np.argmax over the full array.
+    window = np.flatnonzero(envelope >= lower_bound.min())
+
+    peak_index = np.empty(len(phases), dtype=int)
+    for start in range(0, len(phases), chunk_size):
+        block = slice(start, start + chunk_size)
+        peak_index[block] = window[np.argmax(hp_at(window, block), axis=0)]
+
+    return -peak_index * delta_t
+
+
 def apply_time_shift_to_fd_modes(hlm_fd_raw, resized_td_modes, iota, phase, domain):
     """Apply a phase-dependent time shift to raw (unshifted) FD modes.
 
