@@ -180,71 +180,48 @@ class Result(CoreResult):
         which is expected to be populated by reset_event()."""
         updates = self.importance_sampling_metadata["updates"].copy()
 
-        # Assume that updates can contain T, f_s, roll_off, f_min, f_max, but no other
-        # quantities that define a new domain (e.g., delta_f). Typical event metadata
-        # will be constructed in this way.
-
         domain_keys = ["minimum_frequency", "maximum_frequency", "T"]
         if any(k in updates for k in domain_keys):
-            # Handle dicts and floats
-            f_min = updates.get("minimum_frequency", self.domain.f_min)
-            if isinstance(f_min, dict):
-                f_min = min(f_min.values())
-            f_max = updates.get("maximum_frequency", self.domain.f_max)
-            if isinstance(f_max, dict):
-                f_max = max(f_max.values())
-            if "T" in updates:
-                updates["delta_f"] = 1.0 / updates["T"]
+            self.importance_sampling_metadata["use_base_domain"] = True
+            print("Domain will be rebuilt, forcing use_base_domain=True")
+
+        f_min = updates.get("minimum_frequency", self.domain.f_min)
+        if isinstance(f_min, dict):
+            f_min = min(f_min.values())
+        f_max = updates.get("maximum_frequency", self.domain.f_max)
+        if isinstance(f_max, dict):
+            f_max = min(f_max.values())
+        if "T" in updates:
+            updates["delta_f"] = 1.0 / updates["T"]
+        if isinstance(self.domain, MultibandedFrequencyDomain):
+            delta_f = updates.get("delta_f", self.domain.base_domain.delta_f)
+        else:
+            delta_f = updates.get("delta_f", self.domain.delta_f)
+
+        domain_dict_update = {"f_min": f_min, "f_max": f_max, "delta_f": delta_f}
+        domain_dict = self.domain.domain_dict
+        try:
+            self.domain.update(domain_dict_update)
+        except ValueError:
             if isinstance(self.domain, MultibandedFrequencyDomain):
-                delta_f = updates.get("delta_f", self.domain.base_domain.delta_f)
+                base_domain_dict = domain_dict["base_domain"].copy()
+                for k, v in domain_dict_update.items():
+                    base_domain_dict[k] = v
+                domain_dict["base_domain"] = base_domain_dict
+                domain_dict["delta_f_initial"] = delta_f
             else:
-                delta_f = updates.get("delta_f", self.domain.delta_f)
+                domain_dict.update(domain_dict_update)
 
-            domain_update_dict = {}
-            if f_min != self.domain.f_min:
-                domain_update_dict["f_min"] = f_min
-            if f_max != self.domain.f_max:
-                domain_update_dict["f_max"] = f_max
-            if "delta_f" in updates and updates["delta_f"] != delta_f:
-                domain_update_dict["delta_f"] = delta_f
-
-            # Try to update existing domain first
-            try:
-                if domain_update_dict:
-                    self.domain.update(domain_update_dict)
-            except ValueError:
-                domain_dict = self.domain.domain_dict  # Existing settings
-                if isinstance(self.domain, MultibandedFrequencyDomain):
-                    base_domain_dict = domain_dict["base_domain"].copy()
-                    if (
-                        "minimum_frequency" in updates
-                        or "maximum_frequency" in updates
-                        or "T" in updates
-                    ):
-                        base_domain_dict["f_min"] = f_min
-                        base_domain_dict["f_max"] = f_max
-                        if "T" in updates:
-                            base_domain_dict["delta_f"] = domain_dict[
-                                "delta_f_initial"
-                            ] = (1.0 / updates["T"])
-                        domain_dict["base_domain"] = base_domain_dict
-                else:
-                    domain_dict.update(
-                        (k, updates[k]) for k in set(domain_dict).intersection(updates)
+            if verbose:
+                print("Rebuilding domain as follows:")
+                print(
+                    yaml.dump(
+                        domain_dict,
+                        default_flow_style=False,
+                        sort_keys=False,
                     )
-
-                if verbose:
-                    print("Rebuilding domain as follows:")
-                    print(
-                        yaml.dump(
-                            domain_dict,
-                            default_flow_style=False,
-                            sort_keys=False,
-                        )
-                    )
-                self.domain = build_domain(domain_dict)
-        elif verbose:
-            print("No domain updates found; domain not rebuilt.")
+                )
+            self.domain = build_domain(domain_dict)
 
     def _build_prior(self):
         """Build the prior based on model metadata. Called by __init__()."""
@@ -393,8 +370,14 @@ class Result(CoreResult):
         if "updates" in self.importance_sampling_metadata:
             if "T" in self.importance_sampling_metadata["updates"]:
                 delta_f_new = 1 / self.importance_sampling_metadata["updates"]["T"]
+
+                # Handle both UniformFrequencyDomain and MultibandedFrequencyDomain
+                if "base_domain" in wfg_domain_dict:
+                    wfg_domain_dict = wfg_domain_dict["base_domain"]
+
                 print(
-                    f'Updating waveform generation delta_f from {wfg_domain_dict["delta_f"]} to {delta_f_new}.'
+                    "Updating waveform generation delta_f from "
+                    f"{wfg_domain_dict['delta_f']} to {delta_f_new}."
                 )
                 wfg_domain_dict["delta_f"] = delta_f_new
         wfg_domain = build_domain(wfg_domain_dict)
