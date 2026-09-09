@@ -18,10 +18,13 @@ def check_norm_option(norm: Optional[str]) -> None:
 
 class MyResidualBlock(nn.Module):
     """
-    A general-purpose residual block. Works only with 1-dim inputs.
+    A general-purpose residual block.
 
     This is taken from nflows, but modified to allow for LayerNorm instead of
-    BatchNorm1d. The parameter names (``batch_norm_layers``, ``linear_layers``,
+    BatchNorm1d, and to apply the context GLU along the last dimension so that
+    token-batched ``[batch, tokens, features]`` inputs are gated per token
+    (LayerNorm or no normalization only; BatchNorm1d treats dim 1 as the channel
+    axis). The parameter names (``batch_norm_layers``, ``linear_layers``,
     ...) match those of the nflows ``ResidualBlock`` so that state dicts of
     networks trained with BatchNorm remain loadable; LayerNorm parameters are
     stored under ``layer_norm_layers`.
@@ -75,7 +78,9 @@ class MyResidualBlock(nn.Module):
         temps = self.dropout(temps)
         temps = self.linear_layers[1](temps)
         if context is not None:
-            temps = F.glu(torch.cat((temps, self.context_layer(context)), dim=1), dim=1)
+            temps = F.glu(
+                torch.cat((temps, self.context_layer(context)), dim=-1), dim=-1
+            )
         return inputs + temps
 
 

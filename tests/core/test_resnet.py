@@ -53,3 +53,24 @@ def test_invalid_norm_option():
         MyResidualBlock(features=8, norm="GroupNorm")
     with pytest.raises(ValueError, match="norm must be"):
         DenseResidualNet(4, 2, (8,), norm="GroupNorm")
+
+
+def test_context_glu_does_not_mix_across_tokens():
+    """
+    With token-batched [batch, tokens, features] input, each token's output must
+    depend only on its own context. The GLU has to act along the feature axis
+    (dim=-1); glasflow's ResidualBlock uses dim=1, which for 3D input is the
+    token axis and leaks context across tokens.
+    """
+    torch.manual_seed(0)
+    block = MyResidualBlock(features=16, context_features=4, norm="LayerNorm")
+    block.eval()
+    x = torch.rand(5, 3, 16)
+    context = torch.rand(5, 3, 4)
+    out_reference = block(x, context=context)
+    context_modified = context.clone()
+    context_modified[:, 1, :] = torch.rand(5, 4)
+    out_modified = block(x, context=context_modified)
+    assert torch.allclose(out_reference[:, 0, :], out_modified[:, 0, :])
+    assert torch.allclose(out_reference[:, 2, :], out_modified[:, 2, :])
+    assert not torch.allclose(out_reference[:, 1, :], out_modified[:, 1, :])

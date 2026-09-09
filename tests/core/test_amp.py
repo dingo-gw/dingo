@@ -145,3 +145,28 @@ class TestTrainEpochWithAmp:
             automatic_mixed_precision=True,
         )
         assert n_iter == 1
+
+
+class TestTestEpochWithAmp:
+    def test_validation_runs_under_autocast(self):
+        """
+        With automatic_mixed_precision the validation forward pass must run under
+        autocast (for the model's device type), like the training pass; without
+        it, autocast must not be entered.
+        """
+        from unittest import mock
+
+        from torch.amp import autocast
+
+        from dingo.core.posterior_models import base_model
+
+        pm = _make_mock_pm()
+        loader = _make_dataloader()
+        with mock.patch.object(base_model, "autocast", wraps=autocast) as ac:
+            loss = base_model.test_epoch(pm, loader, automatic_mixed_precision=True)
+            assert ac.call_count == 1
+            assert ac.call_args.args[0] == "cpu"
+            assert torch.isfinite(torch.tensor(loss))
+        with mock.patch.object(base_model, "autocast", wraps=autocast) as ac:
+            base_model.test_epoch(pm, loader)
+            ac.assert_not_called()

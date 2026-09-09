@@ -442,7 +442,11 @@ class BasePosteriorModel(ABC):
         is_primary = self.rank is None or self.rank == 0
 
         if test_only:
-            test_loss = test_epoch(self, dataloader=test_loader)
+            test_loss = test_epoch(
+                self,
+                dataloader=test_loader,
+                automatic_mixed_precision=automatic_mixed_precision,
+            )
             if is_primary:
                 print(f"test loss: {test_loss:.3f}")
             return
@@ -495,6 +499,7 @@ class BasePosteriorModel(ABC):
                     self,
                     dataloader=test_loader,
                     gradient_updates_per_optimizer_step=gradient_updates_per_optimizer_step,
+                    automatic_mixed_precision=automatic_mixed_precision,
                     world_size=world_size,
                 )
                 if self.rank is not None:
@@ -694,6 +699,7 @@ def test_epoch(
     pm: BasePosteriorModel,
     dataloader: torch.utils.data.DataLoader,
     gradient_updates_per_optimizer_step: int = 1,
+    automatic_mixed_precision: bool = False,
     world_size: int = 1,
 ) -> float:
     """
@@ -706,6 +712,11 @@ def test_epoch(
     gradient_updates_per_optimizer_step : int
         Used to match the effective batch size of the training loop for
         comparable loss values.
+    automatic_mixed_precision : bool
+        Evaluate under ``torch.amp.autocast``, as in training. This keeps the
+        validation forward pass on the same reduced-precision kernels as the
+        training pass (several times faster than fp32) and makes the test loss
+        numerically consistent with the train loss.
     world_size : int
         Number of GPUs, used only for logging.
 
@@ -741,10 +752,16 @@ def test_epoch(
             device=pm.device,
         )
 
+        amp_ctx = (
+            autocast(_amp_device_type(pm.device))
+            if automatic_mixed_precision
+            else nullcontext()
+        )
         for batch_idx, data in enumerate(dataloader):
             loss_info.update_timer()
             data = [d.to(pm.device, non_blocking=True) for d in data]
-            loss = pm.loss(data[0], *data[1:])
+            with amp_ctx:
+                loss = pm.loss(data[0], *data[1:])
             loss_info.cache_loss(loss, len(data[0]))
             if (batch_idx + 1) % gradient_updates_per_optimizer_step == 0:
                 loss_info.update()
