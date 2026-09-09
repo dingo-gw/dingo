@@ -152,7 +152,7 @@ def test_chain_without_drawing_steps_runs_once():
 
 
 def test_topological_validation():
-    with pytest.raises(ValueError, match="conditions on"):
+    with pytest.raises(ValueError, match="no earlier step produces"):
         ChainComposer([_ConstFactor("b", conditioning=["a"])])  # 'a' never produced
 
 
@@ -180,7 +180,6 @@ class _NoDensityStep:
     log-prob. Honors the per-row count contract so it composes like any step."""
 
     draws = True
-    consumes = ()
 
     @property
     def produces(self):
@@ -323,8 +322,9 @@ class _MockReparam(Reparametrization):
     density contribution (``-log_det``) is checkable."""
 
     def __init__(self, shift=10.0, log_det_val=0.5):
-        self.conditioning = ["u"]
+        self.inputs = ["u"]
         self.parameters = ["v"]
+        self.conditioning = []
         self._shift = shift
         self._ld = log_det_val
 
@@ -358,12 +358,12 @@ def test_point_mass_prefix_then_reparam_defers_base_count():
     assert log_prob.shape == (5,)
 
 
-def test_reparam_step_consumes_input_and_contributes_neg_logdet():
+def test_reparam_step_replaces_input_and_contributes_neg_logdet():
     # A reparam is an in-place bijection: it replaces its input column and contributes
     # -log_det to the chain density.
     comp = ChainComposer([_ConstFactor("u"), _MockReparam(shift=10.0, log_det_val=0.5)])
     out = comp.sample(4, context=None)
-    assert "u" not in out  # consumed
+    assert "u" not in out  # replaced
     assert torch.equal(out["v"], torch.arange(4, dtype=torch.float32) + 10.0)
     # chain log_prob = factor(+0.5) + reparam(-0.5) = 0.
     assert torch.allclose(out["log_prob"], torch.zeros(4))
@@ -482,36 +482,29 @@ def test_row_count_is_root_rows_times_product_of_counts(num_samples):
 
 
 class _MockTargetCorrection(TargetCorrection):
-    """A mock kind-3 correction: emits ``corr = 2 * x``, contributes 0 to the proposal,
-    and (by default) consumes its input."""
+    """A mock kind-3 correction: emits the annotation ``corr = 2 * x`` and contributes
+    0 to the proposal."""
 
-    def __init__(self, reads="x", emits="corr", consume=True):
+    def __init__(self, reads="x", emits="corr"):
         self.conditioning = [reads]
-        self.parameters = [emits]
-        self.consumes = [reads] if consume else []
+        self.produces = [emits]
         self._reads, self._emits = reads, emits
 
     def correction(self, given, context):
         return {self._emits: given[self._reads] * 2}
 
 
-def test_target_correction_emits_side_channel_and_contributes_zero():
-    # The correction reads and consumes the side channel `s` (not the sampled `x`).
+def test_target_correction_emits_annotation_and_contributes_zero():
+    # The correction reads the side channel `s` (not the sampled `x`). Its annotation
+    # is output; the side channel is not.
     comp = ChainComposer(
         [_SideChannelFactor("x", side="s"), _MockTargetCorrection(reads="s")]
     )
     out = comp.sample(5, context=None)
-    assert "s" not in out and "x" in out  # the side channel is consumed
+    assert "s" not in out and "x" in out  # side channels are intermediates
     assert torch.equal(out["corr"], torch.zeros(5))
     # A correction adds 0 to the proposal density.
     assert torch.allclose(out["log_prob"], torch.zeros(5))
-
-
-def test_validation_rejects_correction_consuming_a_sampled_parameter():
-    # A correction has no inverse, so log_prob could not rebuild a consumed sampled
-    # parameter: reject at construction rather than failing later with a KeyError.
-    with pytest.raises(ValueError, match="side-channel"):
-        ChainComposer([_ConstFactor("x"), _MockTargetCorrection(reads="x")])
 
 
 def test_target_correction_rejects_count_above_one():
@@ -552,7 +545,8 @@ def test_side_channel_produces_satisfies_topological_check():
         [_SideChannelFactor("a", side="s"), _ConstFactor("b", conditioning=["s"])]
     )
     out = comp.sample(4, context=None)
-    assert out["b"].shape == (4,) and "s" in out
+    # The side channel served the later step and is not part of the output.
+    assert out["b"].shape == (4,) and "s" not in out
 
 
 class _GaussFactor(Factor):
@@ -586,19 +580,19 @@ class _GaussFactor(Factor):
 
 
 def test_log_prob_replug_kind_aware():
-    # Re-plug: the kind-aware log_prob rebuilds consumed columns via the reparam
+    # Re-plug: the kind-aware log_prob rebuilds replaced inputs via the reparam
     # inverses, sums factor densities and Jacobians, and skips target corrections.
     torch.manual_seed(0)
     comp = ChainComposer(
         [
             _GaussFactor("u"),
             _MockReparam(shift=10.0, log_det_val=0.5),
-            _MockTargetCorrection(reads="v", emits="corr", consume=False),
+            _MockTargetCorrection(reads="v", emits="corr"),
             _GaussFactor("w", conditioning=["v"]),
         ]
     )
     out = comp.sample(64, context=None)
-    assert "u" not in out  # consumed by the reparam
+    assert "u" not in out  # replaced by the reparam
     samples = {k: v for k, v in out.items() if k != "log_prob"}
     lp = comp.log_prob(samples, context=None)
     # u is rebuilt as v - shift; the float round trip is not bit-exact, so compare
@@ -651,8 +645,9 @@ class _InPlaceReparam(Reparametrization):
     so evaluation must restore the column state per step position."""
 
     def __init__(self, shift=5.0):
-        self.conditioning = ["x"]
+        self.inputs = ["x"]
         self.parameters = ["x"]
+        self.conditioning = []
         self._shift = shift
 
     def forward(self, given, context):
@@ -671,7 +666,7 @@ def test_log_prob_replug_in_place_reparam():
         [
             _GaussFactor("x"),
             _InPlaceReparam(shift=5.0),
-            _MockTargetCorrection(reads="x", emits="corr", consume=False),
+            _MockTargetCorrection(reads="x", emits="corr"),
         ]
     )
     out = comp.sample(64, context=None)
@@ -728,7 +723,7 @@ def test_chain_device_consistency_on_accelerator():
         [
             _DeviceGauss("x"),
             _InPlaceReparam(shift=5.0),
-            _MockTargetCorrection(reads="x", emits="corr", consume=False),
+            _MockTargetCorrection(reads="x", emits="corr"),
             DeltaFactor({"c": 1.5}),
         ]
     )

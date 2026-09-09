@@ -48,10 +48,11 @@ def _samples(n=5, seed=0):
 def test_contract():
     reparam = SpinConventionReparam()
     assert reparam.parameters == ["theta_jn", "phi_jl"]
-    # The bijection overwrites its parameters in place; the read-only
-    # conditioning (phase, masses, tilts, ...) must not be consumed.
-    assert reparam.consumes == []
-    assert set(reparam.parameters) < set(reparam.conditioning)
+    # The bijection overwrites its inputs in place; the read-only conditioning
+    # (phase, masses, tilts, ...) stays in the chain.
+    assert reparam.inputs == reparam.parameters
+    assert "phase" in reparam.conditioning
+    assert not set(reparam.parameters) & set(reparam.conditioning)
 
 
 def test_inverse_requires_given_and_closes_roundtrip():
@@ -65,7 +66,10 @@ def test_inverse_requires_given_and_closes_roundtrip():
         reparam.inverse({}, None)
 
     samples = _samples()
-    given = {k: torch.as_tensor(samples[k].to_numpy()) for k in reparam.conditioning}
+    given = {
+        k: torch.as_tensor(samples[k].to_numpy())
+        for k in reparam.inputs + reparam.conditioning
+    }
     physical, _ = reparam.sample_and_log_prob(1, _Context(), given)
     inverse_given = {**given, **physical}
     back = reparam.inverse(physical, _Context(), inverse_given)
@@ -149,7 +153,10 @@ def test_jacobian_matches_sin_ratio():
     class _Context:
         model_metadata = _MODEL_METADATA_SC0
 
-    given = {k: torch.as_tensor(base[k].to_numpy()) for k in reparam.conditioning}
+    given = {
+        k: torch.as_tensor(base[k].to_numpy())
+        for k in reparam.inputs + reparam.conditioning
+    }
     log_det = reparam.log_det(given, _Context())
     assert np.allclose(log_det.numpy(), np.log(expected), atol=1e-12)
     out, log_prob_contribution = reparam.sample_and_log_prob(1, _Context(), given)
@@ -168,7 +175,7 @@ def test_chain_dtype_preserved():
     samples = _samples()
     given = {
         k: torch.as_tensor(samples[k].to_numpy(), dtype=torch.float32)
-        for k in reparam.conditioning
+        for k in reparam.inputs + reparam.conditioning
     }
     out, log_prob_contribution = reparam.sample_and_log_prob(1, _Context(), given)
     assert out["theta_jn"].dtype == torch.float32
@@ -182,7 +189,10 @@ def test_forward_matches_to_physical():
 
     reparam = SpinConventionReparam()
     samples = _samples()
-    given = {k: torch.as_tensor(samples[k].to_numpy()) for k in reparam.conditioning}
+    given = {
+        k: torch.as_tensor(samples[k].to_numpy())
+        for k in reparam.inputs + reparam.conditioning
+    }
     out = reparam.forward(given, _Context())
     expected = reparam.to_physical(samples, _MODEL_METADATA_SC0)
     assert set(out) == {"theta_jn", "phi_jl"}

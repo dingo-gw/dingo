@@ -366,9 +366,11 @@ class GNPEFlowFactor(Factor):
                 y, log_prob = self.model.sample_and_log_prob(
                     x["data"], num_samples=num_samples
                 )
-        # The network returns (n_rows, num_samples, dim): flatten with the draws for a
-        # row adjacent, and repeat the per-row extrinsic parameters (proxies, the
-        # preferred-proxy geocent time) to match before the post-network corrections.
+        # The network returns (n_rows, num_samples, dim), with n_rows the number of
+        # conditioning rows (one per proxy sample). Flatten so that each row is one
+        # posterior sample, with the draws for a proxy row adjacent, and repeat the
+        # per-row extrinsic parameters (proxies, the preferred-proxy geocent time)
+        # to match before the post-network corrections.
         x["parameters"] = y.reshape(n_rows * num_samples, y.shape[-1])
         x["log_prob"] = log_prob.reshape(n_rows * num_samples)
         x["extrinsic_parameters"] = {
@@ -436,8 +438,9 @@ class RAToEventFrame(Reparametrization):
     """
 
     def __init__(self):
-        self.conditioning = ["ra@t_ref"]
+        self.inputs = ["ra@t_ref"]
         self.parameters = ["ra"]
+        self.conditioning = []
 
     @staticmethod
     def _correction(context) -> float:
@@ -484,8 +487,9 @@ class RAToTrainingFrame(RAToEventFrame):
     """
 
     def __init__(self):
-        self.conditioning = ["ra"]
+        self.inputs = ["ra"]
         self.parameters = ["ra@t_ref"]
+        self.conditioning = []
 
     def forward(self, given, context):
         return super().inverse({"ra": given["ra"]}, context)
@@ -525,9 +529,10 @@ class SpinConventionReparam(Reparametrization):
             Parallel processes for the per-sample LAL spin conversion.
         """
         self.parameters = ["theta_jn", "phi_jl"]
+        # The bijection overwrites theta_jn / phi_jl in place; the remaining
+        # columns (phase, masses, tilts, ...) are read-only conditioning.
+        self.inputs = ["theta_jn", "phi_jl"]
         self.conditioning = [
-            "theta_jn",
-            "phi_jl",
             "phase",
             "chirp_mass",
             "mass_ratio",
@@ -538,13 +543,6 @@ class SpinConventionReparam(Reparametrization):
             "phi_12",
         ]
         self.num_processes = num_processes
-
-    @property
-    def consumes(self) -> list[str]:
-        # The bijection overwrites theta_jn / phi_jl in place; the remaining
-        # conditioning (phase, masses, tilts, ...) is read-only and must stay in
-        # the chain -- the default conditioning-minus-parameters would drop it.
-        return []
 
     def log_det(self, given, context):
         """`log|det J|` of `forward`, per row. The map preserves the spherical
@@ -639,8 +637,8 @@ class GNPEKernelCorrection(TargetCorrection):
     acquires the kernel term `p(theta_hat | theta)`. This step evaluates that
     term at the proxies and at the detector times the main network recomputed
     from theta, and emits it as the `delta_log_prob_target` column. It
-    contributes zero to the proposal density and consumes the intermediate
-    detector times.
+    contributes zero to the proposal density. The recomputed detector times it
+    reads are a side channel of the main network, not part of the output.
     """
 
     def __init__(self, kernel_factor: GNPEKernelFactor):
@@ -652,14 +650,14 @@ class GNPEKernelCorrection(TargetCorrection):
             detector-time columns.
         """
         self.kernel_factor = kernel_factor
-        self.parameters = ["delta_log_prob_target"]
+        self.produces = ["delta_log_prob_target"]
         self.conditioning = list(kernel_factor.parameters) + list(
             kernel_factor.gnpe_parameters
         )
-        self.consumes = list(kernel_factor.gnpe_parameters)
 
     def correction(self, given, context):
-        proxies = {p: given[p] for p in self.kernel_factor.parameters}
-        times = {k: given[k] for k in self.kernel_factor.gnpe_parameters}
-        correction = self.kernel_factor.log_prob(proxies, context, times)
+        proxies = {p: given[p] for p in self.kernel_factor.parameters}  # theta_hat
+        gnpe_params = {k: given[k] for k in self.kernel_factor.gnpe_parameters}  # theta
+        # log p(theta_hat | theta)
+        correction = self.kernel_factor.log_prob(proxies, context, gnpe_params)
         return {"delta_log_prob_target": correction}

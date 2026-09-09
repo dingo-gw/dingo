@@ -111,7 +111,16 @@ def test_from_singlestep_gnpe_chain_shape():
     ]
     flow, correction = sampler.composer.steps[1], sampler.composer.steps[2]
     assert flow.conditioning == ["H1_time_proxy", "L1_time_proxy"]
-    assert sorted(correction.consumes) == ["H1_time", "L1_time"]
+    # The correction reads the proxies and the recomputed detector times (the
+    # flow's side channel) and emits its annotation; it samples nothing.
+    assert correction.conditioning == [
+        "H1_time_proxy",
+        "L1_time_proxy",
+        "H1_time",
+        "L1_time",
+    ]
+    assert correction.produces == ["delta_log_prob_target"]
+    assert correction.parameters == []
 
 
 def test_gnpe_data_prep_mismatch_is_rejected():

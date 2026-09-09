@@ -192,7 +192,7 @@ def test_from_model_assembles_pinned_chain():
     delta, ra_in, flow, offset, ra_out = sampler.composer.steps
     assert set(delta.parameters) == set(_PINS)
     assert flow.conditioning == ["ra@t_ref", "dec", "chirp_mass_proxy"]
-    assert offset.consumes == ["delta_chirp_mass"]
+    assert offset.inputs == ["delta_chirp_mass"]
 
 
 def test_pinned_ra_rotates_to_training_frame_and_back():

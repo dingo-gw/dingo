@@ -12,10 +12,11 @@ from dingo.core.inference.steps import ProxyOffsetReparam, SampleTableFactor
 def test_contract():
     reparam = ProxyOffsetReparam("chirp_mass")
     assert reparam.parameters == ["chirp_mass"]
-    assert reparam.conditioning == ["delta_chirp_mass", "chirp_mass_proxy"]
-    # The offset is consumed; the proxy stays in the chain (recorded with the
+    # The offset is the transformed input, replaced by the physical parameter; the
+    # proxy is read-only conditioning and stays in the chain (recorded with the
     # samples, like the GNPE time proxies).
-    assert reparam.consumes == ["delta_chirp_mass"]
+    assert reparam.inputs == ["delta_chirp_mass"]
+    assert reparam.conditioning == ["chirp_mass_proxy"]
 
 
 def test_forward_inverse_and_log_det():

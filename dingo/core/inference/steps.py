@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import math
 from abc import ABC, abstractmethod
-from typing import Optional, Protocol, Union
+from typing import Optional, Protocol
 
 import torch
 
@@ -149,19 +149,18 @@ class Factor(ABC):
         Whether the factor draws new samples (the default) or is a point mass or
         fixed table that is run once. The chain's sample counts go to the steps
         that draw, one each; an int `num_samples` is the count for the first.
-    consumes : tuple[str, ...]
-        Columns removed from the chain after this step; none for an ordinary factor.
     """
 
     parameters: list[str]
     conditioning: list[str]
     draws = True
-    consumes: tuple[str, ...] = ()
 
     @property
     def produces(self) -> list[str]:
-        """The emitted columns: `parameters`, unless the step also emits side
-        channels (overridden then)."""
+        """The emitted columns: `parameters`, plus any side channels (overridden
+        then). A side channel is an intermediate that later steps may read, such
+        as the detector times a GNPE network recomputes; it is not part of the
+        chain's output."""
         return self.parameters
 
     @abstractmethod
@@ -524,15 +523,15 @@ class Reparametrization(ABC):
     Base class for a reparametrization: a deterministic, invertible change of
     variables applied to existing chain columns.
 
-    A reparametrization does not sample. Its `forward` map takes the conditioning
-    columns to the `parameters` it produces, replacing the inputs it `consumes`, and
-    contributes `-log|det J|` to the proposal log probability (zero for a
-    measure-preserving map, the default). It is one-to-one, with one output row per
-    input row, so it carries no sample multiplicity. The `inverse` map rebuilds the
-    consumed inputs, which is what lets `ChainComposer.log_prob` re-evaluate a chain
-    at given samples. Typical uses relate a network's coordinates to physical ones,
-    such as rotating the right ascension from the training reference frame to the
-    event frame.
+    A reparametrization does not sample. Its `forward` map takes its `inputs`, along
+    with any read-only `conditioning`, to the `parameters` it produces, which
+    replace the inputs in the chain; it contributes `-log|det J|` to the proposal
+    log probability (zero for a measure-preserving map, the default). It is
+    one-to-one, with one output row per input row, so it carries no sample
+    multiplicity. The `inverse` map rebuilds the inputs from the outputs, which is
+    what lets `ChainComposer.log_prob` re-evaluate a chain at given samples. Typical
+    uses relate a network's coordinates to physical ones, such as rotating the right
+    ascension from the training reference frame to the event frame.
 
     Subclasses implement `forward` and `inverse`, and `log_det` when the map is not
     measure-preserving.
@@ -540,12 +539,18 @@ class Reparametrization(ABC):
     Attributes
     ----------
     parameters : list[str]
-        The columns produced.
+        The columns produced. They replace `inputs` in the chain; a map that
+        overwrites a column in place names it in both.
+    inputs : list[str]
+        The columns transformed. They leave the chain after the step (unless also
+        produced), and `inverse` rebuilds them.
     conditioning : list[str]
-        The columns read.
+        Further columns the map reads but does not transform, for example a proxy
+        it shifts by. They stay in the chain.
     """
 
     parameters: list[str]
+    inputs: list[str]
     conditioning: list[str]
     draws = False
 
@@ -563,7 +568,7 @@ class Reparametrization(ABC):
         Parameters
         ----------
         given : dict[str, torch.Tensor]
-            The conditioning columns, one row each.
+            The `inputs` and `conditioning` columns, one row each.
         context : SamplerContext
             The per-event shared state.
 
@@ -580,7 +585,7 @@ class Reparametrization(ABC):
         context: "SamplerContext",
         given: Optional[dict[str, torch.Tensor]] = None,
     ) -> dict[str, torch.Tensor]:
-        """Rebuild the consumed inputs from the produced parameters.
+        """Rebuild the `inputs` from the produced parameters.
 
         Parameters
         ----------
@@ -589,14 +594,14 @@ class Reparametrization(ABC):
         context : SamplerContext
             The per-event shared state.
         given : dict[str, torch.Tensor], optional
-            The conditioning columns that were not consumed and are still in the
-            chain, for example a proxy the map shifts by. Maps that depend only on
-            their own outputs may ignore it.
+            The read-only `conditioning` columns, still in the chain, for example a
+            proxy the map shifts by. Maps that depend only on their own outputs may
+            ignore it.
 
         Returns
         -------
         dict[str, torch.Tensor]
-            The consumed columns.
+            The `inputs` columns.
         """
 
     def log_det(
@@ -609,7 +614,7 @@ class Reparametrization(ABC):
         Parameters
         ----------
         given : dict[str, torch.Tensor]
-            The conditioning columns, one row each.
+            The `inputs` and `conditioning` columns, one row each.
         context : SamplerContext
             The per-event shared state.
 
@@ -642,17 +647,10 @@ class Reparametrization(ABC):
         out = self.forward(given, context)
         return out, -self.log_det(given, context)
 
-    @property
-    def consumes(self) -> list[str]:
-        """The conditioning columns replaced by the outputs, and dropped from the
-        chain after the step. By default, every conditioning column that is not also
-        produced. `ChainComposer.log_prob` rebuilds them via `inverse`."""
-        return [c for c in self.conditioning if c not in self.parameters]
-
     def describe(self) -> dict:
-        """Describe the step for the provenance record of a saved result. See
+        """The default descriptor, plus the transformed `inputs`. See
         `Factor.describe`."""
-        return _describe_default(self)
+        return {**_describe_default(self), "inputs": list(self.inputs)}
 
 
 class ProxyOffsetReparam(Reparametrization):
@@ -662,10 +660,11 @@ class ProxyOffsetReparam(Reparametrization):
 
     A proxy-conditioned network (for example the chirp-mass prior conditioning of
     DINGO-BNS) infers the offset `delta_X = X - X_proxy` rather than `X` itself.
-    This step rebuilds `X`. It consumes the offset column and keeps the proxy in the
-    chain, where it is recorded with the samples (like the GNPE time proxies). At a
-    fixed proxy the map is a pure shift, so `log_det` is zero; `inverse` recovers the
-    offset from the proxy, which the reverse fold supplies.
+    This step rebuilds `X`. The offset is its input, replaced by `X`; the proxy is
+    read-only conditioning and stays in the chain, where it is recorded with the
+    samples (like the GNPE time proxies). At a fixed proxy the map is a pure shift,
+    so `log_det` is zero; `inverse` recovers the offset from the proxy, which the
+    reverse fold supplies.
     """
 
     def __init__(self, parameter_name: str):
@@ -680,13 +679,8 @@ class ProxyOffsetReparam(Reparametrization):
         self.delta_name = f"delta_{parameter_name}"
         self.proxy_name = f"{parameter_name}_proxy"
         self.parameters = [parameter_name]
-        self.conditioning = [self.delta_name, self.proxy_name]
-
-    @property
-    def consumes(self) -> list[str]:
-        # The offset is replaced by the physical parameter; the proxy stays in
-        # the chain (recorded with the samples).
-        return [self.delta_name]
+        self.inputs = [self.delta_name]
+        self.conditioning = [self.proxy_name]
 
     def forward(self, given, context):
         return {self.parameter_name: given[self.delta_name] + given[self.proxy_name]}
@@ -705,36 +699,26 @@ class TargetCorrection(ABC):
     Base class for a target correction: a step that annotates the importance-sampling
     target and contributes nothing to the proposal.
 
-    Some targets are not simply prior times likelihood. A target correction emits a
-    side-channel column (`delta_log_prob_target` in Dingo's use), which importance
-    sampling adds to the target log density; the step contributes zero to the
-    proposal. It is one-to-one, with one output row per input row. It reads earlier
-    columns and may consume intermediates it no longer needs.
-
-    A target correction has no inverse. Unlike a `Reparametrization` it may therefore
-    consume only side-channel intermediates (for example detector times computed by
-    an earlier step), never a sampled parameter, since `ChainComposer.log_prob` could
-    not rebuild it.
+    Some targets are not simply prior times likelihood. A target correction reads
+    earlier columns and emits an annotation column (`delta_log_prob_target` in
+    Dingo's use), which importance sampling adds to the target log density; the step
+    contributes zero to the proposal. It samples nothing, so its `parameters` are
+    empty and the annotation is declared in `produces`. It is one-to-one, with one
+    output row per input row. It has no inverse, and `ChainComposer.log_prob` skips
+    it.
 
     Attributes
     ----------
-    parameters : list[str]
-        The column(s) emitted.
+    produces : list[str]
+        The annotation column(s) emitted.
     conditioning : list[str]
         The columns read.
-    consumes : list[str]
-        The intermediate columns dropped after the step.
     """
 
-    parameters: list[str]
+    parameters: list[str] = []
+    produces: list[str]
     conditioning: list[str]
     draws = False
-    consumes: list[str]
-
-    @property
-    def produces(self) -> list[str]:
-        """The emitted columns (the correction's annotation column)."""
-        return self.parameters
 
     @abstractmethod
     def correction(
@@ -779,38 +763,41 @@ class TargetCorrection(ABC):
         return out, torch.zeros_like(reference_column)
 
     def describe(self) -> dict:
-        """Describe the step for the provenance record of a saved result. See
+        """The default descriptor, plus the annotation column(s) in `produces`. See
         `Factor.describe`."""
-        return _describe_default(self)
+        return {**_describe_default(self), "produces": list(self.produces)}
 
 
 class Step(Protocol):
     """
     Protocol for one entry of a chain: anything a `ChainComposer` can fold over.
 
-    A step names the columns it produces (`parameters`) and the earlier columns it
+    A step names the parameters it samples (`parameters`) and the earlier columns it
     reads (`conditioning`), and implements `sample_and_log_prob`. A factor returns a
     log-probability tensor; a density-free block (`GibbsBlock`) returns `None`. The
-    data is not part of the interface; steps read it through the context.
+    data is not part of the interface; steps read it through the context. A
+    `Reparametrization` additionally names the columns it transforms (`inputs`),
+    which its outputs replace.
 
     Attributes
     ----------
     parameters : list[str]
-        The columns produced.
+        The parameters sampled (or transformed): the chain's output columns.
     conditioning : list[str]
         The earlier columns read.
     draws : bool
         Whether the step draws new samples, and so takes one of the chain's sample
         counts, or is run once (a point mass, a sample table, a one-to-one
         transform).
-    consumes : list[str] or tuple[str, ...]
-        Columns removed from the chain after the step.
+    produces : list[str]
+        All columns emitted: `parameters`, plus any side channels (intermediates
+        for later steps, dropped from the output) or, for a `TargetCorrection`,
+        its annotation column(s), which are kept.
     """
 
     parameters: list[str]
     conditioning: list[str]
     draws: bool
-    consumes: Union[list[str], tuple[str, ...]]
     produces: list[str]
 
     def sample_and_log_prob(

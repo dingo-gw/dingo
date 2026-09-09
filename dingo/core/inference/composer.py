@@ -80,13 +80,21 @@ def _repeat_rows(samples, total, n):
     return samples, total
 
 
+def _reads(step: Step) -> list[str]:
+    """The columns a step reads from the table: its conditioning, preceded by the
+    inputs a reparametrization transforms."""
+    if isinstance(step, Reparametrization):
+        return list(step.inputs) + list(step.conditioning)
+    return list(step.conditioning)
+
+
 class ChainComposer:
     """
     Runs a chain of steps in order, building up a table of samples and the summed
     proposal log probability.
 
     The composer holds the steps as an ordered list. At construction it checks that
-    the order is consistent: every conditioning column must be produced by an
+    the order is consistent: every column a step reads must be produced by an
     earlier step, and no step may overwrite an existing column, except a
     `Reparametrization` replacing its own inputs. Sampling folds the steps forward,
     drawing at each step that draws and summing the log-probability contributions;
@@ -109,7 +117,7 @@ class ChainComposer:
         Raises
         ------
         ValueError
-            If a step conditions on a column that no earlier step produces, or would
+            If a step reads a column that no earlier step produces, or would
             overwrite an existing column.
         """
         self.steps = list(steps)
@@ -119,13 +127,12 @@ class ChainComposer:
         """Check that the declared order is a valid topological order of the
         conditioning DAG."""
         produced: set[str] = set()
-        sampled: set[str] = set()  # parameter columns (as opposed to side channels)
         for step in self.steps:
-            missing = [c for c in step.conditioning if c not in produced]
+            missing = [c for c in _reads(step) if c not in produced]
             if missing:
                 raise ValueError(
-                    f"A step producing {step.parameters} conditions on {missing}, "
-                    f"which no earlier step produces. Check chain order."
+                    f"A step producing {step.produces} reads {missing}, which no "
+                    f"earlier step produces. Check chain order."
                 )
             # A step's emitted columns default to its `parameters`; a step may also
             # emit side-channel columns (`produces`). Only a Reparametrization may
@@ -133,32 +140,21 @@ class ChainComposer:
             # `log_prob` can restore them.
             emitted = set(step.produces)
             replaceable = (
-                set(step.conditioning) if isinstance(step, Reparametrization) else set()
+                set(step.inputs) if isinstance(step, Reparametrization) else set()
             )
             clobbered = (emitted & produced) - replaceable
             if clobbered:
                 raise ValueError(
-                    f"A step producing {step.parameters} would overwrite existing "
+                    f"A step producing {step.produces} would overwrite existing "
                     f"column(s) {sorted(clobbered)}. Only a Reparametrization may "
                     f"replace columns (its inverse can rebuild them for log_prob)."
                 )
-            if isinstance(step, TargetCorrection):
-                # A correction has no inverse, so `log_prob` cannot rebuild what it
-                # consumes: it may consume side-channel intermediates only.
-                sampled_consumed = set(step.consumes) & sampled
-                if sampled_consumed:
-                    raise ValueError(
-                        f"A target correction producing {step.parameters} consumes "
-                        f"the sampled parameter(s) {sorted(sampled_consumed)}. A "
-                        f"correction may consume only side-channel intermediates."
-                    )
             produced.update(emitted)
-            sampled.update(step.parameters)
-            # Consumed columns leave the produced set, as in the fold, so a later step
-            # may re-emit them (e.g. `RAToEventFrame` restoring a pinned `ra` that
-            # `RAToTrainingFrame` consumed).
-            produced.difference_update(step.consumes)
-            sampled.difference_update(step.consumes)
+            if isinstance(step, Reparametrization):
+                # The transformed inputs leave the table, as in the fold, so a later
+                # step may re-emit them (e.g. `RAToEventFrame` restoring a pinned
+                # `ra` that `RAToTrainingFrame` transformed).
+                produced.difference_update(set(step.inputs) - emitted)
 
     def sample_and_log_prob(
         self,
@@ -258,16 +254,30 @@ class ChainComposer:
         for step in self.steps:
             k = next(pending) if step.draws else 1
             rows = _n_rows(samples) if samples else 1
-            given = {c: samples[c] for c in step.conditioning}
+            reads = _reads(step)
+            given = {c: samples[c] for c in reads}
             block, lp = step.sample_and_log_prob(
-                k if step.conditioning else rows * k, context, given
+                k if reads else rows * k, context, given
             )
             if samples and k > 1:
                 samples, total = _repeat_rows(samples, total, k)
             samples.update(block)
-            for c in step.consumes:
-                samples.pop(c, None)
+            if isinstance(step, Reparametrization):
+                # The transformed inputs are replaced by the outputs.
+                for c in step.inputs:
+                    if c not in step.parameters:
+                        samples.pop(c)
             total = None if lp is None or total is None else total + lp
+        # Side channels -- columns a step emits beyond its parameters, such as the
+        # detector times a GNPE network recomputes -- are intermediates for later
+        # steps, not output. A target correction's annotations are output.
+        parameters = {p for step in self.steps for p in step.parameters}
+        for step in self.steps:
+            if isinstance(step, TargetCorrection):
+                continue
+            for c in step.produces:
+                if c not in parameters:
+                    samples.pop(c, None)
         return samples, total
 
     def log_prob(
@@ -282,15 +292,16 @@ class ChainComposer:
         stored density a well-defined function of the final columns. The steps are
         folded in reverse order, so that the columns are restored to the
         state each step saw during sampling: a `Reparametrization` rebuilds the
-        inputs it consumed via `inverse` (for example `ra@t_ref` from the event-frame
+        inputs it replaced via `inverse` (for example `ra@t_ref` from the event-frame
         `ra`) and contributes `-log|det J|`; a `Factor` contributes its `log_prob` at
         the restored conditioning; a `TargetCorrection` contributes nothing.
 
         Parameters
         ----------
         samples : dict[str, torch.Tensor]
-            The chain's emitted columns, one value per row. Consumed intermediates
-            are rebuilt by the reparametrization inverses and need not be present.
+            The chain's output columns, one value per row. Replaced inputs are
+            rebuilt by the reparametrization inverses, and side channels are not
+            needed.
         context : SamplerContext
             The per-event shared state.
 
@@ -317,11 +328,11 @@ class ChainComposer:
                 continue
             if isinstance(step, Reparametrization):
                 params = {k: values[k] for k in step.parameters}
-                # The non-consumed conditioning is still present and may be
-                # needed to invert (e.g. a proxy the bijection shifts by).
-                available = {k: values[k] for k in step.conditioning if k in values}
-                values.update(step.inverse(params, context, available))
-                given = {k: values[k] for k in step.conditioning}
+                # The read-only conditioning is still present and may be needed
+                # to invert (e.g. a proxy the bijection shifts by).
+                conditioning = {k: values[k] for k in step.conditioning}
+                values.update(step.inverse(params, context, conditioning))
+                given = {k: values[k] for k in _reads(step)}
                 total = total - step.log_det(given, context)
             else:
                 given = {k: values[k] for k in step.conditioning}
@@ -369,7 +380,6 @@ class GibbsBlock:
     """
 
     draws = True
-    consumes: tuple[str, ...] = ()
 
     @property
     def produces(self) -> list[str]:

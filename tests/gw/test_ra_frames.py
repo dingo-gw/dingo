@@ -70,5 +70,6 @@ def test_ra_reparam_is_noop_without_a_distinct_event_time():
 
 def test_ra_reparam_declared_names():
     rp = RAToEventFrame()
-    assert rp.conditioning == ["ra@t_ref"]
+    assert rp.inputs == ["ra@t_ref"]
     assert rp.parameters == ["ra"]
+    assert rp.conditioning == []

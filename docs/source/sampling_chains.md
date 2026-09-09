@@ -10,16 +10,15 @@ $$
 q(\theta_1, \ldots, \theta_n | d) = \prod_i q_i(\theta_i | \theta_{<i}, d).
 $$
 
-A **factor** in this product represents a step, which could include, e.g., a normalizing flow, a Dirac delta function, or the phase posterior conditioned on the remaining parameters. In general a factor may be stochastic, such as a network, or it may be a point mass that pins parameters to fixed values. In addition to factors, there can also be **reparametrization** steps (e.g., the sky rotation).
+Each conditional $q_i$ in this product is one step of the chain: a normalizing flow, for instance, a point mass that pins parameters to fixed values, or the phase posterior conditioned on the remaining parameters. A step may also be a deterministic change of variables, such as the sky rotation between reference frames.
 
-The chain of steps acts on a table of named parameters along with the log probability, and the table is modified as it is operated on by each step. Factors add additional columns (parameters), whereas reparametrization steps replace columns with transformed ones. Both contribute to the log probability of the samples,
+The chain acts on a table of named parameters, together with the log probability. Each step adds columns to the table, or replaces existing columns with transformed ones, and contributes a term to the log probability of the samples,
 
 $$
 \log q(\theta | d) = \sum_i \Delta_i,
 $$
 
-where $\Delta_i = \log q_i$ for a factor (identically zero for a point mass) and
-$-\log\lvert\det J_i\rvert$ for a reparametrization. (The log probability becomes the proposal density when importance sampling.) Note that the Gibbs sampling of GNPE breaks access to the density; see below.
+where $\Delta_i$ is the log density of a stochastic step (identically zero for a point mass) or the Jacobian term $-\log\lvert\det J_i\rvert$ of a change of variables. The [step types](#steps) below make this precise. (The log probability becomes the proposal density when importance sampling.) Note that the Gibbs sampling of GNPE breaks access to the density; see below.
 
 Two example chains:
 * **Plain NPE** (`FlowFactor → RAToEventFrame`): the flow network, followed by a rotation
@@ -32,7 +31,7 @@ Two example chains:
 The `ChainComposer` class holds the chain of steps and carries out sampling. When a chain is constructed, the composer checks it for consistency: every conditioning column must be produced by an earlier step. When sampling, the composer runs the steps in order, building up the table and the log-density sum:
 
 ```{mermaid}
-:caption: Sampling from a chain of factors. This figure omits reparametrization steps, which replace existing columns and contribute a Jacobian term to the log density.
+:caption: Sampling from a chain of steps. Each step contributes its term $\Delta_i$ to the running log probability.
 
 flowchart TB
     subgraph comp ["ChainComposer"]
@@ -55,7 +54,7 @@ flowchart TB
     class dots ghost
 ```
 
-In the figure, every step is written as a conditional $q_i$, which covers all factors, point masses included.
+In the figure, every step is written as a conditional $q_i$, point masses included; a change of variables contributes its Jacobian term in place of a log density.
 
 The generic machinery is defined in `dingo.core.inference`: `steps` (the step
 types), `composer` (the composer, the Gibbs block, and the runner), and `context` (the
@@ -114,9 +113,9 @@ its own log density. Note that network standardization is applied internally, so
 
 ### Reparametrizations
 
-A `Reparametrization` is a deterministic bijection. Its `forward` method maps the
-conditioning columns to new columns, replacing the inputs it `consumes`. Its
-`inverse` method rebuilds those inputs. The proposal density gains a term
+A `Reparametrization` is a deterministic bijection. Its `forward` method maps its
+`inputs` (and any read-only `conditioning`) to new columns, which replace the
+inputs in the chain. Its `inverse` method rebuilds the inputs. The proposal density gains a term
 $-\log\lvert\det J\rvert$. A reparametrization is 1:1, with one output row per input row, so it
 carries no sample multiplicity.
 
@@ -126,14 +125,14 @@ carries no sample multiplicity.
   which is exactly zero when the two times are equal. `RAToTrainingFrame` applies
   the same rotation in the opposite direction, which is useful when pinning the sky position for a sky-conditional network.
 * `ProxyOffsetReparam` reconstructs a physical parameter from a network's offset
-  output and its proxy, $X = \delta_X + X_\mathrm{proxy}$. It consumes the offset
-  column and keeps the proxy in the chain. This is used when prior-conditioning BNS inference on the chirp mass.
+  output and its proxy, $X = \delta_X + X_\mathrm{proxy}$. The offset is its input,
+  replaced by $X$; the proxy is read-only conditioning and stays in the chain. This is used when prior-conditioning BNS inference on the chirp mass.
 * `SpinConventionReparam` relabels the precessing-spin angles between Dingo's
   internal spin-phase convention and that used by Bilby.
 
 ### Target corrections
 
-A `TargetCorrection` emits a side-channel column, `delta_log_prob_target`. During
+A `TargetCorrection` emits an annotation column, `delta_log_prob_target`. During
 importance sampling, this column is added to the *target* log density. The step
 contributes nothing to the proposal. Target corrections cover cases where the
 target is not simply $\pi(\theta)\,\mathcal{L}(\theta)$. The emitted column is an
@@ -143,10 +142,10 @@ product, and its proposal term is $\Delta_i = 0$. The one instance is
 $q(\hat\theta)\,q(\theta | d, \hat\theta)$ over parameters and proxies, and the
 matching target then includes the kernel term $p(\hat\theta | \theta)$. This term
 is evaluated at the detector times recomputed from $\theta$, and the result is
-recorded with the samples. A target correction has no inverse. It may therefore
-consume only side-channel intermediates, never sampled parameters. (A
-reparametrization may consume sampled parameters because its `inverse` can rebuild
-them.)
+recorded with the samples. The recomputed detector times are a *side channel* of the
+main network: a column a step emits beyond its `parameters`, which later steps may
+read but which is not part of the chain's output. A target correction has no
+inverse, so `ChainComposer.log_prob` skips it.
 
 ### Density-free blocks
 
@@ -328,9 +327,12 @@ DataFrame runner (`run_sampler`) and the `Result` export (`to_result` / `to_hdf5
    `Reparametrization`. A step that annotates the importance-sampling target is a
    `TargetCorrection`.
 2. **Declare the interface.** Set `parameters` (the columns emitted) and
-   `conditioning` (the columns read). Set `consumes` if the step removes columns
-   from the chain (a reparametrization's replaced inputs, a correction's
-   intermediates), and `produces` if a factor emits columns beyond `parameters`.
+   `conditioning` (the columns read). A reparametrization also sets `inputs`, the
+   columns it transforms, which its outputs replace; its `conditioning` is then
+   the read-only remainder. A factor that emits columns beyond `parameters`
+   declares them in `produces`; such side channels are intermediates for later
+   steps and are dropped from the output. A target correction samples nothing:
+   its `parameters` are empty, and it declares its annotation column in `produces`.
    A factor that does not draw new samples (a point mass, a fixed table) sets
    `draws = False`, so that the composer runs it once rather than asking it for
    `num_samples`.
@@ -340,8 +342,7 @@ DataFrame runner (`run_sampler`) and the `Result` export (`to_result` / `to_hdf5
      conditioning row, with the draws for a given row adjacent.
    * A reparametrization implements `forward` and `inverse` (and `log_det` when
      the map is not measure-preserving). The inverse must rebuild exactly the
-     consumed columns, since `ChainComposer.log_prob` relies on it to restore
-     them.
+     `inputs`, since `ChainComposer.log_prob` relies on it to restore them.
    * A target correction implements `correction`.
 4. **Read data only through the context.** This keeps the step valid under a
    derived context.
