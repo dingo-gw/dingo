@@ -244,6 +244,7 @@ class MainInput(BilbyMainInput):
         self.importance_sampling_updates = importance_sampling_updates
         self.prior_dict_updates = args.prior_dict_updates
         self.model_reference_time = args.model_reference_time
+        self.sampling_seed = args.sampling_seed
 
         Input.__init__(self, args, unknown_args, print_msg=False)
 

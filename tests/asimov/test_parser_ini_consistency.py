@@ -88,6 +88,7 @@ EXCLUDED_FROM_INI = {
     "reference_frequency",
     "resampling_method",
     "result_format",
+    "sampling_seed",
     "save_bilby_data_dump",
     "scheduler",
     "scheduler_analysis_time",

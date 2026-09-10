@@ -1344,10 +1344,6 @@ def create_parser(top_level=True, usage=None):
     # sampler_parser = parser.add_argument_group(title="Sampler arguments")
     # sampler_parser.add("--sampler", type=str, default="dynesty", help="Sampler to use")
     # sampler_parser.add(
-    #     "--sampling-seed", default=None, type=noneint, help="Random sampling seed"
-    # )
-
-    # sampler_parser.add(
     #     "--sampler-kwargs",
     #     type=str,
     #     default="DynestyDefault",
@@ -1587,6 +1583,15 @@ def create_parser(top_level=True, usage=None):
         default=50000,
         help="Number of samples per batch. This is limited by the amount of GPU RAM. "
         "Default is 50000",
+    )
+    sampler_parser.add(
+        "--sampling-seed",
+        type=noneint,
+        default=None,
+        help="Random seed (torch, numpy, bilby) for the sampling and importance-"
+        "sampling jobs; each job draws and logs its own if not given. Importance-"
+        "sampling job n uses the seed plus n. Importance sampling is reproducible "
+        "only with one process.",
     )
     sampler_parser.add(
         "--density-recovery-settings",

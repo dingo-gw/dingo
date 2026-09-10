@@ -700,6 +700,8 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
             theta_generator = (d[1].to_dict() for d in theta.iterrows())
 
             if num_processes > 1:
+                # Workers are not re-seeded: under fork they copy one random
+                # stream, under spawn they start unseeded (#408).
                 with Pool(processes=num_processes) as pool:
                     results = pool.map(self.d_inner_h_complex, theta_generator)
             else:

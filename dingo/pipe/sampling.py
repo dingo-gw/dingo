@@ -4,6 +4,10 @@ import copy
 import sys
 from pathlib import Path
 
+import bilby
+import numpy as np
+import torch
+
 from bilby_pipe.input import Input
 from bilby_pipe.utils import (
     parse_args,
@@ -75,7 +79,7 @@ class SamplingInput(Input):
 
         # self.sampler = args.sampler
         # self.sampler_kwargs = args.sampler_kwargs
-        # self.sampling_seed = args.sampling_seed
+        self.sampling_seed = args.sampling_seed
 
         # Frequencies
         # self.sampling_frequency = args.sampling_frequency
@@ -121,6 +125,23 @@ class SamplingInput(Input):
 
         self._load_event()
         self._load_sampler()
+
+    @property
+    def sampling_seed(self):
+        return self._sampling_seed
+
+    @sampling_seed.setter
+    def sampling_seed(self, sampling_seed):
+        """Mirrors bilby_pipe's DataAnalysisInput, plus torch. The Pool workers of
+        importance sampling and the synthetic phase are not re-seeded: under fork
+        they copy one stream, under spawn they start unseeded (#408)."""
+        if sampling_seed is None:
+            sampling_seed = np.random.randint(1, 1e6)
+        self._sampling_seed = int(sampling_seed)
+        torch.manual_seed(self._sampling_seed)
+        np.random.seed(self._sampling_seed)
+        bilby.core.utils.random.seed(self._sampling_seed)
+        logger.info(f"Sampling seed set to {self._sampling_seed}")
 
     def _load_event(self):
         event_dataset = EventDataset(file_name=self.event_data_file)
@@ -305,6 +326,7 @@ class SamplingInput(Input):
 
             self._recover_log_prob_composed()
 
+        self.dingo_sampler.provenance_extra["sampling_seed"] = self.sampling_seed
         self.dingo_sampler.run_sampler(self.num_samples, batch_size=self.batch_size)
         self.dingo_sampler.to_hdf5(label=self.label, outdir=self.result_directory)
 
