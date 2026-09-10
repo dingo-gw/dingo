@@ -180,37 +180,23 @@ class Result(CoreResult):
         which is expected to be populated by reset_event()."""
         updates = self.importance_sampling_metadata["updates"].copy()
 
+        # Assume that updates can contain T, f_s, roll_off, f_min, f_max, but no other
+        # quantities that define a new domain (e.g., delta_f). Typical event metadata
+        # will be constructed in this way.
+
         domain_keys = ["minimum_frequency", "maximum_frequency", "T"]
         if any(k in updates for k in domain_keys):
-            self.importance_sampling_metadata["use_base_domain"] = True
-            print("Domain will be rebuilt, forcing use_base_domain=True")
-
-        f_min = updates.get("minimum_frequency", self.domain.f_min)
-        if isinstance(f_min, dict):
-            f_min = min(f_min.values())
-        f_max = updates.get("maximum_frequency", self.domain.f_max)
-        if isinstance(f_max, dict):
-            f_max = min(f_max.values())
-        if "T" in updates:
-            updates["delta_f"] = 1.0 / updates["T"]
-        if isinstance(self.domain, MultibandedFrequencyDomain):
-            delta_f = updates.get("delta_f", self.domain.base_domain.delta_f)
-        else:
-            delta_f = updates.get("delta_f", self.domain.delta_f)
-
-        domain_dict_update = {"f_min": f_min, "f_max": f_max, "delta_f": delta_f}
-        domain_dict = self.domain.domain_dict
-        try:
-            self.domain.update(domain_dict_update)
-        except ValueError:
+            # TODO: Make compatible with MultibandedFrequencyDomain.
             if isinstance(self.domain, MultibandedFrequencyDomain):
-                base_domain_dict = domain_dict["base_domain"].copy()
-                for k, v in domain_dict_update.items():
-                    base_domain_dict[k] = v
-                domain_dict["base_domain"] = base_domain_dict
-                domain_dict["delta_f_initial"] = delta_f
-            else:
-                domain_dict.update(domain_dict_update)
+                raise NotImplementedError()
+
+            if "T" in updates:
+                updates["delta_f"] = 1.0 / updates["T"]
+
+            domain_dict = self.domain.domain_dict  # Existing settings
+            domain_dict.update(
+                (k, updates[k]) for k in set(domain_dict).intersection(updates)
+            )
 
             if verbose:
                 print("Rebuilding domain as follows:")
@@ -222,6 +208,9 @@ class Result(CoreResult):
                     )
                 )
             self.domain = build_domain(domain_dict)
+        else:
+            if verbose:
+                print("No domain updates found; domain not rebuilt.")
 
     def _build_prior(self):
         """Build the prior based on model metadata. Called by __init__()."""
@@ -382,10 +371,35 @@ class Result(CoreResult):
                 wfg_domain_dict["delta_f"] = delta_f_new
         wfg_domain = build_domain(wfg_domain_dict)
 
+        # Build data_domain from event_metadata if available
+        if self.event_metadata is not None and all(
+            k in self.event_metadata
+            for k in ["minimum_frequency", "maximum_frequency", "T"]
+        ):
+            f_min = self.event_metadata["minimum_frequency"]
+            f_max = self.event_metadata["maximum_frequency"]
+            delta_f = 1.0 / self.event_metadata["T"]
+
+            if isinstance(f_min, dict):
+                f_min = min(f_min.values())
+            if isinstance(f_max, dict):
+                f_max = min(f_max.values())
+
+                data_domain = build_domain(
+                    {
+                        "type": "UniformFrequencyDomain",
+                        "f_min": f_min,
+                        "f_max": f_max,
+                        "delta_f": delta_f,
+                    }
+                )
+        else:
+            data_domain = self.domain
+
         self.likelihood = StationaryGaussianGWLikelihood(
             wfg_kwargs=self.base_metadata["dataset_settings"]["waveform_generator"],
             wfg_domain=wfg_domain,
-            data_domain=self.domain,
+            data_domain=data_domain,
             event_data=self.context,
             t_ref=self.t_ref,
             time_marginalization_kwargs=time_marginalization_kwargs,

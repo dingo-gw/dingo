@@ -23,18 +23,19 @@ def _importance_sampling_updates_require_new_domain(inputs):
     original_f_max = inputs.model_args["maximum_frequency"]
     original_f_s = inputs.sampling_frequency
 
+    f_s = inputs.importance_sampling_updates.get("sampling_frequency", None)
+    if f_s is not None:
+        if f_s != original_f_s:
+            return True
+
     f_max = inputs.importance_sampling_updates.get("maximum_frequency", None)
     if f_max is not None:
         if isinstance(f_max, dict):
             f_max = max(f_max.values())
+        assert f_max <= f_s / 2.0
         # One could also check whether f_min/f_max is outside of the masking range.
         # However, at some level it is the user's responsibility?
         if f_max > original_f_max:
-            return True
-
-    f_s = inputs.importance_sampling_updates.get("sampling_frequency", None)
-    if f_s is not None:
-        if f_s != original_f_s:
             return True
 
     # f_min should be handled with masking
