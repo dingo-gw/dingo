@@ -1,0 +1,10 @@
+[Unit]
+Description=Run dingo-ci-email service every 5 minutes
+
+[Timer]
+OnUnitActiveSec=5min
+OnBootSec=1min
+Unit=dingo-ci-email.service
+
+[Install]
+WantedBy=timers.target

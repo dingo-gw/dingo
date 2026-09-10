@@ -4,6 +4,10 @@
     "port": 465,
     "authUser": "user",
     "authPass": "pass",
-    "recipients": ["friend@otherhost.de"]
+    "recipients": ["friend@otherhost.de"],
+    "imap": {
+        "server": "host.de",
+        "port": 993
+    }
 }
 
