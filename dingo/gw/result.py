@@ -359,16 +359,47 @@ class Result(CoreResult):
         if "updates" in self.importance_sampling_metadata:
             if "T" in self.importance_sampling_metadata["updates"]:
                 delta_f_new = 1 / self.importance_sampling_metadata["updates"]["T"]
+
+                # Handle both UniformFrequencyDomain and MultibandedFrequencyDomain
+                if "base_domain" in wfg_domain_dict:
+                    wfg_domain_dict = wfg_domain_dict["base_domain"]
+
                 print(
-                    f'Updating waveform generation delta_f from {wfg_domain_dict["delta_f"]} to {delta_f_new}.'
+                    "Updating waveform generation delta_f from "
+                    f"{wfg_domain_dict['delta_f']} to {delta_f_new}."
                 )
                 wfg_domain_dict["delta_f"] = delta_f_new
         wfg_domain = build_domain(wfg_domain_dict)
 
+        # Build data_domain from event_metadata if available
+        if self.event_metadata is not None and all(
+            k in self.event_metadata
+            for k in ["minimum_frequency", "maximum_frequency", "T"]
+        ):
+            f_min = self.event_metadata["minimum_frequency"]
+            f_max = self.event_metadata["maximum_frequency"]
+            delta_f = 1.0 / self.event_metadata["T"]
+
+            if isinstance(f_min, dict):
+                f_min = min(f_min.values())
+            if isinstance(f_max, dict):
+                f_max = max(f_max.values())
+
+            data_domain = build_domain(
+                {
+                    "type": "UniformFrequencyDomain",
+                    "f_min": f_min,
+                    "f_max": f_max,
+                    "delta_f": delta_f,
+                }
+            )
+        else:
+            data_domain = self.domain
+
         self.likelihood = StationaryGaussianGWLikelihood(
             wfg_kwargs=self.base_metadata["dataset_settings"]["waveform_generator"],
             wfg_domain=wfg_domain,
-            data_domain=self.domain,
+            data_domain=data_domain,
             event_data=self.context,
             t_ref=self.t_ref,
             time_marginalization_kwargs=time_marginalization_kwargs,
@@ -415,13 +446,18 @@ class Result(CoreResult):
         self.calibration_sampling_kwargs = calibration_sampling_kwargs
 
         # Handle correction_type defaults
-        correction_type = self.calibration_sampling_kwargs.get("correction_type", "data")
+        correction_type = self.calibration_sampling_kwargs.get(
+            "correction_type", "data"
+        )
         if correction_type is None:
             correction_type_dict = {
-                ifo: CALIBRATION_CORRECTION_TYPE_LOOKUP[ifo] for ifo in self.interferometers
+                ifo: CALIBRATION_CORRECTION_TYPE_LOOKUP[ifo]
+                for ifo in self.interferometers
             }
         elif correction_type == "data" or correction_type == "template":
-            correction_type_dict = {ifo: correction_type for ifo in self.interferometers}
+            correction_type_dict = {
+                ifo: correction_type for ifo in self.interferometers
+            }
         elif isinstance(correction_type, dict):
             correction_type_dict = correction_type
         else:
@@ -440,7 +476,7 @@ class Result(CoreResult):
             )
 
         # Removing the delta function priors on the frequency nodes, amplitude and phase.
-        # Usually the frequency nodes are set to delta functions, but we also remove the 
+        # Usually the frequency nodes are set to delta functions, but we also remove the
         # the amplitude and phase delta functions if present.
         # This avoids large log probs and log priors, since the density of a delta function
         # at the sampled point is infinite. The delta functions do not affect the sampling,
@@ -457,9 +493,9 @@ class Result(CoreResult):
         delta_log_prob = np.zeros(num_samples)
 
         # Here we will sample the calibration parameters from the prior.
-        # We treat the *prior as the proposal* distribution and 
-        # therefore add the log_prob of the sampled calibration parameters 
-        # to the existing log_prob. We also will update the prior 
+        # We treat the *prior as the proposal* distribution and
+        # therefore add the log_prob of the sampled calibration parameters
+        # to the existing log_prob. We also will update the prior
         # to include the calibration priors using the importance_sampling_metadata
         prior_update = self.importance_sampling_metadata.get("prior_update", {})
         for ifo, prior in calibration_priors.items():
@@ -690,7 +726,9 @@ class Result(CoreResult):
             num_processes=num_processes,
         )
 
-    def get_pesummary_samples(self, num_processes=1, resampling_method="clip+rejection"):
+    def get_pesummary_samples(
+        self, num_processes=1, resampling_method="clip+rejection"
+    ):
         """Samples in a form suitable for PESummary.
 
         These samples are adjusted to undo certain conventions used internally by

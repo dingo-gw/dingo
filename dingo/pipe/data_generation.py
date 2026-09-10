@@ -21,7 +21,11 @@ import numpy as np
 
 from dingo.core.posterior_models.build_model import build_model_from_kwargs
 from dingo.gw.data.event_dataset import EventDataset
-from dingo.gw.domains import UniformFrequencyDomain, build_domain_from_model_metadata
+from dingo.gw.domains import (
+    UniformFrequencyDomain,
+    build_domain_from_model_metadata,
+    build_domain,
+)
 from dingo.gw.injection import Injection
 from dingo.pipe.parser import create_parser
 
@@ -78,11 +82,6 @@ class DataGenerationInput(BilbyDataGenerationInput):
         self.importance_sampling = args.importance_sampling_generation
         self.importance_sampling_updates = args.importance_sampling_updates
         if self.importance_sampling:
-            # Updates to frequency range should not affect the data generation for importance sampling
-            if "minimum_frequency" in self.importance_sampling_updates:
-                self.importance_sampling_updates.pop("minimum_frequency")
-            if "maximum_frequency" in self.importance_sampling_updates:
-                self.importance_sampling_updates.pop("maximum_frequency")
             vars(args).update(self.importance_sampling_updates)
 
         # Data arguments
@@ -113,7 +112,10 @@ class DataGenerationInput(BilbyDataGenerationInput):
         # Frequencies
         self.sampling_frequency = args.sampling_frequency
         self.minimum_frequency = args.minimum_frequency
-        self.maximum_frequency = args.maximum_frequency
+        if isinstance(args.maximum_frequency, dict):
+            self.maximum_frequency = str(args.maximum_frequency)
+        else:
+            self.maximum_frequency = args.maximum_frequency
         self.reference_frequency = args.reference_frequency
 
         # Waveform, source model and likelihood
@@ -349,7 +351,18 @@ class DataGenerationInput(BilbyDataGenerationInput):
             model = build_model_from_kwargs(
                 filename=self.model, device="cpu", load_training_info=False
             )
-        domain = build_domain_from_model_metadata(model.metadata, base=True)
+
+        if self.importance_sampling:
+            # Build the domain based off the IS-udpated settings instead of the model
+            importance_sampling_domain_dict = {
+                "type": "UniformFrequencyDomain",
+                "f_max": max(self.maximum_frequency_dict.values()),
+                "f_min": min(self.minimum_frequency_dict.values()),
+                "delta_f": 1 / self.duration,
+            }
+            domain = build_domain(importance_sampling_domain_dict)
+        else:
+            domain = build_domain_from_model_metadata(model.metadata, base=True)
         assert isinstance(domain, UniformFrequencyDomain)
 
         if self.save_bilby_data_dump:
