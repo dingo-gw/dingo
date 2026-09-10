@@ -27,6 +27,8 @@ def _importance_sampling_updates_require_new_domain(inputs):
     if f_s is not None:
         if f_s != original_f_s:
             return True
+    else:
+        f_s = original_f_s
 
     f_max = inputs.importance_sampling_updates.get("maximum_frequency", None)
     if f_max is not None:
@@ -38,7 +40,12 @@ def _importance_sampling_updates_require_new_domain(inputs):
         if f_max > original_f_max:
             return True
 
-    # f_min should be handled with masking
+    # Check for any frequency-unrelated updates
+    updates = inputs.importance_sampling_updates.copy()
+    for k in "maximum_frequency", "minimum_frequency", "sampling_frequency":
+        updates.pop(k, None)
+    if len(inputs.importance_sampling_updates) > 0:
+        return True
     return False
 
 
