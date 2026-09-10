@@ -6,6 +6,9 @@ import pandas as pd
 from numpy.typing import DTypeLike
 
 from dingo.core.utils.misc import get_version
+from packaging.version import Version
+
+PANDAS_VERSION = Version(pd.__version__)
 
 # A mapping from group/dataset names to either a numpy dtype or a nested mapping
 # of the same form (allowing per-subgroup dtype specifications).
@@ -115,7 +118,10 @@ def recursive_hdf5_load(
                     d[k] = pd.DataFrame(d[k])
                     # Apply dtype conversion to DataFrame if specified
                     if effective_dtype is not None:
-                        d[k] = d[k].astype(effective_dtype, copy=False)
+                        if PANDAS_VERSION < Version("3.0"):
+                            d[k] = d[k].astype(effective_dtype, copy=False)
+                        else:
+                            d[k] = d[k].astype(effective_dtype)
                 # Convert 0-dimensional arrays to scalars
                 elif d[k].ndim == 0:
                     d[k] = d[k].item()
