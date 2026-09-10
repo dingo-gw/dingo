@@ -62,3 +62,7 @@ sampler.run_sampler(num_samples=50_000, batch_size=10_000)
 result = sampler.to_result()
 result.plot_corner()
 ```
+
+The injected parameters travel with the data: the sampler records them as
+`result.injection_parameters`, `plot_corner()` marks them as truth lines, and
+`result.get_injection_credible_level()` locates them within the posterior.

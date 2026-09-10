@@ -102,7 +102,9 @@ class GWSamplerContext:
             repackage).
         event_data : dict
             The raw event data `d` (strain + ASDs per detector), i.e. `EventDataset.data`.
-            Consumed lazily by `prepared_data()` and reused for the likelihood.
+            Consumed lazily by `prepared_data()` and reused for the likelihood. An
+            injection dict (`Injection.injection()`) may also carry its truths under
+            `"parameters"`; these are moved to `event_metadata["injection_parameters"]`.
         event_metadata : dict, optional
             Per-event metadata: the grid the event data are on, the per-detector
             frequency range, the RA correction, and the likelihood reference time.
@@ -120,6 +122,16 @@ class GWSamplerContext:
             transform chain, and keys its cache on them; the values themselves
             have a single owner -- the chain.
         """
+        # An injection dict carries its truths under "parameters". Keep them as the
+        # event record's injection_parameters (the Result reads them for truth lines
+        # and credible levels), leaving the data dict -- and the caller's -- to the
+        # strain and ASDs. An existing record wins, so a context rebuilt from a saved
+        # Result stays consistent with it.
+        if event_data is not None and "parameters" in event_data:
+            event_data = dict(event_data)
+            truths = event_data.pop("parameters")
+            event_metadata = {**(event_metadata or {})}
+            event_metadata.setdefault("injection_parameters", truths)
         self.domain = domain
         self._data_prep = data_prep
         self.model_metadata = model_metadata

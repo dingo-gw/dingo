@@ -79,7 +79,9 @@ The full interface is documented under
 Injections (simulated signals in stationary Gaussian noise) are produced with the
 `Injection` class. It supports fixed parameters (`injection(theta)`) and random
 parameters drawn from a prior (`random_injection()`), and it returns data in the
-`event_data` format above, ready to pass to a sampler.
+`event_data` format above, ready to pass to a sampler. The injected parameters ride
+along under `"parameters"`; the sampler keeps them as the `Result`'s
+`injection_parameters`.
 
 The full interface is documented under {py:class}`dingo.gw.injection.Injection` in
 the API reference.

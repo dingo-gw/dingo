@@ -311,6 +311,30 @@ def test_context_device_default_and_explicit():
     assert ctx_default.device == "cpu"
 
 
+def test_injection_truths_move_to_event_metadata():
+    # An injection dict (Injection.injection()) carries its truths under
+    # "parameters". The context keeps them as the event record's
+    # injection_parameters, so a Result built from it can draw truth lines, and
+    # leaves the data dict -- and the caller's -- to the strain and ASDs.
+    truths = {"chirp_mass": 30.0, "ra": 1.0}
+    injection = {
+        "waveform": {"H1": np.zeros(3)},
+        "asds": {"H1": np.ones(3)},
+        "parameters": truths,
+    }
+    ctx = GWSamplerContext(domain=None, data_prep=None, event_data=injection)
+    assert ctx.event_metadata == {"injection_parameters": truths}
+    assert set(ctx.event_data) == {"waveform", "asds"}
+    assert "parameters" in injection
+    # An existing record wins (e.g. a context rebuilt from a saved Result whose
+    # serialized context still carries the key).
+    record = {"injection_parameters": {"chirp_mass": 1.0}, "f_min": 20.0}
+    ctx = GWSamplerContext(
+        domain=None, data_prep=None, event_data=injection, event_metadata=record
+    )
+    assert ctx.event_metadata == record
+
+
 # Full conditional-model metadata, as serialized in Result.settings.
 _MODEL_METADATA = {
     "dataset_settings": {
