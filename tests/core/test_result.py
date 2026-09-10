@@ -554,3 +554,21 @@ def test_reset_event_invalidates_sampler_context():
     result.reset_event(event)
     assert result.sampler_context is None
     assert result.event_metadata == {"f_min": 20.0}
+
+
+def test_reset_event_keeps_the_record_the_samples_were_drawn_under():
+    """The first event record survives under the importance-sampling block, so the
+    proposal's context stays reconstructible after event_metadata is replaced."""
+    from types import SimpleNamespace
+
+    samples = pd.DataFrame({"x": [1.0, 2.0]})
+    result = Result(dictionary={"samples": samples, "event_metadata": {"T": 4.0}})
+    result.reset_event(SimpleNamespace(data={}, settings={"T": 8.0, "seed": 1}))
+    assert result.event_metadata == {"T": 8.0, "seed": 1}
+    assert result.importance_sampling_metadata == {
+        "proposal_event_metadata": {"T": 4.0}
+    }
+    # A later reset keeps the original record, not the intermediate one.
+    result.reset_event(SimpleNamespace(data={}, settings={"T": 16.0}))
+    assert result.event_metadata == {"T": 16.0}
+    assert result.importance_sampling_metadata["proposal_event_metadata"] == {"T": 4.0}

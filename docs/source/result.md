@@ -53,6 +53,8 @@ Once samples are in the right form---including all relevant parameters *and* the
 
 As with the synthetic phase, importance sampling allows for parallelization.
 
+The target may be defined on different data from the proposal (in `dingo_pipe`, an `importance-sampling-updates` duration or frequency range regenerates the event). `reset_event()` then makes `event_metadata` the event analyzed and keeps the record the samples were drawn under as `importance_sampling_metadata["proposal_event_metadata"]`. The data they were drawn from are not kept; they remain in the sampling-stage file.
+
 ## Plotting
 
 The plotting methods included here are intended for quick plots for evaluating results. They include

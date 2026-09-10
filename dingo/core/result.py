@@ -163,7 +163,11 @@ class Result(DingoDataset):
         If these attributes already exist, perform a comparison to check for changes.
         Update relevant objects appropriately. Note that setting context and
         event_metadata attributes directly would not perform these additional checks and
-        updates.
+        updates. The record the samples were drawn under is kept as
+        importance_sampling_metadata["proposal_event_metadata"] (the first such
+        record on repeated calls). The event data they were drawn from are not
+        kept, so the proposal's context can be rebuilt only from that record
+        together with the sampling-stage file's data.
 
         Parameters
         ----------
@@ -181,6 +185,13 @@ class Result(DingoDataset):
             print("\nNew event data differ from existing.")
         self.context = context
 
+        if self.event_metadata is not None:
+            # First call wins. Only the record is kept: `self.context` becomes the
+            # new event's data below. Keep the old data here too if a proposal
+            # context ever has to be rebuilt from this Result alone.
+            self.importance_sampling_metadata.setdefault(
+                "proposal_event_metadata", self.event_metadata
+            )
         if self.event_metadata is not None and self.event_metadata != event_metadata:
             print("Changes")
             print("=======")
@@ -191,11 +202,8 @@ class Result(DingoDataset):
 
             new_minus_old = dict(freeze(event_metadata) - freeze(self.event_metadata))
             print("New event metadata:")
-            if self.importance_sampling_metadata.get("updates") is None:
-                self.importance_sampling_metadata["updates"] = {}
             for k in sorted(new_minus_old):
                 print(f"  {k}:  {event_metadata[k]}")
-                self.importance_sampling_metadata["updates"][k] = event_metadata[k]
 
         self.event_metadata = event_metadata
 

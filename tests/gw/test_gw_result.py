@@ -475,8 +475,9 @@ def test_reset_event_with_wider_data_gives_the_likelihood_the_recorded_grid():
     # a wider range; the Result's context builds the likelihood on the recorded
     # grid while its own domain stays the network's.
     from dingo.gw.data.event_dataset import EventDataset
+    from dingo.gw.inference.context import GWSamplerContext
 
-    result = make_gw_result()
+    result = make_gw_result(event_metadata={"domain": DOMAIN_SETTINGS})
     wide = UniformFrequencyDomain(20.0, 512.0, 0.5)
     mask = wide.frequency_mask
     data = {
@@ -485,10 +486,18 @@ def test_reset_event_with_wider_data_gives_the_likelihood_the_recorded_grid():
     }
     settings = {"domain": wide.domain_dict, "maximum_frequency": 512.0}
     result.reset_event(EventDataset(dictionary={"data": data, "settings": settings}))
-    assert result.importance_sampling_metadata["updates"]["maximum_frequency"] == 512.0
+    assert result.event_metadata == settings
     assert result.domain.f_max == DOMAIN_SETTINGS["f_max"]
     likelihood = result.sampler_context.likelihood(
         use_base_domain=result.use_base_domain
     )
     assert likelihood.data_domain == wide
     assert likelihood.waveform_generator.domain.f_max >= 512.0
+    # The record the samples were drawn under survives; with the sampling-time
+    # data (which the Result does not keep) it rebuilds the proposal's context.
+    proposal_record = result.importance_sampling_metadata["proposal_event_metadata"]
+    assert proposal_record == {"domain": DOMAIN_SETTINGS}
+    proposal = GWSamplerContext.from_model_metadata(
+        result.base_metadata, _context(), proposal_record
+    )
+    assert proposal.likelihood().data_domain == result.domain
