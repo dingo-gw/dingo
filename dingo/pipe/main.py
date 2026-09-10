@@ -10,6 +10,7 @@ import numpy as np
 import dingo.pipe.create_injections
 
 from bilby.core.prior import PriorDict
+from bilby.gw.detector import InterferometerList
 from bilby_pipe.input import Input
 from bilby_pipe.main import MainInput as BilbyMainInput
 from bilby_pipe.utils import (
