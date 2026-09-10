@@ -2,6 +2,7 @@ import math
 import os
 
 import pytest
+import torch
 
 from dingo.core.utils.trainutils import (
     AvgTracker,
@@ -137,9 +138,15 @@ def test_local_limits_ignore_total_epoch_limit():
 
 
 def test_loss_info_weighted_average_across_batches():
-    info = LossInfo(epoch=1, len_dataset=100, batch_size=10)
-    info.update(2.0, n=4)
-    info.update(3.0, n=2)
+    info = LossInfo(
+        epoch=1, len_dataset=100, batch_size_per_grad_update=10, device=torch.device("cpu")
+    )
+    # Two optimizer steps of one mini-batch each; the epoch average is weighted
+    # by the number of samples in each step.
+    info.cache_loss(torch.tensor(2.0), n=4)
+    info.update()
+    info.cache_loss(torch.tensor(3.0), n=2)
+    info.update()
     # Weighted: (2*4 + 3*2) / (4 + 2) = 14 / 6.
     assert info.get_avg() == pytest.approx(14.0 / 6)
     assert info.loss == 3.0

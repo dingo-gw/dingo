@@ -9,6 +9,7 @@ from typing import Optional, Union
 import numpy as np
 import torch
 from bilby.core.prior import PriorDict, Uniform
+from bilby.gw.detector import InterferometerList
 from torchvision.transforms import Compose
 from dingo.core.inference.steps import _n_rows
 from dingo.core.posterior_models import BasePosteriorModel
@@ -218,7 +219,10 @@ class GWSamplerContext:
             )
         # Repackage strains/ASDs into an array, move to torch, extract the waveform.
         transforms += [
-            RepackageStrainsAndASDS(ifos=detectors, first_index=domain.min_idx),
+            RepackageStrainsAndASDS(
+                ifos=[ifo.name for ifo in InterferometerList(detectors)],
+                first_index=domain.min_idx,
+            ),
             ToTorch(device=device),
             GetItem("waveform"),
         ]
