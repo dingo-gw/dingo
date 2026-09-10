@@ -60,6 +60,17 @@ def single_process_group(free_port):
     dist.destroy_process_group()
 
 
+def _spline_is_compile_friendly() -> bool:
+    """True if the installed glasflow has the static-shape RQ spline (marked by the
+    check_domain kwarg of the compile-friendly-rqs fork); released glasflow selects the
+    spline tails with mask indexing, which breaks the compiled graph."""
+    import inspect
+
+    from glasflow.nflows.transforms.splines import rational_quadratic as rq
+
+    return "check_domain" in inspect.signature(rq.rational_quadratic_spline).parameters
+
+
 class TestUnwrapNetwork:
     def test_plain_module_is_returned_unchanged(self):
         net = nn.Linear(2, 2)
@@ -122,6 +133,10 @@ class TestCompileNetwork:
         assert "rank3" in inductor
         assert os.environ["TRITON_CACHE_DIR"].startswith(inductor)
 
+    @pytest.mark.skipif(
+        not _spline_is_compile_friendly(),
+        reason="requires the static-shape RQ spline (glasflow compile-friendly-rqs fork)",
+    )
     def test_flow_compiles_without_graph_breaks(self):
         """The full NSF (coupling transforms + RQ splines) must trace as one graph."""
         torch.manual_seed(0)
