@@ -148,6 +148,39 @@ def _check_model_compatibility(trigger_chirp_mass, metadata):
         )
 
 
+def _is_gnpe_model(metadata):
+    """Whether the model uses GNPE and therefore requires an init model.
+
+    Same criterion as GWSamplerGNPE (gw/inference/gw_samplers.py): any gnpe_*
+    block in train_settings.data.
+    """
+    data_settings = metadata.get("train_settings", {}).get("data", {})
+    return any(
+        data_settings.get(key)
+        for key in ("gnpe_time_shifts", "gnpe_chirp", "gnpe_phase")
+    )
+
+
+def _find_init_model(model_path):
+    """Look for the conventional init-model file next to a GNPE main model.
+
+    Two naming conventions are in use (e.g. for the O4c production networks):
+    ``<name>.pt`` with ``<name>_init.pt``, and ``<name>_main.pt`` with
+    ``<name>_init.pt``. For ``_main`` models the documented convention
+    (``<name>_init.pt``) is tried first. Returns the first existing
+    candidate, or None.
+    """
+    base, ext = os.path.splitext(model_path)
+    candidates = []
+    if base.endswith("_main"):
+        candidates.append(f"{base[: -len('_main')]}_init{ext}")
+    candidates.append(f"{base}_init{ext}")
+    for candidate in candidates:
+        if os.path.isfile(candidate):
+            return candidate
+    return None
+
+
 def _write_config_file(config_dict, filename, comment=None):
     """Write a dingo_pipe INI config file from a plain dictionary."""
     with open(filename, "w") as f:
@@ -166,6 +199,7 @@ def prepare_dingo_config(
     gracedb,
     outdir,
     model,
+    model_init=None,
     device="cuda",
     num_samples=50000,
     batch_size=None,
@@ -190,6 +224,11 @@ def prepare_dingo_config(
         Path to the trained dingo model (.pt file). The prior is extracted
         directly from this checkpoint; the trigger is also checked for
         compatibility with the model's training duration.
+    model_init : str, optional
+        Path to the GNPE init model (.pt). GNPE models require one; if None
+        and the model's metadata shows it is GNPE, a conventional
+        ``*_init.pt`` sibling of ``model`` is used when present, and a
+        ValueError is raised otherwise.
     device : str
         Device for the neural network forward pass ('cuda' or 'cpu').
     num_samples : int
@@ -244,7 +283,27 @@ def prepare_dingo_config(
     # Raise early if the trigger requires a longer analysis than the model supports.
     _check_model_compatibility(chirp_mass, model_metadata)
 
-    duration = _get_analysis_duration(chirp_mass)
+    # GNPE models require an init model. Validate/resolve here: sampling keys
+    # on model_init alone and would otherwise fail only on the GPU node.
+    is_gnpe = _is_gnpe_model(model_metadata)
+    if model_init is not None:
+        if not os.path.isfile(model_init):
+            raise ValueError(f"model_init file does not exist: {model_init}")
+        if not is_gnpe:
+            raise ValueError(
+                f"--model-init was given, but model {model} is not a GNPE "
+                "model (no gnpe settings in its metadata). dingo_pipe_sampling "
+                "would wrongly use the GNPE sampler; drop --model-init."
+            )
+    elif is_gnpe:
+        model_init = _find_init_model(model)
+        if model_init is None:
+            raise ValueError(
+                f"Model {model} is a GNPE model (gnpe settings present in its "
+                "metadata) and requires an init model, but --model-init was "
+                "not given and no '*_init.pt' file was found next to the model."
+            )
+        logger.info(f"GNPE model detected; using init model {model_init}")
 
     # Extract PSDs from coinc.xml when available
     psd_dict = {}
@@ -261,8 +320,15 @@ def prepare_dingo_config(
                     "due to pipeline PSD bandwidth"
                 )
 
-    # Calibration lookup (gracefully returns (None, None) off-cluster)
-    calibration_model, calib_dict = calibration_dict_lookup(trigger_time, ifos)
+    # The calibration archive (/home/cal) exists only on CIT; fall back to no
+    # calibration elsewhere. bilby_pipe catches only its own BilbyPipeError:
+    # OSError (missing archive) and KeyError (O3-era non-H1/L1/V1 detector)
+    # leak out and must be handled here.
+    try:
+        calibration_model, calib_dict = calibration_dict_lookup(trigger_time, ifos)
+    except (OSError, KeyError) as e:
+        logger.warning(f"Calibration lookup failed ({e!r}); proceeding without it.")
+        calibration_model, calib_dict = None, None
 
     if webdir is None:
         webdir = os.path.join(outdir, "results_page")
@@ -271,15 +337,19 @@ def prepare_dingo_config(
         "label": gracedb,
         "outdir": outdir,
         "accounting": "ligo.dev.o4.cbc.pe.dingo",
-        # Data settings
+        # Data settings. duration, reference_frequency and deltaT are
+        # deliberately NOT written: dingo_pipe fills them from the model
+        # (the source of truth). Writing mismatching values would push them
+        # into importance_sampling_updates, and rebuilding a
+        # MultibandedFrequencyDomain for changed settings is not implemented
+        # (dingo/gw/result.py:_rebuild_domain) — the IS stage would crash.
+        # The chirp-mass duration ladder is still used for the early
+        # model-compatibility check above.
         "trigger_time": trigger_time,
         "detectors": ifos,
-        "duration": duration,
         "sampling_frequency": 4096,
         "minimum_frequency": minimum_frequency,
         "maximum_frequency": maximum_frequency,
-        "reference_frequency": 20.0,
-        "deltaT": 0.2,
         "time_reference": time_reference,
         # Prior comes from the model; override via prior-dict-updates.
         # Dingo model
@@ -294,6 +364,9 @@ def prepare_dingo_config(
         "result_format": "hdf5",
         "webdir": webdir,
     }
+
+    if model_init is not None:
+        config["model_init"] = model_init
 
     if batch_size is not None:
         config["batch_size"] = batch_size
@@ -389,6 +462,13 @@ def create_parser():
         "--model", type=str, required=True,
         help="Path to trained dingo model (.pt file)",
     )
+    parser.add_argument(
+        "--model-init", type=str, default=None,
+        help=(
+            "Path to the GNPE init model (.pt file). GNPE models require one; "
+            "if omitted, a '*_init.pt' file next to --model is used when present"
+        ),
+    )
 
     # Optional dingo arguments
     parser.add_argument(
@@ -434,7 +514,12 @@ def main(args=None):
         outdir = f"outdir_{gracedb}"
     check_directory_exists_and_if_not_mkdir(outdir)
 
-    if args.psd_file is not None and os.path.isfile(args.psd_file):
+    if args.psd_file is not None:
+        if not os.path.isfile(args.psd_file):
+            raise ValueError(
+                f"--psd-file {args.psd_file} does not exist. Refusing to "
+                "proceed with a different PSD source than requested."
+            )
         candidate["coinc_file"] = args.psd_file
 
     extra_settings = {}
@@ -449,6 +534,7 @@ def main(args=None):
         gracedb=gracedb,
         outdir=outdir,
         model=args.model,
+        model_init=args.model_init,
         device=args.device,
         num_samples=args.num_samples,
         batch_size=args.batch_size,

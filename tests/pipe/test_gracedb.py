@@ -4,8 +4,10 @@ All tests are self-contained: no GraceDB network access, no real dingo model,
 and no CIT cluster (calibration lookup fails gracefully off-cluster).
 """
 
+import copy
 import json
 import os
+from pathlib import Path
 
 import pytest
 
@@ -13,7 +15,9 @@ from dingo.pipe.gracedb import (
     _check_model_compatibility,
     _extract_prior_from_metadata,
     _extract_prior_from_model,
+    _find_init_model,
     _get_analysis_duration,
+    _is_gnpe_model,
     _write_config_file,
     create_parser,
     prepare_dingo_config,
@@ -181,6 +185,24 @@ def mock_metadata(monkeypatch):
     import dingo.pipe.gracedb as gracedb_mod
     monkeypatch.setattr(
         gracedb_mod, "_load_model_metadata", lambda _: MOCK_MODEL_METADATA
+    )
+
+
+# Same 8-second BBH model, but trained with GNPE time shifts — such a model
+# requires a second init model at inference time.
+MOCK_GNPE_MODEL_METADATA = copy.deepcopy(MOCK_MODEL_METADATA)
+MOCK_GNPE_MODEL_METADATA["train_settings"]["data"]["gnpe_time_shifts"] = {
+    "kernel": "bilby.core.prior.Uniform(minimum=-0.001, maximum=0.001)",
+    "exact_equiv": True,
+}
+
+
+@pytest.fixture
+def mock_gnpe_metadata(monkeypatch):
+    """Patch _load_model_metadata to return GNPE model metadata."""
+    import dingo.pipe.gracedb as gracedb_mod
+    monkeypatch.setattr(
+        gracedb_mod, "_load_model_metadata", lambda _: MOCK_GNPE_MODEL_METADATA
     )
 
 
@@ -357,21 +379,21 @@ class TestWriteConfigFile:
     def test_keys_use_hyphens(self, tmp_path):
         fname = str(tmp_path / "test.ini")
         _write_config_file({"trigger_time": 1234567890.0, "num_samples": 50000}, fname)
-        content = open(fname).read()
+        content = Path(fname).read_text()
         assert "trigger-time=1234567890.0" in content
         assert "num-samples=50000" in content
 
     def test_dict_value_serialized_as_json(self, tmp_path):
         fname = str(tmp_path / "test.ini")
         _write_config_file({"psd_dict": {"H1": "H1_psd.txt"}}, fname)
-        content = open(fname).read()
+        content = Path(fname).read_text()
         assert "psd-dict=" in content
         assert "H1_psd.txt" in content
 
     def test_comment_written(self, tmp_path):
         fname = str(tmp_path / "test.ini")
         _write_config_file({}, fname, comment="test event")
-        assert "# test event" in open(fname).read()
+        assert "# test event" in Path(fname).read_text()
 
 
 # ---------------------------------------------------------------------------
@@ -390,7 +412,7 @@ class TestPrepareDingoConfig:
             MOCK_CANDIDATE_BBH, "T123456a", str(tmp_path), mock_model,
             device="cpu", num_samples=1000,
         )
-        content = open(fname).read()
+        content = Path(fname).read_text()
         assert "model=" in content
         assert "device=cpu" in content
         assert "num-samples=1000" in content
@@ -399,15 +421,22 @@ class TestPrepareDingoConfig:
 
     def test_ini_has_data_generation_keys(self, tmp_path, mock_model, mock_metadata):
         fname = prepare_dingo_config(MOCK_CANDIDATE_BBH, "T123456a", str(tmp_path), mock_model)
-        content = open(fname).read()
+        content = Path(fname).read_text()
         assert "trigger-time=" in content
         assert "detectors=" in content
-        assert "duration=" in content
         assert "label=T123456a" in content
+
+    def test_model_owned_settings_not_in_config(self, tmp_path, mock_model, mock_metadata):
+        """duration, reference_frequency, deltaT come from the model, not the INI."""
+        fname = prepare_dingo_config(MOCK_CANDIDATE_BBH, "T123456a", str(tmp_path), mock_model)
+        content = Path(fname).read_text()
+        assert "duration=" not in content
+        assert "reference-frequency=" not in content
+        assert "deltaT=" not in content
 
     def test_no_prior_dict_in_config(self, tmp_path, mock_model, mock_metadata):
         fname = prepare_dingo_config(MOCK_CANDIDATE_BBH, "T123456a", str(tmp_path), mock_model)
-        content = open(fname).read()
+        content = Path(fname).read_text()
         assert "prior-dict=" not in content
         assert "prior-file=" not in content
 
@@ -422,7 +451,7 @@ class TestPrepareDingoConfig:
 
     def test_no_calibration_keys_when_off_cluster(self, tmp_path, mock_model, mock_metadata):
         fname = prepare_dingo_config(MOCK_CANDIDATE_BBH, "T123456a", str(tmp_path), mock_model)
-        content = open(fname).read()
+        content = Path(fname).read_text()
         assert "calibration-model" not in content
         assert "spline-calibration-envelope-dict" not in content
 
@@ -437,7 +466,7 @@ class TestPrepareDingoConfig:
             ),
         )
         fname = prepare_dingo_config(MOCK_CANDIDATE_BBH, "T123456a", str(tmp_path), mock_model)
-        content = open(fname).read()
+        content = Path(fname).read_text()
         assert "calibration-model=CubicSpline" in content
         assert "spline-calibration-envelope-dict" in content
         assert "spline-calibration-nodes=10" in content
@@ -447,27 +476,27 @@ class TestPrepareDingoConfig:
             MOCK_CANDIDATE_BBH, "T123456a", str(tmp_path), mock_model,
             importance_sample=False,
         )
-        assert "importance-sample=False" in open(fname).read()
+        assert "importance-sample=False" in Path(fname).read_text()
 
     def test_settings_override_accounting(self, tmp_path, mock_model, mock_metadata):
         fname = prepare_dingo_config(
             MOCK_CANDIDATE_BBH, "T123456a", str(tmp_path), mock_model,
             settings={"accounting": "ligo.prod.o4.cbc.pe.dingo"},
         )
-        assert "accounting=ligo.prod.o4.cbc.pe.dingo" in open(fname).read()
+        assert "accounting=ligo.prod.o4.cbc.pe.dingo" in Path(fname).read_text()
 
     def test_channel_dict_written(self, tmp_path, mock_model, mock_metadata):
         ch = {"H1": "GDS-CALIB_STRAIN_CLEAN", "L1": "GDS-CALIB_STRAIN_CLEAN"}
         fname = prepare_dingo_config(
             MOCK_CANDIDATE_BBH, "T123456a", str(tmp_path), mock_model, channel_dict=ch
         )
-        assert "channel-dict=" in open(fname).read()
+        assert "channel-dict=" in Path(fname).read_text()
 
     def test_batch_size_written_when_provided(self, tmp_path, mock_model, mock_metadata):
         fname = prepare_dingo_config(
             MOCK_CANDIDATE_BBH, "T123456a", str(tmp_path), mock_model, batch_size=10000
         )
-        assert "batch-size=10000" in open(fname).read()
+        assert "batch-size=10000" in Path(fname).read_text()
 
 
 # ---------------------------------------------------------------------------
@@ -598,3 +627,326 @@ class TestMain:
 
         content = (tmp_path / "dingo_config.ini").read_text()
         assert "accounting=ligo.prod.o4.cbc.pe.dingo" in content
+
+
+# ---------------------------------------------------------------------------
+# PSD extraction and psd_cut frequency capping
+# ---------------------------------------------------------------------------
+
+
+def _patch_psd_extraction(monkeypatch, psd_max_freq):
+    """Replace extract_psds_from_xml with a fake; returns a dict recording calls."""
+    import dingo.pipe.gracedb as gracedb_mod
+
+    calls = {}
+
+    def fake_extract(coinc_file, ifos, outdir):
+        calls["coinc_file"] = coinc_file
+        return (
+            {ifo: f"{outdir}/{ifo}_psd.txt" for ifo in ifos},
+            psd_max_freq,
+        )
+
+    monkeypatch.setattr(gracedb_mod, "extract_psds_from_xml", fake_extract)
+    return calls
+
+
+class TestPsdHandling:
+    def test_psd_dict_written_when_coinc_present(
+        self, tmp_path, mock_model, mock_metadata, monkeypatch
+    ):
+        calls = _patch_psd_extraction(monkeypatch, 4096.0)
+        candidate = {**MOCK_CANDIDATE_BBH, "coinc_file": "coinc.xml"}
+        fname = prepare_dingo_config(candidate, "T123456a", str(tmp_path), mock_model)
+        assert "psd-dict=" in Path(fname).read_text()
+        assert calls["coinc_file"] == "coinc.xml"
+
+    def test_psd_cut_caps_maximum_frequency(
+        self, tmp_path, mock_model, mock_metadata, monkeypatch
+    ):
+        """A PSD reaching only 800 Hz caps maximum_frequency at 0.95 * 800 = 760 Hz."""
+        _patch_psd_extraction(monkeypatch, 800.0)
+        candidate = {**MOCK_CANDIDATE_BBH, "coinc_file": "coinc.xml"}
+        fname = prepare_dingo_config(candidate, "T123456a", str(tmp_path), mock_model)
+        assert "maximum-frequency=760.0" in Path(fname).read_text()
+
+    def test_wideband_psd_keeps_default_maximum_frequency(
+        self, tmp_path, mock_model, mock_metadata, monkeypatch
+    ):
+        """A full-bandwidth PSD (0.95 * 4096 > 1024) leaves the 1024 Hz default."""
+        _patch_psd_extraction(monkeypatch, 4096.0)
+        candidate = {**MOCK_CANDIDATE_BBH, "coinc_file": "coinc.xml"}
+        fname = prepare_dingo_config(candidate, "T123456a", str(tmp_path), mock_model)
+        assert "maximum-frequency=1024.0" in Path(fname).read_text()
+
+    def test_explicit_psd_cut(self, tmp_path, mock_model, mock_metadata, monkeypatch):
+        _patch_psd_extraction(monkeypatch, 800.0)
+        candidate = {**MOCK_CANDIDATE_BBH, "coinc_file": "coinc.xml"}
+        fname = prepare_dingo_config(
+            candidate, "T123456a", str(tmp_path), mock_model, psd_cut=0.5
+        )
+        assert "maximum-frequency=400.0" in Path(fname).read_text()
+
+
+# ---------------------------------------------------------------------------
+# Calibration lookup fallback
+# ---------------------------------------------------------------------------
+
+
+class TestCalibrationFallback:
+    def test_missing_archive_does_not_crash(
+        self, tmp_path, mock_model, mock_metadata, monkeypatch
+    ):
+        """Off-cluster (or in a container without /home/cal) the lookup raises
+        FileNotFoundError; config generation must proceed without calibration."""
+        import dingo.pipe.gracedb as gracedb_mod
+
+        def raise_missing(*args, **kwargs):
+            raise FileNotFoundError("/home/cal/public_html/archive/H1/uncertainty/v0")
+
+        monkeypatch.setattr(gracedb_mod, "calibration_dict_lookup", raise_missing)
+        fname = prepare_dingo_config(MOCK_CANDIDATE_BBH, "T123456a", str(tmp_path), mock_model)
+        content = Path(fname).read_text()
+        assert "calibration-model" not in content
+        assert "spline-calibration-envelope-dict" not in content
+
+
+# ---------------------------------------------------------------------------
+# main() output modes and --psd-file override
+# ---------------------------------------------------------------------------
+
+
+class TestMainOutputModes:
+    def _run_main(self, tmp_path, mock_model, candidate_json, output, monkeypatch):
+        import dingo.pipe.gracedb as gracedb_mod
+        from dingo.pipe.gracedb import main
+
+        recorded = {}
+
+        def fake_run(cmd, check=True, **kwargs):
+            recorded["cmd"] = cmd
+            recorded["check"] = check
+
+        monkeypatch.setattr(gracedb_mod.subprocess, "run", fake_run)
+        args = create_parser().parse_args(
+            [
+                "--json", candidate_json,
+                "--model", mock_model,
+                "--outdir", str(tmp_path),
+                "--output", output,
+                "--device", "cpu",
+            ]
+        )
+        main(args)
+        return recorded
+
+    def test_output_ini_does_not_invoke_dingo_pipe(
+        self, tmp_path, mock_model, candidate_json, mock_metadata, monkeypatch
+    ):
+        recorded = self._run_main(tmp_path, mock_model, candidate_json, "ini", monkeypatch)
+        assert recorded == {}
+
+    def test_output_full_invokes_dingo_pipe(
+        self, tmp_path, mock_model, candidate_json, mock_metadata, monkeypatch
+    ):
+        recorded = self._run_main(tmp_path, mock_model, candidate_json, "full", monkeypatch)
+        assert recorded["cmd"] == ["dingo_pipe", str(tmp_path / "dingo_config.ini")]
+        assert recorded["check"] is True
+
+    def test_output_full_local_appends_local_flag(
+        self, tmp_path, mock_model, candidate_json, mock_metadata, monkeypatch
+    ):
+        recorded = self._run_main(
+            tmp_path, mock_model, candidate_json, "full-local", monkeypatch
+        )
+        assert recorded["cmd"][-1] == "--local"
+
+    def test_output_full_submit_appends_submit_flag(
+        self, tmp_path, mock_model, candidate_json, mock_metadata, monkeypatch
+    ):
+        recorded = self._run_main(
+            tmp_path, mock_model, candidate_json, "full-submit", monkeypatch
+        )
+        assert recorded["cmd"][-1] == "--submit"
+
+
+class TestMainPsdFileOverride:
+    def test_psd_file_overrides_coinc_file(
+        self, tmp_path, mock_model, candidate_json, mock_metadata, monkeypatch
+    ):
+        from dingo.pipe.gracedb import main
+
+        calls = _patch_psd_extraction(monkeypatch, 4096.0)
+        psd_file = tmp_path / "coinc_override.xml"
+        psd_file.write_text("<xml/>")
+        args = create_parser().parse_args(
+            [
+                "--json", candidate_json,
+                "--model", mock_model,
+                "--outdir", str(tmp_path),
+                "--output", "ini",
+                "--psd-file", str(psd_file),
+                "--device", "cpu",
+            ]
+        )
+        main(args)
+        assert calls["coinc_file"] == str(psd_file)
+        assert "psd-dict=" in (tmp_path / "dingo_config.ini").read_text()
+
+    def test_nonexistent_psd_file_raises(
+        self, tmp_path, mock_model, candidate_json, mock_metadata, monkeypatch
+    ):
+        """A typo'd --psd-file must fail early, not silently fall back to a
+        different (or no) PSD source."""
+        from dingo.pipe.gracedb import main
+
+        calls = _patch_psd_extraction(monkeypatch, 4096.0)
+        args = create_parser().parse_args(
+            [
+                "--json", candidate_json,
+                "--model", mock_model,
+                "--outdir", str(tmp_path),
+                "--output", "ini",
+                "--psd-file", str(tmp_path / "does_not_exist.xml"),
+                "--device", "cpu",
+            ]
+        )
+        with pytest.raises(ValueError, match="does not exist"):
+            main(args)
+        assert calls == {}
+
+
+# ---------------------------------------------------------------------------
+# GNPE init model
+# ---------------------------------------------------------------------------
+
+
+class TestIsGnpeModel:
+    def test_plain_model_is_not_gnpe(self):
+        assert not _is_gnpe_model(MOCK_MODEL_METADATA)
+
+    def test_gnpe_time_shifts_detected(self):
+        assert _is_gnpe_model(MOCK_GNPE_MODEL_METADATA)
+
+    def test_gnpe_phase_detected(self):
+        metadata = copy.deepcopy(MOCK_MODEL_METADATA)
+        metadata["train_settings"]["data"]["gnpe_phase"] = {"kernel": "..."}
+        assert _is_gnpe_model(metadata)
+
+
+class TestFindInitModel:
+    def test_sibling_init_found(self, tmp_path):
+        (tmp_path / "network.pt").write_bytes(b"main")
+        (tmp_path / "network_init.pt").write_bytes(b"init")
+        assert _find_init_model(str(tmp_path / "network.pt")) == str(
+            tmp_path / "network_init.pt"
+        )
+
+    def test_main_naming_convention(self, tmp_path):
+        """model_A_main.pt pairs with model_A_init.pt (O4c convention)."""
+        (tmp_path / "model_A_main.pt").write_bytes(b"main")
+        (tmp_path / "model_A_init.pt").write_bytes(b"init")
+        assert _find_init_model(str(tmp_path / "model_A_main.pt")) == str(
+            tmp_path / "model_A_init.pt"
+        )
+
+    def test_no_init_returns_none(self, tmp_path):
+        (tmp_path / "network.pt").write_bytes(b"main")
+        assert _find_init_model(str(tmp_path / "network.pt")) is None
+
+    def test_main_convention_takes_precedence(self, tmp_path):
+        """For X_main.pt, the documented X_init.pt wins over X_main_init.pt."""
+        (tmp_path / "model_A_main.pt").write_bytes(b"main")
+        (tmp_path / "model_A_init.pt").write_bytes(b"init")
+        (tmp_path / "model_A_main_init.pt").write_bytes(b"stale init")
+        assert _find_init_model(str(tmp_path / "model_A_main.pt")) == str(
+            tmp_path / "model_A_init.pt"
+        )
+
+
+class TestGnpeInitModel:
+    def test_explicit_model_init_written(self, tmp_path, mock_model, mock_gnpe_metadata):
+        init_path = tmp_path / "custom_init.pt"
+        init_path.write_bytes(b"fake init model")
+        fname = prepare_dingo_config(
+            MOCK_CANDIDATE_BBH, "T123456a", str(tmp_path), mock_model,
+            model_init=str(init_path),
+        )
+        assert f"model-init={init_path}" in Path(fname).read_text()
+
+    def test_explicit_model_init_missing_file_raises(
+        self, tmp_path, mock_model, mock_gnpe_metadata
+    ):
+        with pytest.raises(ValueError, match="does not exist"):
+            prepare_dingo_config(
+                MOCK_CANDIDATE_BBH, "T123456a", str(tmp_path), mock_model,
+                model_init=str(tmp_path / "no_such_init.pt"),
+            )
+
+    def test_model_init_with_non_gnpe_model_raises(
+        self, tmp_path, mock_model, mock_metadata
+    ):
+        """A non-GNPE model with --model-init would make sampling use the
+        wrong sampler; refuse at config time."""
+        init_path = tmp_path / "custom_init.pt"
+        init_path.write_bytes(b"fake init model")
+        with pytest.raises(ValueError, match="not a GNPE"):
+            prepare_dingo_config(
+                MOCK_CANDIDATE_BBH, "T123456a", str(tmp_path), mock_model,
+                model_init=str(init_path),
+            )
+
+    def test_gnpe_autodetects_sibling_init(self, tmp_path, mock_model, mock_gnpe_metadata):
+        # mock_model is tmp_path/model.pt; create the conventional sibling
+        init_path = tmp_path / "model_init.pt"
+        init_path.write_bytes(b"fake init model")
+        fname = prepare_dingo_config(
+            MOCK_CANDIDATE_BBH, "T123456a", str(tmp_path), mock_model
+        )
+        assert f"model-init={init_path}" in Path(fname).read_text()
+
+    def test_gnpe_without_init_raises(self, tmp_path, mock_model, mock_gnpe_metadata):
+        with pytest.raises(ValueError, match="init model"):
+            prepare_dingo_config(
+                MOCK_CANDIDATE_BBH, "T123456a", str(tmp_path / "out"), mock_model
+            )
+        assert not os.path.exists(str(tmp_path / "out" / "dingo_config.ini"))
+
+    def test_non_gnpe_has_no_model_init(self, tmp_path, mock_model, mock_metadata):
+        # Even with a sibling init file present, a non-GNPE model gets none.
+        (tmp_path / "model_init.pt").write_bytes(b"fake init model")
+        fname = prepare_dingo_config(
+            MOCK_CANDIDATE_BBH, "T123456a", str(tmp_path), mock_model
+        )
+        assert "model-init=" not in Path(fname).read_text()
+
+    def test_parser_accepts_model_init(self, mock_model):
+        args = create_parser().parse_args(
+            ["--json", "e.json", "--model", mock_model, "--model-init", "init.pt"]
+        )
+        assert args.model_init == "init.pt"
+
+    def test_parser_model_init_defaults_none(self, mock_model):
+        args = create_parser().parse_args(["--json", "e.json", "--model", mock_model])
+        assert args.model_init is None
+
+    def test_main_passes_model_init_through(
+        self, tmp_path, mock_model, candidate_json, mock_gnpe_metadata
+    ):
+        from dingo.pipe.gracedb import main
+
+        init_path = tmp_path / "custom_init.pt"
+        init_path.write_bytes(b"fake init model")
+        args = create_parser().parse_args(
+            [
+                "--json", candidate_json,
+                "--model", mock_model,
+                "--model-init", str(init_path),
+                "--outdir", str(tmp_path),
+                "--output", "ini",
+                "--device", "cpu",
+            ]
+        )
+        main(args)
+        content = (tmp_path / "dingo_config.ini").read_text()
+        assert f"model-init={init_path}" in content
