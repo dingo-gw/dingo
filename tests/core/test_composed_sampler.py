@@ -41,7 +41,7 @@ BASE_TRANSFORM_KWARGS = {
     "num_transform_blocks": 1,
     "activation": "elu",
     "dropout_probability": 0.0,
-    "batch_norm": False,
+    "norm": None,
     "num_bins": 4,
     "base_transform_type": "rq-coupling",
 }
@@ -59,7 +59,7 @@ EMBEDDING_KWARGS = {
     "hidden_dims": [32, 16, 8],
     "activation": "elu",
     "dropout": 0.0,
-    "batch_norm": False,
+    "norm": None,
     "added_context": False,
 }
 
