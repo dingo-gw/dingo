@@ -435,10 +435,10 @@ class GWSamplerContext:
         Parameters
         ----------
         time_marginalization_kwargs : dict, optional
-            Analytically marginalize over `geocent_time`. `t_lower` / `t_upper` are
-            filled from the network's (uniform) time prior when not already provided
-            (a caller with an updated prior passes its own bounds). Requires a
-            time-marginalized network.
+            Analytically marginalize over `geocent_time`. Must carry explicit
+            `t_lower` / `t_upper` bounds; the caller (the importance-sampling layer
+            of `Result`) supplies them from its prior. Requires a time-marginalized
+            network.
         phase_marginalization_kwargs : dict, optional
             Analytically marginalize over `phase`. Requires a uniform [0, 2 pi) phase prior.
         calibration_marginalization_kwargs : dict, optional

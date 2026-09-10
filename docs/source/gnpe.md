@@ -128,7 +128,7 @@ When reliable proxy values are available before sampling, a single GNPE iteratio
 suffices, and the chain becomes autoregressive rather than iterative: the sample
 density is preserved, and no recovery step is needed. Dingo uses this in two places.
 In [density recovery](result.md#density-recovery), an unconditional flow trained on
-the Gibbs proxies supplies the proxy values, and a single pass through the main
+the Gibbs proxies (wrapped as a `FlowFactor`) supplies the proxy values, and a single pass through the main
 network (`GWComposedSampler.from_singlestep_gnpe`) yields new samples together with
 their density. For [binary neutron stars](bns.md), the chirp-mass proxy is fixed per
 event, so sampling is single-step from the start.

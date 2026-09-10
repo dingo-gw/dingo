@@ -289,8 +289,8 @@ class Result(CoreResult):
         """
         # Marginalization is validated here against the *evolved* prior (any
         # importance-sampling prior update, the time / phase split-offs), which
-        # the sample-free context cannot see; the explicit bounds set below
-        # therefore take precedence over the context's static-prior fill.
+        # the sample-free context cannot see; the bounds the context requires are
+        # set below from that prior.
         if time_marginalization_kwargs is not None:
             if self.geocent_time_prior is None:
                 raise NotImplementedError(

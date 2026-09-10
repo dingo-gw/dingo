@@ -114,7 +114,7 @@ If `prior-dict-updates` is specified in the `.ini` file, then this will be used 
 If extending the prior support during importance sampling, be sure that the posterior does not rail up against the prior boundary being extended.
 ```
 
-By default, dingo_pipe assumes that it is necessary to sample the phase synthetically, so it will do so before importance sampling. This can be turned off by passing an empty dictionary to `importance-sampling-settings`. Note that importance sampling itself can be switched off by setting the `importance-sample` flag to False (it defaults to True). For models using a multibanded frequency domain, the likelihood is evaluated on the undecimated base domain by default (`use_base_domain` in `importance-sampling-settings`).
+By default, dingo_pipe assumes that it is necessary to sample the phase synthetically, so it will do so before importance sampling. This can be turned off by setting `importance-sampling-settings = none` (an empty dictionary keeps the default; `none` also clears the multibanding default below). Note that importance sampling itself can be switched off by setting the `importance-sample` flag to False (it defaults to True). For models using a multibanded frequency domain, the likelihood is evaluated on the undecimated base domain by default (`use_base_domain` in `importance-sampling-settings`).
 
 Importance sampling (including synthetic phase sampling) is an expensive step, so dingo_pipe allows for parallelization: this step is split over `n-parallel` jobs, each of which uses `request-cpus-importance-sampling` processes. In the backend, this makes use of the Result [split()](dingo.core.result.Result.split) and [merge()](dingo.core.result.Result.merge) methods.
 

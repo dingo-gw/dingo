@@ -101,7 +101,7 @@ determined from the data (see the Methods of {footcite:p}`Dax:2024mcn`). The sca
 sweeps the proxy over the training chirp-mass prior on a grid whose spacing is set by
 the kernel width, draws a few posterior samples at each grid point in batched
 network passes over blocks of grid points, evaluates a phase-marginalized likelihood for every draw within
-the prior, and takes the chirp mass of the maximum-likelihood draw as the trigger
+the prior (the scan therefore requires a phase-marginalized network), and takes the chirp mass of the maximum-likelihood draw as the trigger
 value.
 
 The sweep runs on the ordinary chain machinery: a fixed table with one row per grid

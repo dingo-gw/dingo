@@ -69,7 +69,7 @@ class ImportanceSamplingNode(AnalysisNode):
         self.arguments.add("label", self.label)
         self.arguments.add("proposal-samples-file", proposal_samples_file)
         self.arguments.add("event-data-file", generation_node.event_data_file)
-        if self.parallel_idx and self.inputs.sampling_seed:
+        if self.parallel_idx and self.inputs.sampling_seed is not None:
             self.arguments.add(
                 "sampling-seed",
                 str(

@@ -67,8 +67,10 @@ ordinary Python, however, and can just as well be assembled by hand (see
 ## Steps
 
 Each entry in a chain is a step. A step is an object with `parameters` (the
-columns it emits), `conditioning` (the earlier columns it reads), and a
-`sample_and_log_prob` method; together these form the `Step` protocol. Steps never
+columns it emits), `conditioning` (the earlier columns it reads), `produces` (every
+column it adds, `parameters` plus any side channels), `draws` (whether it draws
+samples), and a `sample_and_log_prob` method; together these form the `Step`
+protocol. Steps never
 receive event data directly. Instead, the data enters through the shared
 [sampler context](#sampler-context). There are three types of step, plus one
 density-free sampling block:
@@ -219,7 +221,8 @@ same range independently, through ASD masking.
 event data on the requested grid, wider than the network's band if asked, which
 the pipe records with them; the likelihood works on that grid. For a multibanded
 model, whether the likelihood uses the base domain or the decimated bands is the
-`use_base_domain` argument of `likelihood()`.
+`use_base_domain` argument of `likelihood()`; data off the network's grid (a wider
+range or another duration) require the base domain.
 * A *prior update* is applied at the
 importance-sampling stage and never modifies the context.
 
@@ -237,7 +240,7 @@ A context is **immutable**: it is built once from an event dataset and the model
 The representation vocabulary in this section (frequency domains, multibanded
 decimation, base-domain likelihoods) is specific to this domain family. To support
 a new domain family, write a new context class implementing the same interface
-(the `dingo.core.inference.context.SamplerContext` protocol: `prepared_data` and `likelihood`, plus the `prior` used by importance sampling) rather than extending this one.
+(the `dingo.core.inference.context.SamplerContext` protocol: `prepared_data` and `likelihood`, the `event_metadata` and `device` attributes, plus the `prior` used by importance sampling) rather than extending this one.
 ```
 
 ## Sampling mechanics
@@ -262,9 +265,10 @@ The reason to draw only at the point of sampling, rather than repeating a pinned
 
 A `Result` exported from a composed sampler records how its samples were made,
 under `settings["sampler"]`. The record lists the executed chain in order, with one
-descriptor per step, plus any entries added by the caller. For example,
-`dingo_pipe` adds the model checkpoint paths (`models`), the density-recovery
-recipe, and the chirp-mass-scan record.
+descriptor per step, and the `num_samples` requested, plus any entries added by
+the caller. For example, `dingo_pipe` adds the model checkpoint paths (`models`),
+the seed it used (`sampling_seed`), the density-recovery recipe, and the
+chirp-mass-scan record.
 
 ```python
 {"chain": [
@@ -274,7 +278,9 @@ recipe, and the chirp-mass-scan record.
      {"step": "RAToTrainingFrame", ...},
      {"step": "FlowFactor", ...},
  ],
- "models": {"model": "model.pt"}}
+ "num_samples": 50000,
+ "models": {"model": "model.pt"},
+ "sampling_seed": 12345}
 ```
 
 This block is a record of what was run. Nothing reads it at load time, and in

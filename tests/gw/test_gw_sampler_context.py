@@ -291,7 +291,7 @@ def test_frequency_range_cropping_masks_network_input():
 
 def test_likelihood_caller_marginalization_bounds_win(context):
     # Bounds provided by the caller (e.g. from an updated prior at the IS layer)
-    # are used as-is; the network-prior fill only runs when they are missing.
+    # are used as-is; the context requires them and fills nothing itself.
     likelihood = context.likelihood(
         time_marginalization_kwargs={"n_fft": 2, "t_lower": 1.0, "t_upper": 2.0}
     )
