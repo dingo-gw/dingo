@@ -316,7 +316,7 @@ class GWSampler(GWSamplerMixin, Sampler):
             # transform data, since this transform is used by the GNPE sampler as
             # well.
             RepackageStrainsAndASDS(
-                ifos=self.detectors,
+                ifos=[ifo.name for ifo in InterferometerList(self.detectors)],
                 first_index=self.domain.min_idx,
             ),
             ToTorch(device=self.model.device),

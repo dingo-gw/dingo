@@ -222,7 +222,7 @@ def create_cf(
         hidden_dims=posterior_kwargs["hidden_dims"],
         activation=activation_fn,
         dropout=posterior_kwargs["dropout"],
-        batch_norm=posterior_kwargs["batch_norm"],
+        norm=posterior_kwargs["norm"],
         context_features=glu_dim,
     )
 
@@ -258,7 +258,7 @@ def get_theta_embedding_net(embedding_kwargs: dict, input_dim):
             hidden_dims=embedding_kwargs["embedding_net"]["hidden_dims"],
             activation=activation_fn,
             dropout=embedding_kwargs["embedding_net"].get("dropout", 0.0),
-            batch_norm=embedding_kwargs["embedding_net"].get("batch_norm", True),
+            norm=embedding_kwargs["embedding_net"].get("norm", "BatchNorm"),
         )
     else:
         embedding_net = torch.nn.Identity()
