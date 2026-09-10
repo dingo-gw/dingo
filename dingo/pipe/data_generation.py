@@ -1,5 +1,6 @@
 import os
 import sys
+import json
 
 import dingo.pipe.create_injections  # Needed for delta-function time priors.
 
@@ -19,7 +20,6 @@ from bilby_pipe.utils import (
 import lalsimulation as LS
 import numpy as np
 
-from dingo.core.posterior_models.build_model import build_model_from_kwargs
 from dingo.gw.data.event_dataset import EventDataset
 from dingo.gw.domains import UniformFrequencyDomain, build_domain_from_model_metadata
 from dingo.gw.injection import Injection
@@ -41,6 +41,7 @@ class DataGenerationInput(BilbyDataGenerationInput):
             command_line_args=args.__dict__,
             unknown_command_line_args=unknown_args,
             injection_parameters=None,
+            model=json.loads(args.model_metadata_str),
             # bilby_version=bilby.__version__,
             # bilby_pipe_version=get_version_information(),
         )
@@ -271,17 +272,7 @@ class DataGenerationInput(BilbyDataGenerationInput):
     def _inject_dingo_signal(self, args):
         """Generate a GW signal using the dingo.gw.injection class and add it to the
         interferometer strain data. Also compute SNRs and store them."""
-        try:
-            model = build_model_from_kwargs(
-                filename=args.model, device="meta", load_training_info=False
-            )
-        except RuntimeError:
-            # 'meta' is not supported by older version of python / torch
-            model = build_model_from_kwargs(
-                filename=args.model, device="cpu", load_training_info=False
-            )
-
-        injection = Injection.from_posterior_model_metadata(model.metadata)
+        injection = Injection.from_posterior_model_metadata(self.meta_data["model"])
         injection.use_base_domain = True  # Do not generate MFD signals.
         injection.t_ref = self.trigger_time
         injection._initialize_transform()
@@ -339,17 +330,7 @@ class DataGenerationInput(BilbyDataGenerationInput):
         This method will also save the PSDs as .txt files in the data directory
         for easy reading by pesummary and Bilby.
         """
-
-        try:
-            model = build_model_from_kwargs(
-                filename=self.model, device="meta", load_training_info=False
-            )
-        except RuntimeError:
-            # 'meta' is not supported by older version of python / torch
-            model = build_model_from_kwargs(
-                filename=self.model, device="cpu", load_training_info=False
-            )
-        domain = build_domain_from_model_metadata(model.metadata, base=True)
+        domain = build_domain_from_model_metadata(self.meta_data["model"], base=True)
         assert isinstance(domain, UniformFrequencyDomain)
 
         if self.save_bilby_data_dump:
