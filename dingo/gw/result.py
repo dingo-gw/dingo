@@ -383,16 +383,16 @@ class Result(CoreResult):
             if isinstance(f_min, dict):
                 f_min = min(f_min.values())
             if isinstance(f_max, dict):
-                f_max = min(f_max.values())
+                f_max = max(f_max.values())
 
-                data_domain = build_domain(
-                    {
-                        "type": "UniformFrequencyDomain",
-                        "f_min": f_min,
-                        "f_max": f_max,
-                        "delta_f": delta_f,
-                    }
-                )
+            data_domain = build_domain(
+                {
+                    "type": "UniformFrequencyDomain",
+                    "f_min": f_min,
+                    "f_max": f_max,
+                    "delta_f": delta_f,
+                }
+            )
         else:
             data_domain = self.domain
 
