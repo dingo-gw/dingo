@@ -289,6 +289,22 @@ def test_frequency_range_cropping_masks_network_input():
     assert (strain_real[frequencies >= 25.0] != 0).all()
 
 
+def test_triangular_detector_data_keyed_by_arm():
+    # A model trained on "ET" sees data keyed by the arm names bilby expands it to
+    # (ET1/ET2/ET3), as the pipe writes them; the repackaging follows the same
+    # expansion (the #333 fix, ported from the legacy sampler).
+    meta = copy.deepcopy(_MODEL_METADATA)
+    meta["train_settings"]["data"]["detectors"] = ["ET"]
+    n_bins = _bins(_DOMAIN_SETTINGS["f_max"])
+    arms = ("ET1", "ET2", "ET3")
+    event_data = {
+        "waveform": {arm: np.ones(n_bins, dtype=complex) for arm in arms},
+        "asds": {arm: np.ones(n_bins) for arm in arms},
+    }
+    ctx = GWSamplerContext.from_model_metadata(meta, event_data)
+    assert ctx.prepared_data().shape[0] == 3
+
+
 def test_likelihood_caller_marginalization_bounds_win(context):
     # Bounds provided by the caller (e.g. from an updated prior at the IS layer)
     # are used as-is; the context requires them and fills nothing itself.
