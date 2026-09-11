@@ -2,6 +2,7 @@ import logging
 from typing import Dict, List, Literal, Tuple
 from dingo.core.utils.misc import get_version
 import packaging.version as pv
+import warnings
 
 import torch
 
@@ -175,3 +176,128 @@ def update_model_config(model_settings: dict):
         del model_settings["nsf_kwargs"]
         model_settings["embedding_kwargs"] = model_settings["embedding_net_kwargs"]
         del model_settings["embedding_net_kwargs"]
+
+    if "embedding_kwargs" in model_settings and "embedding_type" not in model_settings:
+        model_settings["embedding_type"] = "resnet"
+
+    if model_settings.get("embedding_type") == "transformer":
+        # Networks trained on the dingo-t1 branch (e.g. the published Dingo-T1
+        # network) store kwargs that are now either fixed or derived.
+        embedding_kwargs = model_settings["embedding_kwargs"]
+        embedding_kwargs.pop("added_context", None)
+        tokenizer_kwargs = embedding_kwargs.get("tokenizer_kwargs") or {}
+        if not tokenizer_kwargs.pop(
+            "condition_on_position", True
+        ) or tokenizer_kwargs.pop("context_in_initial_layer", False):
+            raise ValueError(
+                "Transformer networks with condition_on_position=False or "
+                "context_in_initial_layer=True (dingo-t1 branch) are not supported."
+            )
+        # Derived from num_blocks and d_model at construction.
+        for key in ("context_features", "output_dim"):
+            tokenizer_kwargs.pop(key, None)
+        # [num_tokens, num_features] -> num_features (only the latter was used).
+        if "input_dims" in tokenizer_kwargs:
+            tokenizer_kwargs["input_dim"] = tokenizer_kwargs.pop("input_dims")[-1]
+        # num_blocks (one detector column after two frequency columns) -> the
+        # generic position layout; the GLU context width is unchanged.
+        if "num_blocks" in tokenizer_kwargs:
+            tokenizer_kwargs["position_category_sizes"] = [
+                tokenizer_kwargs.pop("num_blocks")
+            ]
+            tokenizer_kwargs["position_continuous_dim"] = 2
+        (embedding_kwargs.get("final_net_kwargs") or {}).pop("input_dim", None)
+
+
+def update_data_config(settings: dict):
+    """
+    Update ``settings["train_settings"]["data"]`` to the current keys, in place.
+    Renames the tokenization settings written by the dingo-t1 branch (e.g. the
+    published Dingo-T1 network), filling in the constant defaults that branch
+    applied for absent keys, and the ``mask_detectors`` keys of the interim
+    transformer-branch schema. Idempotent.
+
+    Parameters
+    ----------
+    settings: dict
+        Model metadata or training settings, i.e. a dict with ``train_settings``.
+    """
+    data_settings = settings.get("train_settings", {}).get("data", {})
+    tok = data_settings.get("tokenization")
+    if tok is None:
+        return
+    if tok.pop("normalize_frequency_for_positional_encoding", False):
+        raise NotImplementedError(
+            "Networks trained with normalize_frequency_for_positional_encoding=True "
+            "(dingo-t1 branch) are not supported."
+        )
+    # Training records normalize_position since it defaulted to True; networks
+    # saved before that were trained on positions in Hz.
+    tok.setdefault("normalize_position", False)
+    if "num_tokens" in tok:
+        tok["num_tokens_per_block"] = tok.pop("num_tokens")
+    if "drop_detectors" in tok:
+        old = tok.pop("drop_detectors")
+        tok["mask_detectors"] = {
+            "p_mask_012_detectors": old.get("p_drop_012_detectors"),
+            "p_mask_hlv": old.get("p_drop_hlv"),
+        }
+    mask_detectors = tok.get("mask_detectors")
+    if mask_detectors is not None and (
+        {"num_blocks", "p_mask_012_detectors", "p_mask_hlv"} & set(mask_detectors)
+    ):
+        # Networks with these keys were trained with global detector indices
+        # (H1=0, L1=1, V1=2). The index is now the position in the training
+        # detector list, which agrees only if the list is ordered that way.
+        detectors = data_settings["detectors"]
+        if list(detectors) != ["H1", "L1", "V1"][: len(detectors)]:
+            raise ValueError(
+                f"Transformer networks trained with detectors {detectors} under the "
+                f"global detector indices H1=0, L1=1, V1=2 are not supported: the "
+                f"detector index is now the position in the training detector list."
+            )
+        mask_detectors.pop("num_blocks", None)
+        for new, old_key in (
+            ("p_num_masked", "p_mask_012_detectors"),
+            ("p_detector", "p_mask_hlv"),
+        ):
+            if old_key in mask_detectors:
+                mask_detectors[new] = mask_detectors.pop(old_key)
+    if "drop_frequency_range" in tok:
+        old = tok.pop("drop_frequency_range")
+        if "f_cut" in old:
+            f_cut = old["f_cut"]
+            frequency_range = {
+                "p_mask": f_cut.get("p_cut", 0.2),
+                "p_same_all_detectors": f_cut.get("p_same_cut_all_detectors", 0.2),
+                "p_lower_upper_both": f_cut.get("p_lower_upper_both", [0.4, 0.4, 0.2]),
+            }
+            # The bound names are deliberately swapped: mask_frequency_range uses
+            # random_strain_cropping's convention (f_min_upper = cap on f_min,
+            # f_max_lower = floor on f_max), the mirror image of dingo-t1's cut
+            # names. Absent bounds stay absent (that side was never cut).
+            for new, old_key in (
+                ("f_min_upper", "f_max_lower_cut"),
+                ("f_max_lower", "f_min_upper_cut"),
+            ):
+                if old_key in f_cut:
+                    frequency_range[new] = f_cut[old_key]
+            tok["mask_frequency_range"] = frequency_range
+        if "mask_interval" in old:
+            tok["mask_frequency_notches"] = {
+                "p_per_detector": 0.2,
+                **old["mask_interval"],
+            }
+    if "drop_random_tokens" in tok:
+        old = tok.pop("drop_random_tokens")
+        if old.get("increase_p_until_epoch") is not None:
+            warnings.warn(
+                "drop_random_tokens.increase_p_until_epoch is no longer supported "
+                "and is ignored."
+            )
+        tok["mask_random_tokens"] = {
+            "p_mask": old.get("p_drop", 0.4),
+            "max_num_tokens": old.get(
+                "max_num_tokens", tok.get("num_tokens_per_block")
+            ),
+        }

@@ -5,6 +5,7 @@ import os
 from os.path import join
 import numpy as np
 import torch
+from dingo.core.nn.transformer import TransformerModel
 from dingo.core.posterior_models.normalizing_flow import NormalizingFlowPosteriorModel
 from dingo.core.utils import torchutils
 
@@ -318,3 +319,79 @@ def test_legacy_layer_norm_setting_is_converted():
         update_model_config(
             {"embedding_kwargs": {"batch_norm": True, "layer_norm": True}}
         )
+
+
+# ---------------------------------------------------------------------------
+# NormalizingFlowPosteriorModel — embedding_type dispatch
+# ---------------------------------------------------------------------------
+
+_T_TOKENS = 6
+_T_FEATURES = 12
+_T_BLOCKS = 2
+_T_PARAMS = 4
+_T_CONTEXT = 8
+_T_D_MODEL = 16
+
+
+def _make_transformer_model_kwargs():
+    return {
+        "posterior_model_type": "normalizing_flow",
+        "embedding_type": "transformer",
+        "posterior_kwargs": {
+            "input_dim": _T_PARAMS,
+            "context_dim": _T_CONTEXT,
+            "num_flow_steps": 5,
+            "base_transform_kwargs": {
+                "hidden_dim": 32,
+                "num_transform_blocks": 2,
+                "activation": "elu",
+                "dropout_probability": 0.0,
+                "norm": None,
+                "num_bins": 4,
+                "base_transform_type": "rq-coupling",
+            },
+        },
+        "embedding_kwargs": {
+            "tokenizer_kwargs": {
+                "input_dim": _T_FEATURES,
+                "position_continuous_dim": 2,
+                "position_category_sizes": [_T_BLOCKS],
+                "hidden_dims": [16],
+                "activation": "elu",
+                "norm": None,
+            },
+            "transformer_kwargs": {
+                "d_model": _T_D_MODEL,
+                "dim_feedforward": 32,
+                "nhead": 4,
+                "dropout": 0.0,
+                "num_layers": 2,
+                "norm_first": True,
+            },
+            "pooling": "cls",
+            "final_net_kwargs": {
+                "activation": "elu",
+                "output_dim": _T_CONTEXT,
+            },
+        },
+    }
+
+
+def test_pm_initializes_with_embedding_type_transformer():
+    """embedding_type: transformer builds a TransformerModel as the embedding net
+    (and is filtered out before the network builder, which would reject it)."""
+    model_kwargs = _make_transformer_model_kwargs()
+    pm = NormalizingFlowPosteriorModel(
+        metadata={"train_settings": {"model": model_kwargs}}, device="cpu"
+    )
+    assert isinstance(pm.network.embedding_net, TransformerModel)
+
+
+def test_pm_initializes_with_explicit_embedding_type_resnet(data_setup_pm_1):
+    """embedding_type: resnet is now explicit in settings; existing resnet path must
+    still work unchanged."""
+    d = data_setup_pm_1
+    d.model_kwargs["embedding_type"] = "resnet"
+    pm = NormalizingFlowPosteriorModel(metadata=d.metadata, device="cpu")
+    assert pm.network is not None
+    assert not isinstance(pm.network.embedding_net, TransformerModel)

@@ -31,12 +31,16 @@ class ImportanceSamplingNode(AnalysisNode):
         self.setup_arguments()
 
         if self.inputs.transfer_files or self.inputs.osg:
-           
+
             input_files_to_transfer = [
                 proposal_samples_file,
                 str(generation_node.event_data_file),
                 str(self.inputs.complete_ini_file),
-                *(self.inputs.spline_calibration_envelope_dict.values() if self.inputs.spline_calibration_envelope_dict else [])
+                *(
+                    self.inputs.spline_calibration_envelope_dict.values()
+                    if self.inputs.spline_calibration_envelope_dict
+                    else []
+                ),
             ]
 
             # if running on the OSG we need to specify the sites
@@ -52,7 +56,7 @@ class ImportanceSamplingNode(AnalysisNode):
             # Credentials are needed to access any OSDF files
             if any(["osdf" in s for s in input_files_to_transfer]):
                 self.extra_lines.extend(self.scitoken_lines)
-                
+
             self.extra_lines.extend(
                 self._condor_file_transfer_lines(
                     input_files_to_transfer,
@@ -61,11 +65,18 @@ class ImportanceSamplingNode(AnalysisNode):
             )
             self.arguments.add("outdir", os.path.relpath(self.inputs.outdir))
 
-            
         # Add extra arguments for dingo
         self.arguments.add("label", self.label)
         self.arguments.add("proposal-samples-file", proposal_samples_file)
         self.arguments.add("event-data-file", generation_node.event_data_file)
+        if self.parallel_idx and self.inputs.sampling_seed is not None:
+            self.arguments.add(
+                "sampling-seed",
+                str(
+                    int(self.inputs.sampling_seed)
+                    + int(self.parallel_idx.removeprefix("part"))
+                ),
+            )
 
         env_vars = []
         # if self.request_cpus > 1:

@@ -61,8 +61,10 @@ write_to = "dingo/_version.py"
 markers = [
     "slow: marks tests as slow",
     "asimov: marks tests for Asimov/LIGO pipeline integration",
+    "heavy: marks heavy end-to-end tests (train + importance sample; GPU; minutes-long). Deselected by default; run with -m heavy.",
 ]
-addopts = "-m 'not asimov'"
+addopts = "-m 'not asimov and not heavy'"
+pythonpath = ["."]
 
 [project.urls]
 homepage = "https://github.com/dingo-gw/dingo"

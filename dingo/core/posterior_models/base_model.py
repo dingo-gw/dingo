@@ -40,7 +40,10 @@ except ImportError:
 import dingo.core.utils as utils
 import dingo.core.utils.trainutils
 from dingo.core.nn.compile_utils import eager_mode
-from dingo.core.utils.backward_compatibility import update_model_config
+from dingo.core.utils.backward_compatibility import (
+    update_data_config,
+    update_model_config,
+)
 from dingo.core.utils.misc import get_version
 from dingo.core.utils.torchutils import get_ddp_module, unwrap_network
 from dingo.core.utils.trainutils import EarlyStopping, RuntimeLimits
@@ -366,6 +369,7 @@ class BasePosteriorModel(ABC):
         self.iteration = d.get("iteration", 0)
 
         self.metadata = d["metadata"]
+        update_data_config(self.metadata)  # Backward compat
 
         if "context" in d:
             self.context = d["context"]
@@ -552,6 +556,17 @@ class BasePosteriorModel(ABC):
 
             if is_primary:
                 print(f"Finished training epoch {self.epoch}.\n")
+
+    @property
+    def base_metadata(self) -> dict:
+        """The analysis metadata (dataset, domain, detector, and data settings). For
+        an unconditional (density-recovery) model this is the metadata of the base
+        model whose samples it was trained on, stored under `metadata["base"]`; the
+        network's own settings (`standardization`, `inference_parameters`) are
+        always read from `metadata` directly."""
+        if self.metadata["train_settings"]["data"].get("unconditional", False):
+            return self.metadata["base"]
+        return self.metadata
 
 
 def _dataset_len(dataloader: torch.utils.data.DataLoader) -> int:

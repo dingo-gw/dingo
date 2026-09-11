@@ -1,4 +1,5 @@
 import copy
+from typing import Optional
 
 import numpy as np
 import torch
@@ -6,8 +7,8 @@ import torch.nn as nn
 
 from dingo.core.utils import torchutils
 from dingo.core.nn.enets import create_enet_with_projection_layer_and_dense_resnet
-
-from dingo.core.nn.enets import DenseResidualNet
+from dingo.core.nn.resnet import DenseResidualNet
+from dingo.core.nn.transformer import create_transformer_enet
 
 
 class ContinuousFlow(nn.Module):
@@ -29,8 +30,8 @@ class ContinuousFlow(nn.Module):
     def __init__(
         self,
         continuous_flow_net: nn.Module,
-        context_embedding_net: nn.Module = torch.nn.Identity(),
-        theta_embedding_net: nn.Module = torch.nn.Identity(),
+        context_embedding_net: Optional[nn.Module] = None,
+        theta_embedding_net: Optional[nn.Module] = None,
         context_with_glu: bool = False,
         theta_with_glu: bool = False,
     ):
@@ -39,10 +40,11 @@ class ContinuousFlow(nn.Module):
         ----------
         continuous_flow_net: nn.Module
             Main network for the continuous flow.
-        context_embedding_net: nn.Module = torch.nn.Identity()
+        context_embedding_net: Optional[nn.Module]
             Embedding network for the context information (e.g., observed data).
-        theta_embedding_net: nn.Module = torch.nn.Identity()
-            Embedding network for the parameters.
+            If None, defaults to nn.Identity().
+        theta_embedding_net: Optional[nn.Module]
+            Embedding network for the parameters. If None, defaults to nn.Identity().
         context_with_glu: bool = False
             Whether to provide context as GLU or main input to the continuous_flow_net.
         theta_with_glu: bool = False
@@ -51,8 +53,18 @@ class ContinuousFlow(nn.Module):
         """
         super(ContinuousFlow, self).__init__()
         self.continuous_flow_net = continuous_flow_net
-        self.context_embedding_net = context_embedding_net
-        self.theta_embedding_net = theta_embedding_net
+        # Default to a fresh nn.Identity() per instance rather than a mutable default
+        # argument, which would otherwise share a single Identity module (and its
+        # registration as a submodule) across every ContinuousFlow that omits this
+        # argument.
+        self.context_embedding_net = (
+            context_embedding_net
+            if context_embedding_net is not None
+            else nn.Identity()
+        )
+        self.theta_embedding_net = (
+            theta_embedding_net if theta_embedding_net is not None else nn.Identity()
+        )
         self.theta_with_glu = theta_with_glu
         self.context_with_glu = context_with_glu
 
@@ -158,7 +170,10 @@ class ContinuousFlow(nn.Module):
 
 
 def create_cf(
-    posterior_kwargs: dict, embedding_kwargs: dict = None, initial_weights: dict = None
+    posterior_kwargs: dict,
+    embedding_kwargs: dict = None,
+    initial_weights: dict = None,
+    embedding_type: str = "resnet",
 ):
     """
     Build a continuous flow based on settings dictionaries.
@@ -171,6 +186,10 @@ def create_cf(
         Settings for the context embedding network.
     initial_weights: dict
         Initial weights for the embedding network (of SVD projection type).
+    embedding_type: str
+        "resnet" (SVD projection followed by a dense residual network) or
+        "transformer" (tokenized data; the context is then the list of waveform,
+        position and token_mask tensors, passed through to the embedding network).
 
     Returns
     -------
@@ -181,7 +200,13 @@ def create_cf(
     context_dim = posterior_kwargs["context_dim"]
 
     # get embeddings modules for context
-    if embedding_kwargs is not None:
+    if embedding_kwargs is None:
+        context_embedding = torch.nn.Identity()
+    elif (embedding_type or "resnet").lower() == "transformer":
+        context_embedding_kwargs = copy.deepcopy(embedding_kwargs)
+        context_embedding_kwargs.pop("allow_tf32", None)
+        context_embedding = create_transformer_enet(**context_embedding_kwargs)
+    else:
         context_embedding_kwargs = copy.deepcopy(embedding_kwargs)
         if initial_weights is not None:
             context_embedding_kwargs["V_rb_list"] = initial_weights["V_rb_list"]
@@ -191,8 +216,6 @@ def create_cf(
         context_embedding = create_enet_with_projection_layer_and_dense_resnet(
             **context_embedding_kwargs
         )
-    else:
-        context_embedding = torch.nn.Identity()
 
     # get embeddings modules for theta (which is actually cat(t, theta))
     if "theta_embedding_kwargs" in posterior_kwargs:
@@ -271,14 +294,15 @@ def get_dim_positional_embedding(encoding: dict, input_dim: int):
         return (1 + 2 * encoding["frequencies"]) * input_dim
     return 2 * encoding["frequencies"] + input_dim
 
+
 class PositionalEncoding(nn.Module):
     """
     Implements positional encoding as commonly used in transformer architectures.
-    
-    Positional encoding introduces a way to inject information about the order of 
-    the input data (e.g., sequence positions) into a neural network that otherwise 
-    lacks a sense of position due to its permutation-invariant nature. This class 
-    computes sinusoidal encodings based on the position of each element in the input 
+
+    Positional encoding introduces a way to inject information about the order of
+    the input data (e.g., sequence positions) into a neural network that otherwise
+    lacks a sense of position due to its permutation-invariant nature. This class
+    computes sinusoidal encodings based on the position of each element in the input
     and concatenates them with the original input features.
 
     Attributes
@@ -298,7 +322,7 @@ class PositionalEncoding(nn.Module):
         The number of sinusoidal frequencies to compute. This determines the dimensionality
         of the positional encoding for each input feature.
     encode_all : bool, optional (default=True)
-        If True, the positional encoding is computed for all features in the input. 
+        If True, the positional encoding is computed for all features in the input.
         Otherwise, it is computed only for the first feature (e.g., the time dimension).
     base_freq : float, optional (default=2 * np.pi)
         The base frequency used for sinusoidal encoding.
@@ -306,12 +330,13 @@ class PositionalEncoding(nn.Module):
     Methods
     -------
     forward(t_theta)
-        Computes the positional encoding for the input tensor `t_theta` and concatenates 
+        Computes the positional encoding for the input tensor `t_theta` and concatenates
         it with the original input features.
         - If `encode_all` is True, the positional encoding is computed for all features.
         - If `encode_all` is False, the positional encoding is applied only to the first
           feature, such as time, while other features remain unchanged.
     """
+
     def __init__(self, nr_frequencies, encode_all=True, base_freq=2 * np.pi):
         super(PositionalEncoding, self).__init__()
         frequencies = base_freq * torch.pow(

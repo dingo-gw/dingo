@@ -39,13 +39,11 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         time_marginalization_kwargs: Optional[dict] = None,
         phase_marginalization_kwargs: Optional[dict] = None,
         calibration_marginalization_kwargs: Optional[dict] = None,
-        phase_grid=None,
         use_base_domain: bool = False,
         frequency_update: Optional[
             dict[str, float | dict[str, float | list[float]]]
         ] = None,
     ):
-        # TODO: Does the phase_grid argument ever get used?
         """
         Parameters
         ----------
@@ -71,9 +69,10 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
             When the domain is a MultibandedFrequencyDomain, whether to use the
             associated base UniformFrequencyDomain for likelihood computations.
         frequency_update: dict
-            Specifies settings for updating the frequency range
-            example: {'minimum_frequency': {'H1': 30., 'L1': 20.},
-                       maximum_frequency: 1024.}
+            The event's frequency range: the ASDs are masked outside it, and the
+            calibration spline nodes are placed across it, per detector. Values
+            are floats or per-detector dicts, e.g.
+            {'minimum_frequency': {'H1': 30., 'L1': 20.}, 'maximum_frequency': 1024.}
         """
         super().__init__(
             wfg_kwargs=wfg_kwargs,
@@ -81,6 +80,7 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
             data_domain=data_domain,
             ifo_list=list(event_data["waveform"].keys()),
             t_ref=t_ref,
+            frequency_update=frequency_update,
         )
 
         if isinstance(data_domain, MultibandedFrequencyDomain) and not use_base_domain:
@@ -152,7 +152,9 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
             ]
         )
         self.whiten = True
-        self.phase_grid = phase_grid
+        # Assigned by phase-grid consumers (synthetic phase) or set internally by
+        # phase marginalization; never a construction input.
+        self.phase_grid = None
 
         # optionally initialize time marginalization
         self.time_marginalization = False
@@ -177,6 +179,12 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
 
         # Initialize calibration marginalization using the setter from GWSignal.
         self.calibration_marginalization_kwargs = calibration_marginalization_kwargs
+
+        # When set, log_likelihood returns (log_likelihood, snr) pairs, where snr
+        # is the matched-filter signal-to-noise ratio of the waveform against the
+        # data (phase-maximized under phase marginalization). Used by the
+        # chirp-mass scan to report trigger quality.
+        self.return_aux_snr = False
 
     def initialize_time_marginalization(self, t_lower, t_upper, n_fft=1):
         """
@@ -314,7 +322,13 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
                 for d_ifo, mu_ifo in zip(d.values(), mu.values())
             ],
         )
-        return self.log_Zn + kappa2 - 1 / 2.0 * rho2opt
+        log_likelihood = self.log_Zn + kappa2 - 1 / 2.0 * rho2opt
+
+        if self.return_aux_snr:
+            snr = kappa2 / rho2opt**0.5
+            return log_likelihood, snr
+
+        return log_likelihood
 
     def log_likelihood_phase_grid(
         self, theta: dict, phases: Optional[np.ndarray] = None
@@ -335,6 +349,8 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
     def _log_likelihood_phase_grid_manual(
         self, theta: dict, phases: Optional[np.ndarray] = None
     ) -> np.ndarray:
+        if self.return_aux_snr:
+            raise NotImplementedError
         if self.phase_marginalization:
             raise ValueError(
                 "Can't compute likelihood on a phase grid for "
@@ -356,6 +372,8 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
 
     def _log_likelihood_phase_grid_mode_decomposed(self, theta, phases=None):
         # TODO: Implement for time marginalization
+        if self.return_aux_snr:
+            raise NotImplementedError
         if self.phase_marginalization:
             raise ValueError(
                 "Can't compute likelihood on a phase grid for "
@@ -512,7 +530,16 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
                     for d_ifo, mu_ifo in zip(d.values(), mu.values())
                 ]
             )
-            return self.log_Zn + ln_i0(np.abs(kappa2C)) - 1 / 2.0 * rho2opt
+            log_likelihood = self.log_Zn + ln_i0(np.abs(kappa2C)) - 1 / 2.0 * rho2opt
+
+            if self.return_aux_snr:
+                # Phase-maximized matched-filter SNR: |kappa2C| / sqrt(rho2opt).
+                # (ln_i0(|kappa2C|) is the phase-marginalized likelihood term
+                # above, not a matched-filter statistic.)
+                snr = np.abs(kappa2C) / rho2opt**0.5
+                return log_likelihood, snr
+
+            return log_likelihood
 
         else:
             log_likelihoods_phase_grid = self.log_likelihood_phase_grid(theta)
@@ -596,7 +623,16 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         alpha = np.max(exponent)
         kappa2 = alpha + np.log(np.sum(np.exp(exponent - alpha)))
 
-        return self.log_Zn + kappa2 - 1 / 2.0 * rho2opt
+        log_likelihood = self.log_Zn + kappa2 - 1 / 2.0 * rho2opt
+
+        if self.return_aux_snr:
+            # Here kappa2 is the time-marginalized term, not a matched-filter
+            # statistic.
+            raise NotImplementedError(
+                "return_aux_snr is not implemented for time marginalization."
+            )
+
+        return log_likelihood
 
     def _log_likelihood_calibration_marginalized(self, theta):
         """
@@ -611,6 +647,8 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         -------
         log_likelihood: float
         """
+        if self.return_aux_snr:
+            raise NotImplementedError
 
         # Step 1: Compute whitened GW strain mu(theta) for parameters theta.
         mu = self.signal(theta)["waveform"]
@@ -655,23 +693,21 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
 
         Returns
         -------
-        complex : Inner product
+        np.ndarray
+            Complex inner products, one per row of theta.
         """
         with threadpool_limits(limits=1, user_api="blas"):
-            # Generator object for theta rows. For idx this yields row idx of
-            # theta dataframe, converted to dict, ready to be passed to
-            # self.log_likelihood.
             theta_generator = (d[1].to_dict() for d in theta.iterrows())
 
             if num_processes > 1:
+                # Workers are not re-seeded: under fork they copy one random
+                # stream, under spawn they start unseeded (#408).
                 with Pool(processes=num_processes) as pool:
-                    d_inner_h_complex = pool.map(
-                        self.d_inner_h_complex, theta_generator
-                    )
+                    results = pool.map(self.d_inner_h_complex, theta_generator)
             else:
-                d_inner_h_complex = list(map(self.d_inner_h_complex, theta_generator))
+                results = list(map(self.d_inner_h_complex, theta_generator))
 
-        return np.array(d_inner_h_complex)
+        return np.array(results)
 
     def d_inner_h_complex(self, theta):
         """
@@ -685,19 +721,14 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
 
         Returns
         -------
-        complex : Inner product
+        complex : Inner product (d|h)
         """
         # TODO: Implement for time marginalization.
-        return self._d_inner_h_complex(theta)
-
-    def _d_inner_h_complex(self, theta):
         mu = self.signal(theta)["waveform"]
         d = self.whitened_strains
         return sum(
-            [
-                inner_product_complex(d_ifo, mu_ifo)
-                for d_ifo, mu_ifo in zip(d.values(), mu.values())
-            ]
+            inner_product_complex(d_ifo, mu_ifo)
+            for d_ifo, mu_ifo in zip(d.values(), mu.values())
         )
 
 
