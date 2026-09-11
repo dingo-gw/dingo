@@ -108,7 +108,7 @@ training:
 local:
   device: cuda
   num_gpus: 8
-  num_workers: 8 # per GPU
+  num_workers: 64 # total across GPUs (= 8 per GPU); scale with num_gpus
   runtime_limits:
     max_time_per_run: 1_000_000
     max_epochs_per_run: 500
