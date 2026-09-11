@@ -165,7 +165,7 @@ The `GWSamplerContext` holds event data and metadata, along with model metadata,
 
 `prepared_data(conditioning=None)`
 : The network-input representation of the event. This takes the raw data, and applies transformations based on the model metadata, e.g., heterodyning, decimating, whitening, frequency-masking, and repackaging. Optional `conditioning` allows for the result to depend on the conditioning parameters. When called without conditioning, the representation is computed once
-  and cached. When called with conditioning, the result has one data row per conditioning row. As an example, for DINGO-BNS, the `chirp_mass_proxy` parameter should be provided as conditioning, and `prepared_data()` will use this for heterodyning.
+  and cached. When called with conditioning, the result has one data row per conditioning row. As an example, for DINGO-BNS, the `chirp_mass_proxy` parameter should be provided as conditioning, and `prepared_data()` will use this for heterodyning. For a tokenized (transformer) network the representation is the list `[waveform, position, token_mask]`, and a frequency-range update or PSD notch masks tokens rather than bins.
 
 `prior`
 : The prior used for training the network. Importance-sampling prior updates

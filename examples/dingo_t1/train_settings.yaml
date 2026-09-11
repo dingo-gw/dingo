@@ -107,6 +107,7 @@ training:
 
 local:
   device: cuda
+  num_gpus: 8
   num_workers: 8 # per GPU
   runtime_limits:
     max_time_per_run: 1_000_000
@@ -117,7 +118,6 @@ local:
     memory_cpus: 256000
     memory_gpus: 80000
     num_cpus: 64
-    num_gpus: 8
     request_disk: 800GB
 #  wandb:
 #    entity: ...
