@@ -400,8 +400,10 @@ def build_train_and_test_loaders(
     rank : int, optional
         Rank of the current DDP process.
     drop_last : bool
-        Drop the last, smaller batch of each epoch. Used with ``torch.compile``,
-        which would otherwise recompile the network for the odd batch shape.
+        Drop the last, smaller batch of each training epoch, so that a compiled
+        network (specialized to the batch shape) is not recompiled for it. The test
+        loader always keeps its last batch: the test epoch runs eagerly, and dropping
+        it could leave a small per-rank test split with no batches at all.
 
     Returns
     -------
@@ -442,7 +444,7 @@ def build_train_and_test_loaders(
             num_workers=num_workers,
             worker_init_fn=fix_random_seeds,
             persistent_workers=persistent_workers,
-            drop_last=drop_last,
+            drop_last=False,
         )
     else:
         train_sampler = None
@@ -464,7 +466,7 @@ def build_train_and_test_loaders(
             num_workers=num_workers,
             worker_init_fn=fix_random_seeds,
             persistent_workers=persistent_workers,
-            drop_last=drop_last,
+            drop_last=False,
         )
 
     return train_loader, test_loader, train_sampler

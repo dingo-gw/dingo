@@ -9,7 +9,12 @@ import torch.distributed as dist
 import torch.nn as nn
 from torch.nn.parallel import DistributedDataParallel as DDP
 
-from dingo.core.nn.compile_utils import compile_network, eager_mode
+from dingo.core.nn.compile_utils import (
+    compile_network,
+    eager_mode,
+    is_compiled,
+    reset_graphs_if_requires_grad_changes,
+)
 from dingo.core.nn.nsf import create_nsf_model
 from dingo.core.posterior_models.normalizing_flow import NormalizingFlowPosteriorModel
 from dingo.core.utils.torchutils import get_ddp_module, unwrap_network
@@ -148,3 +153,75 @@ class TestCompileNetwork:
             flow.log_prob, fullgraph=True, backend="aot_eager"
         )
         assert torch.allclose(compiled_log_prob(theta, context), eager, atol=1e-5)
+
+
+class TestResetGraphsOnRequiresGradChange:
+    """Dynamo does not guard on requires_grad of parameters: a graph traced with a
+    frozen layer is reused after unfreezing and never produces its gradient."""
+
+    @staticmethod
+    def _net():
+        torch.manual_seed(0)
+        net = nn.Sequential(nn.Linear(4, 8), nn.Linear(8, 1))
+        return net
+
+    @staticmethod
+    def _set_rb(net, requires_grad):
+        for p in net[0].parameters():  # parameters "0.weight", "0.bias" play the RB layer
+            p.requires_grad_(requires_grad)
+
+    def test_unfreeze_without_reset_gives_no_gradient(self):
+        net = self._net()
+        self._set_rb(net, False)
+        compiled = torch.compile(net, backend="aot_eager")
+        x = torch.randn(8, 4)
+        compiled(x).sum().backward()
+        self._set_rb(net, True)
+        net.zero_grad(set_to_none=True)
+        compiled(x).sum().backward()
+        assert net[0].weight.grad is None  # the bug this module guards against
+
+    def test_reset_restores_gradient_after_unfreeze(self):
+        net = self._net()
+        self._set_rb(net, False)
+        compiled = torch.compile(net, backend="aot_eager")
+        x = torch.randn(8, 4)
+        compiled(x).sum().backward()
+        assert reset_graphs_if_requires_grad_changes(
+            compiled, name_contains="0.", requires_grad=True
+        )
+        self._set_rb(net, True)
+        net.zero_grad(set_to_none=True)
+        compiled(x).sum().backward()
+        assert net[0].weight.grad is not None
+        assert torch.any(net[0].weight.grad != 0)
+
+    def test_no_reset_when_state_unchanged_or_uncompiled(self):
+        net = self._net()
+        self._set_rb(net, False)
+        assert not reset_graphs_if_requires_grad_changes(net, "0.", requires_grad=True)
+        compiled = torch.compile(net, backend="aot_eager")
+        assert not reset_graphs_if_requires_grad_changes(
+            compiled, "0.", requires_grad=False
+        )
+        assert not reset_graphs_if_requires_grad_changes(
+            compiled, "no_such_layer", requires_grad=True
+        )
+
+    def test_is_compiled_sees_through_ddp(self, single_process_group):
+        net = nn.Linear(2, 2)
+        assert not is_compiled(net)
+        assert is_compiled(torch.compile(net))
+        assert is_compiled(torch.compile(DDP(net)))
+        assert is_compiled(DDP(torch.compile(net)))
+
+
+class TestSingleGpuCacheDir:
+    def test_cache_dir_honored_without_rank(self, monkeypatch, tmp_path):
+        monkeypatch.delenv("TORCHINDUCTOR_CACHE_DIR", raising=False)
+        monkeypatch.delenv("TRITON_CACHE_DIR", raising=False)
+        compile_network(nn.Linear(2, 2), cache_dir=str(tmp_path))
+        inductor = os.environ["TORCHINDUCTOR_CACHE_DIR"]
+        assert inductor.startswith(str(tmp_path))
+        assert "rank" not in inductor
+        assert os.environ["TRITON_CACHE_DIR"].startswith(inductor)

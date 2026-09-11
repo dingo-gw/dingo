@@ -26,6 +26,15 @@ def eager_mode():
         yield
 
 
+def is_compiled(network: torch.nn.Module) -> bool:
+    """True if ``network`` is (or wraps) a ``torch.compile``-d module."""
+    while network is not None:
+        if hasattr(network, "_orig_mod"):  # torch.compile OptimizedModule
+            return True
+        network = getattr(network, "module", None)  # DDP
+    return False
+
+
 def compile_network(
     network: torch.nn.Module, rank: int = None, cache_dir: str = None
 ) -> torch.nn.Module:
@@ -41,15 +50,40 @@ def compile_network(
         Inductor/Triton cache: the ranks compile concurrently and would otherwise
         race on the shared cache files.
     cache_dir : str, optional
-        Base directory for the per-rank caches (default: the system temp dir). It
-        must be **node-local**: Triton shared objects written to a network
-        filesystem can be unloadable from another process, which hangs the run.
+        Base directory for the on-disk Inductor/Triton cache (default: the system
+        temp dir). It must be **node-local**: Triton shared objects written to a
+        network filesystem can be unloadable from another process, which hangs
+        the run.
     """
-    if rank is not None:
-        # in case the default cache dir is not available
+    if rank is not None or cache_dir is not None:
         base = cache_dir or tempfile.gettempdir()
-        # naming the cache so that different DDP ranks do not interferej
-        rank_cache = os.path.join(base, f"dingo_inductor_rank{rank}")
-        os.environ["TORCHINDUCTOR_CACHE_DIR"] = rank_cache
-        os.environ["TRITON_CACHE_DIR"] = os.path.join(rank_cache, "triton")
+        name = "dingo_inductor" if rank is None else f"dingo_inductor_rank{rank}"
+        cache = os.path.join(base, name)
+        os.environ["TORCHINDUCTOR_CACHE_DIR"] = cache
+        os.environ["TRITON_CACHE_DIR"] = os.path.join(cache, "triton")
     return torch.compile(network)
+
+
+def reset_graphs_if_requires_grad_changes(
+    network: torch.nn.Module, name_contains: str, requires_grad: bool
+) -> bool:
+    """Discard the compiled graphs of ``network`` if setting ``requires_grad`` on the
+    parameters whose name contains ``name_contains`` would change their state.
+
+    Dynamo does not guard on ``requires_grad`` of parameters: a graph traced while
+    a layer was frozen is reused after the layer is unfrozen, and its backward
+    never produces gradients for that layer (no error, the loss looks normal).
+    Call this *before* flipping the flags at a stage boundary; the next forward
+    then re-traces with the new set of trainable parameters. Returns True if the
+    graphs were reset. No-op for uncompiled networks.
+    """
+    if not is_compiled(network):
+        return False
+    params = [p for n, p in network.named_parameters() if name_contains in n]
+    if not params:
+        return False
+    currently_trainable = any(p.requires_grad for p in params)
+    if currently_trainable == bool(requires_grad):
+        return False
+    torch.compiler.reset()
+    return True

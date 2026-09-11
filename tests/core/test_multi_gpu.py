@@ -227,7 +227,8 @@ class TestBuildTrainAndTestLoaders:
             drop_last=True,
         )
         assert [len(b[0]) for b in train_loader] == [30, 30]
-        assert train_loader.drop_last and test_loader.drop_last
+        assert train_loader.drop_last
+        assert not test_loader.drop_last  # eager test epoch; never empty a small split
 
     def test_single_gpu_returns_none_sampler(self):
         dataset = TensorDataset(torch.randn(100, 4))

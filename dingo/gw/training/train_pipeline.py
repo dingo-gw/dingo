@@ -16,7 +16,10 @@ from threadpoolctl import threadpool_limits
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader, DistributedSampler
 
-from dingo.core.nn.compile_utils import compile_network
+from dingo.core.nn.compile_utils import (
+    compile_network,
+    reset_graphs_if_requires_grad_changes,
+)
 from dingo.core.posterior_models.base_model import BasePosteriorModel
 from dingo.core.posterior_models.build_model import (
     autocomplete_model_kwargs,
@@ -296,6 +299,15 @@ def initialize_stage(
 
     # Freeze/unfreeze RB layer if necessary
     if "freeze_rb_layer" in stage:
+        if reset_graphs_if_requires_grad_changes(
+            pm.network,
+            name_contains="layers_rb",
+            requires_grad=not stage["freeze_rb_layer"],
+        ) and print_output:
+            print(
+                "freeze_rb_layer changes the trainable parameters: compiled graphs "
+                "(if any) discarded, the next training step (re)compiles."
+            )
         if stage["freeze_rb_layer"]:
             if world_size is not None and world_size > 1:
                 raise ValueError(
@@ -515,6 +527,13 @@ def get_num_gpus(local_settings: dict) -> int:
     return 1
 
 
+def _record_float32_matmul_precision(pm: BasePosteriorModel) -> None:
+    """Store the matmul precision in the checkpoint metadata: unlike torch_compile
+    it changes the numerics of training, so it belongs with the model."""
+    if isinstance(pm.metadata, dict):
+        pm.metadata["float32_matmul_precision"] = torch.get_float32_matmul_precision()
+
+
 def run_training(
     train_settings: Optional[dict],
     local_settings: dict,
@@ -544,6 +563,7 @@ def run_training(
         pm, wfd = prepare_training_new(train_settings, train_dir, local_settings)
     else:
         pm, wfd = prepare_training_resume(ckpt_file, local_settings, train_dir)
+    _record_float32_matmul_precision(pm)
 
     if local_settings.get("torch_compile", False):
         pm.network = compile_network(
@@ -655,6 +675,8 @@ def run_training_ddp(
                     )
                 except ImportError:
                     print("WandB is enabled but not installed.")
+
+        _record_float32_matmul_precision(pm)
 
         if contains_BatchNorm(pm.network):
             if rank == 0:
