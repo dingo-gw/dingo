@@ -44,9 +44,13 @@ class ImportanceSamplingNode(AnalysisNode):
             # in the local pool instead (flock_local/nogrid, as for MergeNode)
             if self.inputs.osg and self.run_node_on_osg:
                 sites = self.inputs.desired_sites
-                if sites is not None:
-                    self.extra_lines.append(f'MY.DESIRED_Sites = "{sites}"')
-                self.requirements.append("IS_GLIDEIN=?=True")
+                # sites == "nogrid" means the base Node keeps the job in the
+                # local pool (flock_local); adding IS_GLIDEIN there would make
+                # the job unmatchable.
+                if sites != "nogrid":
+                    if sites is not None:
+                        self.extra_lines.append(f'MY.DESIRED_Sites = "{sites}"')
+                    self.requirements.append("IS_GLIDEIN=?=True")
 
             if self.transfer_container:
                 input_files_to_transfer.append(self.inputs.container)

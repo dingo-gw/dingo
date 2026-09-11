@@ -128,6 +128,7 @@ MOCK_MODEL_METADATA = {
     },
     "train_settings": {
         "data": {
+            "detectors": ["H1", "L1"],
             "extrinsic_prior": {
                 "dec": "default",
                 "ra": "default",
@@ -433,6 +434,7 @@ class TestPrepareDingoConfig:
         assert "duration=" not in content
         assert "reference-frequency=" not in content
         assert "deltaT=" not in content
+        assert "time-reference=" not in content
 
     def test_no_prior_dict_in_config(self, tmp_path, mock_model, mock_metadata):
         fname = prepare_dingo_config(MOCK_CANDIDATE_BBH, "T123456a", str(tmp_path), mock_model)
@@ -661,14 +663,48 @@ class TestPsdHandling:
         assert "psd-dict=" in Path(fname).read_text()
         assert calls["coinc_file"] == "coinc.xml"
 
-    def test_psd_cut_caps_maximum_frequency(
+    def test_psd_cut_refused_without_cropping(
         self, tmp_path, mock_model, mock_metadata, monkeypatch
     ):
-        """A PSD reaching only 800 Hz caps maximum_frequency at 0.95 * 800 = 760 Hz."""
+        """Without strain cropping the model cannot analyze below its f_max,
+        so the PSD cap must NOT be applied (dingo_pipe would reject it)."""
+        _patch_psd_extraction(monkeypatch, 800.0)
+        candidate = {**MOCK_CANDIDATE_BBH, "coinc_file": "coinc.xml"}
+        fname = prepare_dingo_config(candidate, "T123456a", str(tmp_path), mock_model)
+        assert "maximum-frequency=1024.0" in Path(fname).read_text()
+
+    def test_psd_cut_caps_maximum_frequency_with_cropping(
+        self, tmp_path, mock_model, monkeypatch
+    ):
+        """With strain cropping enabled (floor below the cap), the PSD cap
+        applies: 0.95 * 800 = 760 Hz."""
+        metadata = copy.deepcopy(MOCK_MODEL_METADATA)
+        metadata["train_settings"]["data"]["random_strain_cropping"] = {
+            "cropping_probability": 1.0,
+            "f_max_lower": 200.0,
+        }
+        import dingo.pipe.gracedb as gracedb_mod
+        monkeypatch.setattr(gracedb_mod, "_load_model_metadata", lambda _: metadata)
         _patch_psd_extraction(monkeypatch, 800.0)
         candidate = {**MOCK_CANDIDATE_BBH, "coinc_file": "coinc.xml"}
         fname = prepare_dingo_config(candidate, "T123456a", str(tmp_path), mock_model)
         assert "maximum-frequency=760.0" in Path(fname).read_text()
+
+    def test_psd_cut_respects_cropping_floor(
+        self, tmp_path, mock_model, monkeypatch
+    ):
+        """A cap below the cropping floor is refused."""
+        metadata = copy.deepcopy(MOCK_MODEL_METADATA)
+        metadata["train_settings"]["data"]["random_strain_cropping"] = {
+            "cropping_probability": 1.0,
+            "f_max_lower": 900.0,
+        }
+        import dingo.pipe.gracedb as gracedb_mod
+        monkeypatch.setattr(gracedb_mod, "_load_model_metadata", lambda _: metadata)
+        _patch_psd_extraction(monkeypatch, 800.0)
+        candidate = {**MOCK_CANDIDATE_BBH, "coinc_file": "coinc.xml"}
+        fname = prepare_dingo_config(candidate, "T123456a", str(tmp_path), mock_model)
+        assert "maximum-frequency=1024.0" in Path(fname).read_text()
 
     def test_wideband_psd_keeps_default_maximum_frequency(
         self, tmp_path, mock_model, mock_metadata, monkeypatch
@@ -679,13 +715,84 @@ class TestPsdHandling:
         fname = prepare_dingo_config(candidate, "T123456a", str(tmp_path), mock_model)
         assert "maximum-frequency=1024.0" in Path(fname).read_text()
 
-    def test_explicit_psd_cut(self, tmp_path, mock_model, mock_metadata, monkeypatch):
+    def test_explicit_psd_cut_with_cropping(
+        self, tmp_path, mock_model, monkeypatch
+    ):
+        metadata = copy.deepcopy(MOCK_MODEL_METADATA)
+        metadata["train_settings"]["data"]["random_strain_cropping"] = {
+            "cropping_probability": 1.0,
+            "f_max_lower": 200.0,
+        }
+        import dingo.pipe.gracedb as gracedb_mod
+        monkeypatch.setattr(gracedb_mod, "_load_model_metadata", lambda _: metadata)
         _patch_psd_extraction(monkeypatch, 800.0)
         candidate = {**MOCK_CANDIDATE_BBH, "coinc_file": "coinc.xml"}
         fname = prepare_dingo_config(
             candidate, "T123456a", str(tmp_path), mock_model, psd_cut=0.5
         )
         assert "maximum-frequency=400.0" in Path(fname).read_text()
+
+
+class TestDetectorCompatibility:
+    def test_mismatched_network_raises(self, tmp_path, mock_model, monkeypatch):
+        metadata = copy.deepcopy(MOCK_MODEL_METADATA)
+        metadata["train_settings"]["data"]["detectors"] = ["H1", "L1", "V1"]
+        import dingo.pipe.gracedb as gracedb_mod
+        monkeypatch.setattr(gracedb_mod, "_load_model_metadata", lambda _: metadata)
+        with pytest.raises(ValueError, match="detector"):
+            prepare_dingo_config(
+                MOCK_CANDIDATE_BBH, "T123456a", str(tmp_path), mock_model
+            )
+
+    def test_matching_network_passes(self, tmp_path, mock_model, mock_metadata):
+        fname = prepare_dingo_config(
+            MOCK_CANDIDATE_BBH, "T123456a", str(tmp_path), mock_model
+        )
+        assert os.path.isfile(fname)
+
+    def test_metadata_without_detectors_is_tolerated(
+        self, tmp_path, mock_model, monkeypatch
+    ):
+        metadata = copy.deepcopy(MOCK_MODEL_METADATA)
+        del metadata["train_settings"]["data"]["detectors"]
+        import dingo.pipe.gracedb as gracedb_mod
+        monkeypatch.setattr(gracedb_mod, "_load_model_metadata", lambda _: metadata)
+        fname = prepare_dingo_config(
+            MOCK_CANDIDATE_BBH, "T123456a", str(tmp_path), mock_model
+        )
+        assert os.path.isfile(fname)
+
+
+class TestFrequencyBandFromModel:
+    def test_frequencies_follow_model_domain(
+        self, tmp_path, mock_model, monkeypatch
+    ):
+        metadata = copy.deepcopy(MOCK_MODEL_METADATA)
+        metadata["dataset_settings"]["domain"]["f_min"] = 25.0
+        metadata["dataset_settings"]["domain"]["f_max"] = 512.0
+        import dingo.pipe.gracedb as gracedb_mod
+        monkeypatch.setattr(gracedb_mod, "_load_model_metadata", lambda _: metadata)
+        fname = prepare_dingo_config(
+            MOCK_CANDIDATE_BBH, "T123456a", str(tmp_path), mock_model
+        )
+        content = Path(fname).read_text()
+        assert "minimum-frequency=25.0" in content
+        assert "maximum-frequency=512.0" in content
+
+
+class TestScalarChirpMassPrior:
+    def test_incompatible_event_with_scalar_prior_raises_valueerror(
+        self, tmp_path, mock_model, monkeypatch
+    ):
+        """A fixed-scalar chirp_mass entry must not break the error path."""
+        metadata = copy.deepcopy(MOCK_MODEL_METADATA)
+        metadata["dataset_settings"]["intrinsic_prior"]["chirp_mass"] = 100.0
+        import dingo.pipe.gracedb as gracedb_mod
+        monkeypatch.setattr(gracedb_mod, "_load_model_metadata", lambda _: metadata)
+        with pytest.raises(ValueError, match="segments"):
+            prepare_dingo_config(
+                MOCK_CANDIDATE_BNS, "T654321b", str(tmp_path), mock_model
+            )
 
 
 # ---------------------------------------------------------------------------

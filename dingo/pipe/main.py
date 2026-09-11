@@ -208,6 +208,19 @@ class MainInput(BilbyMainInput):
         self.importance_sampling_updates = importance_sampling_updates
         # bilby_pipe >= 1.9.3 job creation reads this from MainInput.
         self.htcondor_strict_cpu_request = args.htcondor_strict_cpu_request
+
+        # Dingo's parser is a fork of bilby_pipe's, and this class bypasses
+        # BilbyMainInput.__init__, so options added upstream and read by the
+        # shared job-creation code would raise AttributeError at DAG-build
+        # time. Backfill upstream defaults for anything not mirrored here.
+        try:
+            from bilby_pipe.parser import create_parser as _create_bilby_parser
+
+            for action in _create_bilby_parser()._actions:
+                if action.dest != "help" and not hasattr(args, action.dest):
+                    setattr(args, action.dest, action.default)
+        except Exception as e:
+            logger.warning(f"Could not backfill bilby_pipe parser defaults: {e}")
         self.prior_dict_updates = args.prior_dict_updates
         self.model_reference_time = args.model_reference_time
 

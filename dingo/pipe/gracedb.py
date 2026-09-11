@@ -14,6 +14,7 @@ import subprocess
 
 from bilby_pipe.gracedb import (
     CHANNEL_DICTS,
+    _get_default_duration,
     _read_cbc_candidate,
     calibration_dict_lookup,
     extract_psds_from_xml,
@@ -21,7 +22,6 @@ from bilby_pipe.gracedb import (
     read_from_json,
 )
 from bilby_pipe.utils import (
-    BilbyPipeError,
     check_directory_exists_and_if_not_mkdir,
     logger,
 )
@@ -29,30 +29,22 @@ from bilby_pipe.utils import (
 GRACEDB_URL = "https://gracedb.ligo.org/api/"
 
 
-def _get_analysis_duration(chirp_mass):
-    """Return analysis duration in seconds based on chirp mass.
-
-    Uses the same boundaries as bilby_pipe_gracedb so that the data
-    segment length is consistent with standard online PE practice.
-    """
-    if chirp_mass > 13.53:
-        return 4
-    elif chirp_mass > 8.73:
-        return 8
-    elif chirp_mass > 5.66:
-        return 16
-    elif chirp_mass > 3.68:
-        return 32
-    elif chirp_mass > 2.39:
-        return 64
-    return 128
+# Chirp-mass -> analysis-duration ladder. Maintained (and retuned between
+# observing runs) upstream in bilby_pipe; import it so the segment lengths
+# always match what the Bilby fallback would choose for the same trigger.
+_get_analysis_duration = _get_default_duration
 
 
 def _load_model_metadata(model_path):
-    """Load and return the metadata dict from a dingo model checkpoint."""
-    import torch
+    """Load only the metadata dict from a dingo model checkpoint.
 
-    d = torch.load(model_path, map_location="cpu", weights_only=False)
+    Weights are mapped to the meta device: no multi-GB RAM or IO cost for
+    tensors that are immediately discarded (same pattern as dingo_ls and
+    dingo_pipe's fill_in_arguments_from_model).
+    """
+    from dingo.core.utils.backward_compatibility import torch_load_with_fallback
+
+    d, _ = torch_load_with_fallback(model_path, preferred_map_location="meta")
     return d["metadata"]
 
 
@@ -131,8 +123,10 @@ def _check_model_compatibility(trigger_chirp_mass, metadata):
         chirp_mass_prior_str = metadata["dataset_settings"]["intrinsic_prior"].get(
             "chirp_mass", ""
         )
-        mc_min_match = re.search(r"minimum=([0-9.eE+\-]+)", chirp_mass_prior_str)
-        mc_min = float(mc_min_match.group(1)) if mc_min_match else None
+        mc_min = None
+        if isinstance(chirp_mass_prior_str, str):
+            mc_min_match = re.search(r"minimum=([0-9.eE+\-]+)", chirp_mass_prior_str)
+            mc_min = float(mc_min_match.group(1)) if mc_min_match else None
 
         detail = (
             f" The model's chirp mass prior minimum is {mc_min} Msun."
@@ -145,6 +139,26 @@ def _check_model_compatibility(trigger_chirp_mass, metadata):
             f"{model_duration}s segments.{detail} "
             f"This is likely a BNS or NSBH event incompatible with this model. "
             f"Use a model trained for longer segments or do not run dingo_pipe_gracedb."
+        )
+
+
+def _check_detector_compatibility(ifos, metadata):
+    """Raise ValueError if the event's detectors differ from the model's
+    fixed training network.
+
+    Dingo networks are trained per detector configuration (e.g. separate
+    HL and HLV networks); dingo_pipe takes the detector list from the model,
+    so a mismatched trigger fails only on the cluster. Fail here instead.
+    Models whose metadata predates the detectors entry are not checked.
+    """
+    model_detectors = metadata.get("train_settings", {}).get("data", {}).get(
+        "detectors"
+    )
+    if model_detectors and set(ifos) != set(model_detectors):
+        raise ValueError(
+            f"Event detectors {sorted(ifos)} do not match the model's "
+            f"training network {sorted(model_detectors)}. Use a network "
+            "trained for this detector configuration."
         )
 
 
@@ -269,19 +283,38 @@ def prepare_dingo_config(
         superevent,
         trigger_time,
         ifos,
-        reference_frame,
-        time_reference,
+        # Unused: the config no longer sets a reference frame, and dingo_pipe
+        # hardcodes time_reference="geocent" (main.py) so writing the best-SNR
+        # ifo here would be dead configuration. NB the candidate trigger_time
+        # is that detector's end time (detector frame) — see docs.
+        _reference_frame,
+        _time_reference,
     ) = _read_cbc_candidate(candidate)
 
     chirp_mass = trigger_values["chirp_mass"]
-    minimum_frequency = 20.0
-    maximum_frequency = 1024.0
 
-    # Load model metadata once — used for both compatibility check and prior.
+    # Load model metadata once — used for the compatibility checks and the
+    # frequency band.
     model_metadata = _load_model_metadata(model)
 
-    # Raise early if the trigger requires a longer analysis than the model supports.
+    # Raise early if the trigger requires a longer analysis than the model
+    # supports, or was observed by a different detector network.
     _check_model_compatibility(chirp_mass, model_metadata)
+    _check_detector_compatibility(ifos, model_metadata)
+
+    # The frequency band must match the model's domain: dingo_pipe validates
+    # the INI against it and rejects mismatches at launch.
+    from ..gw.domains.build_domain import build_domain_from_model_metadata
+
+    domain = build_domain_from_model_metadata(model_metadata, base=True)
+    minimum_frequency = float(domain.f_min)
+    maximum_frequency = float(domain.f_max)
+    crop_settings = (
+        model_metadata.get("train_settings", {})
+        .get("data", {})
+        .get("random_strain_cropping")
+        or {}
+    )
 
     # GNPE models require an init model. Validate/resolve here: sampling keys
     # on model_init alone and would otherwise fail only on the GPU node.
@@ -314,11 +347,30 @@ def prepare_dingo_config(
         if psd_max_freq is not None:
             psd_max_freq *= min(psd_cut, 1)
             if maximum_frequency > psd_max_freq:
-                maximum_frequency = psd_max_freq
-                logger.info(
-                    f"maximum_frequency reduced to {psd_max_freq:.1f} Hz "
-                    "due to pipeline PSD bandwidth"
+                # Lowering f_max below the model domain is only valid when the
+                # model was trained with strain cropping, down to its floor
+                # (mirrors gw_samplers._validate_maximum_frequency).
+                floors = crop_settings.get("f_max_lower", maximum_frequency)
+                floor = (
+                    max(floors.values()) if isinstance(floors, dict) else floors
                 )
+                if (
+                    crop_settings.get("cropping_probability", 0.0) > 0.0
+                    and psd_max_freq >= floor
+                ):
+                    maximum_frequency = psd_max_freq
+                    logger.info(
+                        f"maximum_frequency reduced to {psd_max_freq:.1f} Hz "
+                        "due to pipeline PSD bandwidth"
+                    )
+                else:
+                    logger.warning(
+                        f"Pipeline PSD ends at {psd_max_freq:.1f} Hz (after "
+                        f"psd_cut) below the model's f_max "
+                        f"{maximum_frequency:.1f} Hz, but the model does not "
+                        "support lowering it (no strain cropping, or below "
+                        "the cropping floor); keeping the model's f_max."
+                    )
 
     # The calibration archive (/home/cal) exists only on CIT; fall back to no
     # calibration elsewhere. bilby_pipe catches only its own BilbyPipeError:
@@ -350,7 +402,6 @@ def prepare_dingo_config(
         "sampling_frequency": 4096,
         "minimum_frequency": minimum_frequency,
         "maximum_frequency": maximum_frequency,
-        "time_reference": time_reference,
         # Prior comes from the model; override via prior-dict-updates.
         # Dingo model
         "model": model,
@@ -413,7 +464,7 @@ def create_parser():
     event = parser.add_mutually_exclusive_group(required=True)
     event.add_argument(
         "--gracedb", type=str,
-        help="GraceDB superevent or event ID (e.g. S230914ax)",
+        help="GraceDB preferred-event ID (G-id, e.g. G618945). Superevent IDs are not accepted; resolving S-id to G-id is the caller's job.",
     )
     event.add_argument(
         "--json", type=str,
