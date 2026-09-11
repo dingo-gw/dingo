@@ -204,7 +204,10 @@ class MainInput(BilbyMainInput):
         self.model = args.model
         self.model_init = args.model_init
         self.num_gnpe_iterations = args.num_gnpe_iterations
+        self.importance_sampling_pool = args.importance_sampling_pool
         self.importance_sampling_updates = importance_sampling_updates
+        # bilby_pipe >= 1.9.3 job creation reads this from MainInput.
+        self.htcondor_strict_cpu_request = args.htcondor_strict_cpu_request
         self.prior_dict_updates = args.prior_dict_updates
         self.model_reference_time = args.model_reference_time
 

@@ -39,15 +39,17 @@ class ImportanceSamplingNode(AnalysisNode):
                 *(self.inputs.spline_calibration_envelope_dict.values() if self.inputs.spline_calibration_envelope_dict else [])
             ]
 
-            # if running on the OSG we need to specify the sites
-            if self.inputs.osg:
+            # if running on the OSG we need to specify the sites; with
+            # importance-sampling-pool=local-pool the base Node keeps the job
+            # in the local pool instead (flock_local/nogrid, as for MergeNode)
+            if self.inputs.osg and self.run_node_on_osg:
                 sites = self.inputs.desired_sites
                 if sites is not None:
                     self.extra_lines.append(f'MY.DESIRED_Sites = "{sites}"')
                 self.requirements.append("IS_GLIDEIN=?=True")
 
-                if self.transfer_container:
-                    input_files_to_transfer.append(self.inputs.container)
+            if self.transfer_container:
+                input_files_to_transfer.append(self.inputs.container)
 
             # Credentials are needed to access any OSDF files
             if any(["osdf" in s for s in input_files_to_transfer]):
@@ -85,6 +87,10 @@ class ImportanceSamplingNode(AnalysisNode):
 
         if self.inputs.simple_submission:
             _strip_unwanted_submission_keys(self.job)
+
+    @property
+    def run_node_on_osg(self):
+        return getattr(self.inputs, "importance_sampling_pool", "igwn-pool") != "local-pool"
 
     @property
     def request_memory(self):

@@ -739,6 +739,31 @@ def create_parser(top_level=True, usage=None):
         ),
     )
     submission_parser.add(
+        "--htcondor-strict-cpu-request",
+        action=StoreBoolean,
+        default=True,
+        help=(
+            "Whether to request exactly ``request-cpus`` cores using HTCondor instead "
+            "of using this value as a lower bound. If ``False``, analysis jobs "
+            "will request all cores on the allocated node. (Required by "
+            "bilby_pipe >= 1.9.3 job creation.)"
+        ),
+    )
+    submission_parser.add(
+        "--importance-sampling-pool",
+        type=str,
+        default="igwn-pool",
+        choices=["igwn-pool", "local-pool"],
+        help=(
+            "Where the importance-sampling jobs run when osg=True: 'igwn-pool' "
+            "(default) submits them to the OSG like other analysis jobs; "
+            "'local-pool' keeps them in the submit host's local HTCondor pool, "
+            "which avoids glidein-provisioning latency (useful for online "
+            "analyses where sampling needs an OSG GPU site but importance "
+            "sampling can use local CPUs). Analogous to generation-pool."
+        ),
+    )
+    submission_parser.add(
         "--conda-env",
         type=nonestr,
         default=None,
