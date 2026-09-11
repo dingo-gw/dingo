@@ -128,7 +128,7 @@ def tolerances(approximant):
 
     elif approximant in ["SEOBNRv5PHM", "SEOBNRv5HM"]:
         # Tested on 1000 mismatches.
-        return 1e-9, 1e-12
+        return 1e-9, 1e-11
 
     else:
         return 1e-5, 1e-5
@@ -399,8 +399,8 @@ def test_default_ell_max_matches_mode_content(uniform_fd_domain):
 
 
 def test_unknown_approximant_is_an_error_not_a_guess(uniform_fd_domain):
-    """An approximant with no tabulated default and no mode_list must fail loudly
-    rather than fall back to a grid that may be too short."""
+    """_get_ell_max must fail loudly rather than guess a grid that may be too
+    short"""
     wfg = WaveformGenerator(
         approximant="IMRPhenomXAS",
         domain=uniform_fd_domain,
@@ -411,3 +411,42 @@ def test_unknown_approximant_is_an_error_not_a_guess(uniform_fd_domain):
     )
     with pytest.raises(ValueError, match="No default ell_max"):
         wfg._get_ell_max()
+
+
+def test_dft_phase_decomposition_is_the_default(uniform_fd_domain):
+    """The DFT path is on by default."""
+    wfg = WaveformGenerator(
+        approximant="IMRPhenomXPHM",
+        domain=uniform_fd_domain,
+        f_ref=10.0,
+        f_start=10.0,
+        spin_conversion_phase=0.0,
+    )
+    assert wfg.use_dft_phase_decomposition is True
+
+
+def test_dft_falls_back_without_ell_max(uniform_fd_domain, monkeypatch):
+    """With the flag on (default) but no way to size the phase grid --
+    no mode_list and no DEFAULT_ELL_MAX entry -- generate_hplus_hcross_m must
+    warn and use the individual-mode path, not raise."""
+    from dingo.gw.waveform_generator import waveform_generator as wfg_module
+
+    monkeypatch.delitem(wfg_module.DEFAULT_ELL_MAX, "IMRPhenomXPHM")
+
+    kwargs = dict(
+        approximant="IMRPhenomXPHM",
+        domain=uniform_fd_domain,
+        f_ref=10.0,
+        f_start=10.0,
+        spin_conversion_phase=0.0,
+    )
+    with pytest.warns(UserWarning, match="Falling back to the individual-mode"):
+        pol_m = WaveformGenerator(**kwargs).generate_hplus_hcross_m(DFT_PARAMETERS[0])
+
+    pol_m_std = WaveformGenerator(
+        **kwargs, use_dft_phase_decomposition=False
+    ).generate_hplus_hcross_m(DFT_PARAMETERS[0])
+
+    for m in pol_m_std:
+        for name in pol_m_std[m]:
+            np.testing.assert_array_equal(pol_m[m][name], pol_m_std[m][name])

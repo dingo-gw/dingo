@@ -55,7 +55,7 @@ class WaveformGenerator:
         mode_list: List[Tuple] = None,
         transform=None,
         spin_conversion_phase=None,
-        use_dft_phase_decomposition: bool = False,
+        use_dft_phase_decomposition: bool = True,
         **kwargs,
     ):
         """
@@ -91,19 +91,22 @@ class WaveformGenerator:
             which is expensive).
             By setting spin_conversion_phase != None, we impose the convention to always
             use phase = spin_conversion_phase when computing the cartesian spins.
-        use_dft_phase_decomposition : bool = False
-            If True, generate_hplus_hcross_m() obtains the m-components of the
-            polarizations by evaluating the summed polarizations at
-            N = 2 * ell_max + 1 equally-spaced values of the coalescence phase and
-            inverting with a DFT, rather than by generating the individual
-            inertial-frame modes. This avoids materializing, and independently
-            conditioning and FFT-ing, all N_modes mode arrays, and is faster for
-            models that expose a direct polarization projection (SEOBNRv5PHM,
-            IMRPhenomXPHM). The two paths are mathematically equivalent:
-            h_+(f; phi_c) is a trigonometric polynomial in phi_c of degree ell_max,
-            so N equally-spaced samples determine it exactly.
+        use_dft_phase_decomposition : bool = True
+            If True (the default), generate_hplus_hcross_m() obtains the
+            m-components of the polarizations by evaluating the summed
+            polarizations at N = 2 * ell_max + 1 equally-spaced values of the
+            coalescence phase and inverting with a DFT, rather than by generating
+            the individual inertial-frame modes. This avoids materializing, and
+            independently conditioning and FFT-ing, all N_modes mode arrays, and
+            is faster for models that expose a direct polarization projection
+            (SEOBNRv5PHM, IMRPhenomXPHM). The two paths are mathematically
+            equivalent: h_+(f; phi_c) is a trigonometric polynomial in phi_c of
+            degree ell_max, so N equally-spaced samples determine it exactly.
             ell_max (and hence N) is taken from mode_list when given, otherwise
-            from the approximant's default mode content (DEFAULT_ELL_MAX).
+            from the approximant's default mode content (DEFAULT_ELL_MAX); if
+            neither determines it, the individual-mode path is used instead, with
+            a warning. Approximants without a DFT implementation always use the
+            individual-mode path, regardless of this flag.
         """
         if not isinstance(approximant, str):
             raise ValueError("approximant should be a string, but got", approximant)
@@ -203,6 +206,18 @@ class WaveformGenerator:
         pol_m = wfg_utils.recover_pol_m_from_multi_phase(
             hpc_fd_list, phi_c_offsets, ell_max
         )
+        for h in pol_m.values():
+            # The generator may return arrays reaching a power-of-2 Nyquist
+            # frequency beyond f_max (e.g. pyseobnr on a domain where
+            # f_max / delta_f is not a power of 2). Truncate to the domain, as
+            # the individual-mode path does.
+            if len(h["h_plus"]) > len(self.domain):
+                warnings.warn(
+                    f"Waveform longer than domain's `frequency_array` "
+                    f"({len(h['h_plus'])} vs {len(self.domain)}). Truncating."
+                )
+                h["h_plus"] = h["h_plus"][: len(self.domain)]
+                h["h_cross"] = h["h_cross"][: len(self.domain)]
         if self._domain_transform is not None:
             return self._domain_transform(pol_m)
         return pol_m
@@ -818,12 +833,25 @@ class WaveformGenerator:
         elif not isinstance(list(parameters.values())[0], float):
             raise ValueError("parameters dictionary must contain floats", parameters)
 
+        use_dft = self.use_dft_phase_decomposition
+        if (
+            use_dft
+            and self.mode_list is None
+            and self.approximant_str not in DEFAULT_ELL_MAX
+        ):
+            # The DFT path needs ell_max to size its phase grid; without it, fall
+            # back to the individual-mode path rather than fail.
+            warnings.warn(
+                f"use_dft_phase_decomposition is set, but ell_max cannot be "
+                f"determined for {self.approximant_str} (no mode_list, no "
+                f"DEFAULT_ELL_MAX entry). Falling back to the individual-mode "
+                f"path."
+            )
+            use_dft = False
+
         if isinstance(self.domain, UniformFrequencyDomain):
             # Generate FD modes in for frequencies [-f_max, ..., 0, ..., f_max].
-            if (
-                LS.SimInspiralImplementedFDApproximants(self.approximant)
-                and self.use_dft_phase_decomposition
-            ):
+            if LS.SimInspiralImplementedFDApproximants(self.approximant) and use_dft:
                 # DFT approach: evaluate the summed FD polarizations on a grid
                 # of N phase offsets starting at the reference phase, then recover
                 # the m-components by inverting the grid with a DFT.
@@ -871,7 +899,24 @@ class WaveformGenerator:
                     h["h_cross"] = h["h_cross"][: len(self.domain)]
 
         elif isinstance(self.domain, MultibandedFrequencyDomain):
-            if LS.SimInspiralImplementedFDApproximants(self.approximant):
+            if LS.SimInspiralImplementedFDApproximants(self.approximant) and use_dft:
+                # DFT approach, as in the UniformFrequencyDomain branch above:
+                # temporarily switch to the base domain, evaluate the polarizations
+                # on the phase grid there, and decimate the recovered m-components
+                # to the MFD.
+                self._use_base_domain = True
+                self._domain_transform = DecimateAll(self._domain)
+                ell_max = self._get_ell_max()
+                hpc_fd_list, phi_c_offsets = (
+                    self._multi_phase_fd_pols_by_repeated_calls(parameters, ell_max)
+                )
+                pol_m = self._pol_m_from_multi_phase(
+                    hpc_fd_list, phi_c_offsets, ell_max
+                )
+                self.domain = self.full_domain
+                return pol_m
+
+            elif LS.SimInspiralImplementedFDApproximants(self.approximant):
                 # SimInspiralChooseFDModes does not work with multi-banding. Hence,
                 # temporarily switch from MFD to FD, generate the modes, decimate to MFD,
                 # and reset the domain to MFD.
