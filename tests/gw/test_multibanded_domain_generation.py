@@ -20,7 +20,7 @@ from dingo.gw.dataset.evaluate_multibanded_domain import \
     _evaluate_multibanding_main
 from dingo.gw.dataset.generate_multibanded_domain import (
     _build_mfd_for_threshold, _compute_mismatches, _load_asd,
-    _output_settings_path, compute_max_decimation_factor,
+    _output_settings_path, _same_nodes, compute_max_decimation_factor,
     compute_waveform_difference_per_decimation_factor, floor_to_power_of_2,
     get_band_nodes_for_adaptive_decimation)
 from dingo.gw.domains import MultibandedFrequencyDomain, UniformFrequencyDomain
@@ -482,3 +482,88 @@ def test_load_asd_preserves_out_of_range_infs(asd_file_with_line, ufd_2x):
     # the ASD file's frequency range must remain infinite.
     assert np.all(np.isinf(asd_2x[f < 10.0]))
     assert np.all(np.isfinite(asd_2x[(f >= 10.0) & (f < 300.0)]))
+
+
+# ---------------------------------------------------------------------------
+# generate_multibanded_domain_settings: threshold search
+# ---------------------------------------------------------------------------
+
+
+class TestThresholdSearchBandCountChange:
+    """The bracket ends (and consecutive bisection steps) can map to MFDs with a
+    different number of bands. Comparing their nodes must not raise."""
+
+    @staticmethod
+    def _run(tmp_path, ufd):
+        import yaml
+
+        from dingo.gw.dataset import generate_multibanded_domain as gmd
+
+        settings = {
+            "domain": {
+                "type": "UniformFrequencyDomain",
+                "f_min": ufd.f_min,
+                "f_max": ufd.f_max,
+                "delta_f": ufd.delta_f,
+            },
+            "intrinsic_prior": INTRINSIC_PRIOR,
+        }
+        settings_file = str(tmp_path / "settings_ufd.yaml")
+        with open(settings_file, "w") as f:
+            yaml.dump(settings, f)
+
+        # Three bands below threshold 1 (meets target), two bands above (misses it).
+        # The bracketing walk from 5e-3 ends at [0.32, 5.12], straddling the change.
+        fine = MultibandedFrequencyDomain(
+            nodes=[20.0, 64.0, 128.0, 256.0], delta_f_initial=1.0, base_domain=ufd
+        )
+        coarse = MultibandedFrequencyDomain(
+            nodes=[20.0, 64.0, 256.0], delta_f_initial=1.0, base_domain=ufd
+        )
+
+        def mock_build(diffs, freqs, dec, ufd_, threshold, *args, **kwargs):
+            return fine if threshold < 1.0 else coarse
+
+        def mock_mismatches(polarizations, ufd_, mfd, asd):
+            return np.full(4, 1e-4 if mfd.num_bands == 3 else 1e-2)
+
+        with (
+            patch.object(
+                gmd,
+                "_generate_whitened_waveforms",
+                return_value=(
+                    ufd, None, None, {"h_cross": None}, {"h_cross": None}, None
+                ),
+            ),
+            patch.object(
+                gmd,
+                "compute_waveform_difference_per_decimation_factor",
+                return_value=([], []),
+            ),
+            patch.object(gmd, "_build_mfd_for_threshold", side_effect=mock_build),
+            patch.object(gmd, "_compute_mismatches", side_effect=mock_mismatches),
+        ):
+            output_path = gmd.generate_multibanded_domain_settings(
+                settings_file, num_samples=4, target_median_mismatch=1e-3
+            )
+        with open(output_path, "r") as f:
+            return yaml.safe_load(f)
+
+    def test_bracket_with_different_band_counts(self, tmp_path, ufd):
+        out = self._run(tmp_path, ufd)
+        assert out["domain"]["nodes"] == [20.0, 64.0, 128.0, 256.0]
+
+
+class TestSameNodes:
+    def test_identical_nodes(self):
+        assert _same_nodes(np.array([20.0, 64.0, 256.0]), np.array([20.0, 64.0, 256.0]))
+
+    def test_different_nodes_same_length(self):
+        assert not _same_nodes(
+            np.array([20.0, 64.0, 256.0]), np.array([20.0, 80.0, 256.0])
+        )
+
+    def test_different_number_of_bands(self):
+        assert not _same_nodes(
+            np.array([20.0, 64.0, 128.0, 256.0]), np.array([20.0, 64.0, 256.0])
+        )
