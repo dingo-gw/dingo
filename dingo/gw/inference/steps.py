@@ -324,6 +324,10 @@ class GNPEFlowFactor(Factor):
         aliases : dict[str, str], optional
             Trained-name to exposed-name map (e.g. `{"ra": "ra@t_ref"}`).
         """
+        if model.metadata["train_settings"]["data"].get("tokenization"):
+            raise NotImplementedError(
+                "GNPE with a tokenized (transformer) network is not supported."
+            )
         self.model = model
         self.transform_pre, self.transform_post, gnpe_transform = (
             _build_gnpe_transforms(model)

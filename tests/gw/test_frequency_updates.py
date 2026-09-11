@@ -468,9 +468,31 @@ def test_resolve_frequency_bounds_expands_float_and_dict(domain):
     assert bounds == {"H1": (30.0, 512.0), "L1": (30.0, 448.0)}
 
 
-def test_resolve_frequency_bounds_rejects_detector_mismatch(domain):
-    with pytest.raises(ValueError, match="exactly detectors"):
-        resolve_frequency_bounds(DETECTORS, domain, maximum_frequency={"H1": 512.0})
+def test_resolve_frequency_bounds_partial_dict(domain):
+    # A dict may name any of the analyzed detectors; the others keep the domain
+    # bound. A detector outside the list is an error.
+    bounds = resolve_frequency_bounds(
+        DETECTORS, domain, maximum_frequency={"H1": 512.0}
+    )
+    assert bounds == {"H1": (20.0, 512.0), "L1": (20.0, 1024.0)}
+    with pytest.raises(ValueError, match="not analyzed"):
+        resolve_frequency_bounds(DETECTORS, domain, maximum_frequency={"V1": 512.0})
+
+
+def test_frequency_bound_expands_over_the_analyzed_detectors(domain):
+    settings = {
+        "detectors": ["H1", "L1", "V1"],
+        "tokenization": {"mask_frequency_range": {"p_mask": 0.5, "f_min_upper": 50.0}},
+    }
+    analyzed = ["H1", "L1"]
+    _validate_frequency_bound(30.0, "minimum_frequency", domain, settings, analyzed)
+    _validate_frequency_bound(
+        {"H1": 30.0}, "minimum_frequency", domain, settings, analyzed
+    )
+    with pytest.raises(ValueError, match="not analyzed"):
+        _validate_frequency_bound(
+            {"V1": 30.0}, "minimum_frequency", domain, settings, analyzed
+        )
 
 
 def _model_metadata_without_cropping(domain_settings=DOMAIN_SETTINGS):
@@ -505,7 +527,7 @@ def test_importance_sampling_range_needs_no_cropping_license():
         ({"maximum_frequency": 2048.0, "sampling_frequency": 2048.0}, "Nyquist"),
         ({"minimum_frequency": 0.0}, "positive"),
         ({"minimum_frequency": 600.0, "maximum_frequency": 512.0}, "non-empty"),
-        ({"maximum_frequency": {"H1": 512.0}}, "exactly detectors"),
+        ({"maximum_frequency": {"V1": 512.0}}, "not analyzed"),
     ],
 )
 def test_importance_sampling_range_rejects_bad_requests(kwargs, match):

@@ -33,14 +33,15 @@ def _validate_frequency_bound(
     bound: str,
     domain: UniformFrequencyDomain | MultibandedFrequencyDomain,
     data_settings: dict,
+    detectors: list[str] | None = None,
 ):
     """
     Validate a requested minimum or maximum frequency against the model's training
     settings.
 
-    ``value`` may be a float (applying to all detectors) or a per-detector dict
-    constraining only the detectors it names; keys must be detectors the model was
-    trained with. Values equal to the domain bound are always allowed. A changed
+    ``value`` may be a float (applying to all analyzed detectors) or a per-detector
+    dict constraining only the detectors it names; keys must be analyzed detectors.
+    Values equal to the domain bound are always allowed. A changed
     value requires frequency flexibility from training: ``random_strain_cropping``
     and/or ``tokenization.mask_frequency_range`` are validated against their
     envelopes; a model with only ``tokenization.mask_random_tokens`` passes with a
@@ -57,6 +58,9 @@ def _validate_frequency_bound(
         The model's base (uniform) domain.
     data_settings : dict
         ``train_settings["data"]`` of the model.
+    detectors : list[str], optional
+        The analyzed detectors, a subset of the training detectors (see
+        ``check_detector_update``); defaults to the training list.
 
     Raises
     ------
@@ -66,17 +70,19 @@ def _validate_frequency_bound(
     minimum = bound == "minimum_frequency"
     domain_value = domain.f_min if minimum else domain.f_max
     model_detectors = data_settings["detectors"]
+    detectors = model_detectors if detectors is None else list(detectors)
 
     if isinstance(value, dict):
-        unknown = set(value) - set(model_detectors)
+        unknown = set(value) - set(detectors)
         if unknown:
             raise ValueError(
-                f"{bound} names detectors {sorted(unknown)} the model was not "
-                f"trained with (detectors: {model_detectors})."
+                f"{bound} names detectors {sorted(unknown)} that are not analyzed "
+                f"(detectors: {detectors}; the model was trained with "
+                f"{model_detectors})."
             )
         values = dict(value)
     else:
-        values = {d: value for d in model_detectors}
+        values = {d: value for d in detectors}
 
     # Hard domain bounds.
     for det, v in values.items():
@@ -112,7 +118,7 @@ def _validate_frequency_bound(
         if crop_settings.get("cropping_probability", 0.0) == 0.0:
             raise ValueError(f"Cropping disabled; cannot update {bound} to {value}.")
         if not crop_settings.get("independent_detectors", True):
-            effective = {d: values.get(d, domain_value) for d in model_detectors}
+            effective = {d: values.get(d, domain_value) for d in detectors}
             if len(set(effective.values())) > 1:
                 raise ValueError(
                     f"Independent frequencies per detector not enabled. All "
@@ -143,21 +149,22 @@ def check_frequency_updates(
     model_metadata: dict,
     f_min: dict[str, float] | float | None = None,
     f_max: dict[str, float] | float | None = None,
+    detectors: list[str] | None = None,
 ):
     """
     Validate requested minimum / maximum frequencies against a model's metadata.
 
     Thin metadata-level wrapper around ``_validate_frequency_bound``, used by
     dingo_pipe at DAG-build time; see there for the accepted forms and semantics.
+    ``detectors`` are the analyzed detectors (default: the training list).
     """
     domain = build_domain_from_model_metadata(model_metadata, base=True)
     if not isinstance(domain, (UniformFrequencyDomain, MultibandedFrequencyDomain)):
         raise ValueError("Frequency updates only possible for frequency domains.")
     data_settings = model_metadata["train_settings"]["data"]
-    if f_min is not None:
-        _validate_frequency_bound(f_min, "minimum_frequency", domain, data_settings)
-    if f_max is not None:
-        _validate_frequency_bound(f_max, "maximum_frequency", domain, data_settings)
+    for bound, value in (("minimum_frequency", f_min), ("maximum_frequency", f_max)):
+        if value is not None:
+            _validate_frequency_bound(value, bound, domain, data_settings, detectors)
 
 
 def _validate_psd_notches(
@@ -379,20 +386,19 @@ def resolve_frequency_bounds(
     maximum_frequency: dict[str, float] | float | None = None,
 ) -> dict[str, tuple[float, float]]:
     """Return `(f_min, f_max)` for each detector from an event's frequency range,
-    given as one float for all detectors or as one value per detector. Missing
+    given as one float for all detectors or as a dict naming any of them. Missing
     values default to the domain bounds."""
 
     def expand(value, default):
-        if value is None:
-            return {d: float(default) for d in detectors}
         if isinstance(value, dict):
-            if set(value) != set(detectors):
+            unknown = set(value) - set(detectors)
+            if unknown:
                 raise ValueError(
-                    f"Frequency bounds must have exactly detectors {detectors}, got "
-                    f"{sorted(value)}."
+                    f"Frequency bounds name detectors {sorted(unknown)} that are not "
+                    f"analyzed (detectors: {detectors})."
                 )
-            return {d: float(value[d]) for d in detectors}
-        return {d: float(value) for d in detectors}
+            return {d: float(value.get(d, default)) for d in detectors}
+        return {d: float(default if value is None else value) for d in detectors}
 
     f_min = expand(minimum_frequency, domain.f_min)
     f_max = expand(maximum_frequency, domain.f_max)
@@ -404,14 +410,17 @@ def check_importance_sampling_frequency_range(
     minimum_frequency: dict[str, float] | float | None = None,
     maximum_frequency: dict[str, float] | float | None = None,
     sampling_frequency: float | None = None,
+    detectors: list[str] | None = None,
 ):
     """Check a frequency range given under `importance-sampling-updates`. It changes
     the likelihood only, never the network input, so the strain-cropping rules do
-    not apply. Each detector's range must be positive, non-empty, and at most the
-    Nyquist frequency of the data (when `sampling_frequency` is given)."""
+    not apply. Each analyzed detector's (default: the training list) range must be
+    positive, non-empty, and at most the Nyquist frequency of the data (when
+    `sampling_frequency` is given)."""
     if minimum_frequency is None and maximum_frequency is None:
         return
-    detectors = model_metadata["train_settings"]["data"]["detectors"]
+    if detectors is None:
+        detectors = model_metadata["train_settings"]["data"]["detectors"]
     network = build_domain_from_model_metadata(model_metadata, base=True)
     f_nyquist = sampling_frequency / 2 if sampling_frequency else np.inf
     bounds = resolve_frequency_bounds(

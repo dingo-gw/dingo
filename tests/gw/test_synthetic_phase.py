@@ -113,21 +113,6 @@ def test_log_prob_replug_matches_sample():
     assert np.allclose(log_prob.numpy(), log_prob_replug.numpy())
 
 
-def test_context_frequency_override():
-    def context(event_metadata):
-        return GWSamplerContext(
-            domain=None,
-            data_prep=None,
-            event_data={},
-            event_metadata=event_metadata,
-        )
-
-    with_override = context({"minimum_frequency": 25.0})
-    assert with_override._frequency("minimum_frequency", 20.0) == 25.0
-    assert with_override._frequency("maximum_frequency", 1024.0) == 1024.0
-    assert context(None)._frequency("minimum_frequency", 20.0) == 20.0
-
-
 def test_factor_builds_likelihood_from_context():
     # The factor takes the likelihood from the context, passing only its
     # base-domain choice (the same one importance sampling evaluates with).

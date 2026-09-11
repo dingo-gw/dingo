@@ -19,27 +19,48 @@ from dingo.gw.domains import (
     UniformFrequencyDomain,
     build_domain,
 )
-from dingo.gw.frequency_updates import _validate_frequency_bound
+from dingo.gw.frequency_updates import (
+    _validate_frequency_bound,
+    _validate_psd_notches,
+    check_detector_update,
+    resolve_frequency_bounds,
+)
 from dingo.gw.gwutils import get_extrinsic_prior_dict
 from dingo.gw.likelihood import StationaryGaussianGWLikelihood
 from dingo.gw.prior import build_prior_with_defaults
 from dingo.gw.transforms import (
     DecimateWaveformsAndASDS,
-    MaskDataForFrequencyRangeUpdate,
     HeterodynePhase,
+    MaskDataForFrequencyRangeUpdate,
+    MaskTokensForFrequencyRangeUpdate,
+    NormalizePosition,
     RepackageStrainsAndASDS,
+    StrainTokenization,
     ToTorch,
+    UnpackDict,
     WhitenAndScaleStrain,
 )
 
 
-def _frequency_range_update(domain, event_metadata) -> Optional[dict]:
-    """The event's requested frequency range when it differs from the data-domain
-    bounds, else `None`. Values may be floats or per-detector dicts; defaults are
-    the domain bounds. A request merely *wider* than the domain also triggers --
-    data generation writes base-domain bounds, which can exceed a multibanded
-    domain's quantized band edge (e.g. 1099.0 vs 1098.875) -- and the resulting
-    mask is then an identity."""
+def _event_detectors(data_settings: dict, event_metadata) -> list[str]:
+    """The analyzed detectors: the event record's list when it carries one, else the
+    training list. Per-detector event settings are expanded over this list: a float
+    bound applies to all of them, a dict may name any subset of them. A strict
+    subset of the training detectors is allowed only for a network trained with
+    detector masking (checked with the other event settings before network input
+    is prepared)."""
+    detectors = (event_metadata or {}).get("detectors")
+    return list(detectors) if detectors is not None else data_settings["detectors"]
+
+
+def _frequency_range_update(domain, event_metadata, detectors) -> Optional[dict]:
+    """The event's requested frequency range as complete per-detector dicts over
+    `detectors` when it differs from the data-domain bounds, else `None`. The
+    request may be floats or dicts naming some of the detectors; defaults are the
+    domain bounds. A request merely *wider* than the domain also triggers -- data
+    generation writes base-domain bounds, which can exceed a multibanded domain's
+    quantized band edge (e.g. 1099.0 vs 1098.875) -- and the resulting mask is
+    then an identity."""
     if event_metadata is None:
         return None
     minimum = event_metadata.get("minimum_frequency", domain.f_min)
@@ -50,7 +71,11 @@ def _frequency_range_update(domain, event_metadata) -> Optional[dict]:
 
     if normalize(minimum) == {domain.f_min} and normalize(maximum) == {domain.f_max}:
         return None
-    return {"minimum_frequency": minimum, "maximum_frequency": maximum}
+    bounds = resolve_frequency_bounds(detectors, domain, minimum, maximum)
+    return {
+        "minimum_frequency": {d: f_min for d, (f_min, _) in bounds.items()},
+        "maximum_frequency": {d: f_max for d, (_, f_max) in bounds.items()},
+    }
 
 
 class GWSamplerContext:
@@ -103,8 +128,9 @@ class GWSamplerContext:
             injection dict (`Injection.injection()`) may also carry its truths under
             `"parameters"`; these are moved to `event_metadata["injection_parameters"]`.
         event_metadata : dict, optional
-            Per-event metadata: the grid the event data are on, the per-detector
-            frequency range, the RA correction, and the likelihood reference time.
+            Per-event metadata: the grid the event data are on, the analyzed
+            detectors, the per-detector frequency range and PSD notches, the RA
+            correction, and the likelihood reference time.
         model_metadata : dict, optional
             The metadata of the model defining this analysis (dataset + train
             settings); the source for the prior, the likelihood, the detector
@@ -144,8 +170,10 @@ class GWSamplerContext:
 
     @property
     def detectors(self) -> list[str]:
-        """Detector names, read from the model metadata."""
-        return self.model_metadata["train_settings"]["data"]["detectors"]
+        """The analyzed detectors: the event record's, else the training list."""
+        return _event_detectors(
+            self.model_metadata["train_settings"]["data"], self.event_metadata
+        )
 
     @property
     def t_ref(self) -> float:
@@ -186,7 +214,7 @@ class GWSamplerContext:
         domain = build_domain(metadata["dataset_settings"]["domain"])
         if "domain_update" in data_settings:
             domain.update(data_settings["domain_update"])
-        detectors = data_settings["detectors"]
+        detectors = _event_detectors(data_settings, event_metadata)
 
         transforms = []
         # Chirp-mass GNPE (BNS): heterodyne the raw strain -- before decimation
@@ -214,27 +242,71 @@ class GWSamplerContext:
             )
         # Whiten and scale (the network expects standardized data).
         transforms.append(WhitenAndScaleStrain(domain.noise_std))
-        # Event frequency-range update: mask the whitened strain/ASDs outside the
-        # requested range. Must precede repackaging (ranges may be per-detector).
-        # The request is validated against the training crop license the first time
-        # prepared_data() runs -- deliberately not here: the license governs the
-        # network-input view only, and contexts are also reconstructed for
-        # likelihood-only use (e.g. from saved importance-sampling results), where
-        # a range that is illegal as network input is legal for ASD masking.
-        range_update = _frequency_range_update(domain, event_metadata)
-        if range_update is not None:
+        # Event frequency-range update, expanded over the analyzed detectors (a
+        # triangular detector's arms are keyed by arm name). The request is
+        # validated against the training license the first time prepared_data()
+        # runs -- deliberately not here: the license governs the network-input view
+        # only, and contexts are also reconstructed for likelihood-only use (e.g.
+        # from saved importance-sampling results), where a range that is illegal as
+        # network input is legal for ASD masking. The analyzed detectors and the
+        # PSD notches are checked at the same time.
+        ifo_names = [ifo.name for ifo in InterferometerList(detectors)]
+        range_update = _frequency_range_update(domain, event_metadata, ifo_names)
+        tokenization = data_settings.get("tokenization")
+        if range_update is not None and tokenization is None:
+            # Mask the whitened strain/ASDs outside the requested range. Must
+            # precede repackaging (ranges may be per-detector). A tokenized network
+            # masks whole tokens instead (below); bin masking would be inert there.
             transforms.append(
                 MaskDataForFrequencyRangeUpdate(domain=domain, **range_update)
             )
-        # Repackage strains/ASDs into an array, move to torch, extract the waveform.
-        transforms += [
-            RepackageStrainsAndASDS(
-                ifos=[ifo.name for ifo in InterferometerList(detectors)],
-                first_index=domain.min_idx,
-            ),
-            ToTorch(device=device),
-            GetItem("waveform"),
-        ]
+        # Repackage the analyzed detectors' strains/ASDs into an array.
+        transforms.append(
+            RepackageStrainsAndASDS(ifos=ifo_names, first_index=domain.min_idx)
+        )
+        if tokenization is None:
+            # Move to torch and extract the waveform.
+            transforms += [ToTorch(device=device), GetItem("waveform")]
+        else:
+            # Tokenize (on numpy arrays, so before ToTorch); a token's detector
+            # index is its detector's position in the training list. Then mask the
+            # tokens outside the requested range or overlapping a PSD notch, rescale
+            # the token positions if the network was trained on normalized ones
+            # (after the masks, which compare positions in Hz), and hand the
+            # network its three inputs.
+            if ifo_names != detectors:
+                raise NotImplementedError(
+                    f"Tokenized networks do not support multi-arm detectors "
+                    f"({detectors} -> {ifo_names})."
+                )
+            training_detectors = data_settings["detectors"]
+            transforms.append(
+                StrainTokenization(
+                    domain=domain,
+                    detectors=detectors,
+                    token_size=tokenization.get("token_size"),
+                    num_tokens_per_block=tokenization.get("num_tokens_per_block"),
+                    drop_last_token=tokenization.get("drop_last_token", False),
+                    training_detectors=training_detectors,
+                )
+            )
+            notches = (event_metadata or {}).get("psd_notch_dict")
+            if range_update is not None or notches:
+                transforms.append(
+                    MaskTokensForFrequencyRangeUpdate(
+                        domain=domain,
+                        detectors=detectors,
+                        **(range_update or {}),
+                        psd_notch_dict=notches,
+                        training_detectors=training_detectors,
+                    )
+                )
+            if tokenization["normalize_position"]:
+                transforms.append(NormalizePosition(domain.f_min, domain.f_max))
+            transforms += [
+                ToTorch(device=device),
+                UnpackDict(["waveform", "position", "token_mask"]),
+            ]
 
         return cls(
             domain=domain,
@@ -287,8 +359,10 @@ class GWSamplerContext:
             device=model.device,
         )
 
-    def prepared_data(self, conditioning=None) -> torch.Tensor:
-        """The event data in the representation the networks condition on.
+    def prepared_data(self, conditioning=None):
+        """The event data in the representation the networks condition on: one
+        tensor, or for a tokenized (transformer) network the list
+        `[waveform, position, token_mask]`.
 
         Called without `conditioning`, this returns the single shared
         representation, computed once and cached. Called with `conditioning` (the
@@ -301,8 +375,9 @@ class GWSamplerContext:
         sweep), the whole batch runs through the transform chain in one pass,
         uncached, so a caller sweeping a large grid should split it into blocks.
 
-        A frequency-range update in the event metadata is validated against the
-        training-time strain cropping before any preparation.
+        The event's network-input settings (analyzed detectors, frequency range,
+        PSD notches) are validated against the training licenses before any
+        preparation.
 
         Parameters
         ----------
@@ -312,7 +387,7 @@ class GWSamplerContext:
 
         Returns
         -------
-        torch.Tensor
+        torch.Tensor or list of torch.Tensor
         """
         if self._data_prep is None:
             raise ValueError("This context carries no network-input preparation.")
@@ -325,26 +400,29 @@ class GWSamplerContext:
             )
         if not self.data_prep_conditioning:
             if self._prepared is None:
-                self._validate_frequency_range()
+                self._validate_event_settings()
                 self._prepared = self._data_prep(self.event_data)
             if conditioning is None:
                 return self._prepared
-            return self._prepared.expand(_n_rows(conditioning), *self._prepared.shape)
-
-        columns = self._conditioning_columns(conditioning)
-        self._validate_frequency_range()
-        n_rows = _n_rows(columns)
-        if all(torch.all(c == c[0]) for c in columns.values()):
+            n_rows = _n_rows(conditioning)
+        else:
+            columns = self._conditioning_columns(conditioning)
+            self._validate_event_settings()
+            n_rows = _n_rows(columns)
+            if not all(torch.all(c == c[0]) for c in columns.values()):
+                parameters = {name: column.numpy() for name, column in columns.items()}
+                return self._data_prep(
+                    {**self._broadcast_event(n_rows), "parameters": parameters}
+                )
             # N rows of one pinned value: prepare once, view it across the rows.
             key = {name: float(c[0]) for name, c in columns.items()}
             if key != self._prepared_key:
                 self._prepared = self._data_prep({**self.event_data, "parameters": key})
                 self._prepared_key = key
-            return self._prepared.expand(n_rows, *self._prepared.shape)
-        parameters = {name: column.numpy() for name, column in columns.items()}
-        return self._data_prep(
-            {**self._broadcast_event(n_rows), "parameters": parameters}
-        )
+        # The shared representation viewed across the rows.
+        if isinstance(self._prepared, list):
+            return [p.expand(n_rows, *p.shape) for p in self._prepared]
+        return self._prepared.expand(n_rows, *self._prepared.shape)
 
     def _conditioning_columns(self, conditioning) -> dict[str, torch.Tensor]:
         """Collect the conditioning columns the preparation consumes, keyed by
@@ -382,19 +460,28 @@ class GWSamplerContext:
             for part, data in self.event_data.items()
         }
 
-    def _validate_frequency_range(self):
-        """Validate an event frequency-range update: hard bounds against the (base)
-        domain, and narrowing only when the network was trained with a frequency-range
-        license (random strain cropping, or token masking for a tokenized network)
-        covering the requested range. Applies to the network-input view only -- the
-        likelihood view applies the range independently via ASD masking."""
-        update = _frequency_range_update(self.domain, self.event_metadata)
-        if update is None:
-            return
+    def _validate_event_settings(self):
+        """Validate the event's network-input settings against the training
+        licenses: the analyzed detectors (a strict subset of the training detectors
+        only for a network trained with detector masking), a frequency-range update
+        (hard bounds against the base domain; narrowing only under random strain
+        cropping or, for a tokenized network, token-range masking), and PSD notches.
+        Applies to the network-input view only -- the likelihood applies the range
+        and the notched ASDs independently."""
         domain = getattr(self.domain, "base_domain", self.domain)
         data_settings = self.model_metadata["train_settings"]["data"]
-        for bound in ("minimum_frequency", "maximum_frequency"):
-            _validate_frequency_bound(update[bound], bound, domain, data_settings)
+        check_detector_update(self.model_metadata, self.detectors)
+        update = _frequency_range_update(
+            self.domain, self.event_metadata, self.detectors
+        )
+        if update is not None:
+            for bound in ("minimum_frequency", "maximum_frequency"):
+                _validate_frequency_bound(
+                    update[bound], bound, domain, data_settings, self.detectors
+                )
+        notches = (self.event_metadata or {}).get("psd_notch_dict")
+        if notches:
+            _validate_psd_notches(notches, domain, data_settings)
 
     @property
     def prior(self) -> PriorDict:
@@ -546,9 +633,16 @@ class GWSamplerContext:
         else:
             t_ref = self.t_ref
 
+        metadata = self.event_metadata or {}
+        bounds = resolve_frequency_bounds(
+            list(self.event_data["waveform"]),
+            data_domain,
+            metadata.get("minimum_frequency"),
+            metadata.get("maximum_frequency"),
+        )
         frequency_update = dict(
-            minimum_frequency=self._frequency("minimum_frequency", data_domain.f_min),
-            maximum_frequency=self._frequency("maximum_frequency", data_domain.f_max),
+            minimum_frequency={d: f_min for d, (f_min, _) in bounds.items()},
+            maximum_frequency={d: f_max for d, (_, f_max) in bounds.items()},
         )
 
         likelihood = StationaryGaussianGWLikelihood(
@@ -579,9 +673,3 @@ class GWSamplerContext:
         if T is not None and abs(1.0 / T - network.delta_f) > 1e-12:
             return UniformFrequencyDomain(network.f_min, network.f_max, 1.0 / T)
         return network
-
-    def _frequency(self, key: str, default: float):
-        """The event's frequency-range override for `key` (min/max), else `default`."""
-        if self.event_metadata is None:
-            return default
-        return self.event_metadata.get(key, default)

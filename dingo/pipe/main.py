@@ -195,15 +195,15 @@ def fill_in_arguments_from_model(args, perform_arg_checks=True):
         except (TypeError, ValueError):
             return convert_string_to_dict(value, key)
 
+    analyzed_detectors = [d.strip("'") for d in args.detectors]
     f_min = parse_frequency(args.minimum_frequency, "minimum-frequency")
     f_max = parse_frequency(args.maximum_frequency, "maximum-frequency")
-    check_frequency_updates(model_metadata, f_min, f_max)
+    check_frequency_updates(model_metadata, f_min, f_max, detectors=analyzed_detectors)
     if args.psd_notch_dict is not None:
         check_psd_notches(
             model_metadata,
             parse_psd_notch_dict(convert_string_to_dict(args.psd_notch_dict)),
         )
-    analyzed_detectors = [d.strip("'") for d in args.detectors]
     if isinstance(f_min, dict):
         args.minimum_frequency = str(
             add_defaults_for_missing_detectors(f_min, domain.f_min, analyzed_detectors)
@@ -262,6 +262,7 @@ def fill_in_arguments_from_model(args, perform_arg_checks=True):
         sampling_frequency=(
             float(sampling_frequency) if sampling_frequency is not None else None
         ),
+        detectors=analyzed_detectors,
     )
     updates = {**changed_args, **importance_sampling_updates}
     # A Dingo injection is generated on the network's band, so its data cannot be

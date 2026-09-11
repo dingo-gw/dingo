@@ -116,6 +116,17 @@ def _n_rows(block: dict) -> int:
     return len(next(iter(block.values())))
 
 
+def _network_inputs(data, rows: Optional[int] = None) -> tuple:
+    """The network's data inputs as the tuple its methods take: `data` is one tensor
+    (a plain network) or the list of tensors a tokenized network's preparation
+    returns (waveform, position, token mask). With `rows`, the shared representation
+    is viewed across that many rows."""
+    parts = tuple(data) if isinstance(data, list) else (data,)
+    if rows is None:
+        return parts
+    return tuple(p.expand(rows, *p.shape) for p in parts)
+
+
 def _describe_default(step) -> dict:
     """Default provenance descriptor for a chain step: the class name, the parameters
     it produces, and the columns it conditions on."""
@@ -237,7 +248,8 @@ class FlowFactor(Factor):
     The factor handles the network's standardization internally, so its interface is
     in physical parameter space. Three kinds of model are supported. A
     data-conditional model draws from the shared data representation,
-    `SamplerContext.prepared_data()`. A model with `context_parameters` (for example
+    `SamplerContext.prepared_data()` (one tensor, or the list of tensors a
+    tokenized network takes). A model with `context_parameters` (for example
     GNPE proxies, or a prior-conditioning pin) additionally conditions on those chain
     columns, and the data representation may depend on their values. An
     unconditional model (flagged `unconditional` in its training metadata, such as a
@@ -294,10 +306,10 @@ class FlowFactor(Factor):
             with torch.no_grad():
                 z, log_prob = self.model.sample_and_log_prob(num_samples=num_samples)
         elif not self.context_parameters:
-            data = context.prepared_data()
+            data = _network_inputs(context.prepared_data(), rows=1)
             with torch.no_grad():
                 z, log_prob = self.model.sample_and_log_prob(
-                    data.unsqueeze(0), num_samples=num_samples
+                    *data, num_samples=num_samples
                 )
             # Squeeze the batch dimension added for the single shared context.
             z = z.squeeze(0)
@@ -314,10 +326,10 @@ class FlowFactor(Factor):
                 self._network_conditioning(given), self.context_parameters
             )
             n_rows = ctx.shape[0]
-            data = context.prepared_data(conditioning=given)
+            data = _network_inputs(context.prepared_data(conditioning=given))
             with torch.no_grad():
                 z, log_prob = self.model.sample_and_log_prob(
-                    data, ctx, num_samples=num_samples
+                    *data, ctx, num_samples=num_samples
                 )
             z = z.reshape(n_rows * num_samples, z.shape[-1])
             log_prob = log_prob.reshape(n_rows * num_samples)
@@ -340,15 +352,13 @@ class FlowFactor(Factor):
         if self.unconditional:
             net_context = ()
         elif not self.context_parameters:
-            data = context.prepared_data()
-            data = data.expand(num_samples, *data.shape)
-            net_context = (data,)
+            net_context = _network_inputs(context.prepared_data(), rows=num_samples)
         else:
-            data = context.prepared_data(conditioning=given)
+            data = _network_inputs(context.prepared_data(conditioning=given))
             ctx = self.standardization.standardize(
                 self._network_conditioning(given), self.context_parameters
             )
-            net_context = (data, ctx)
+            net_context = (*data, ctx)
         self.model.network.eval()
         with torch.no_grad():
             log_prob = self.model.log_prob(z, *net_context)
