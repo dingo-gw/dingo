@@ -12,8 +12,8 @@ from glasflow.nflows import distributions, flows, transforms
 import glasflow.nflows.nn.nets as nflows_nets
 from dingo.core.utils import torchutils
 from dingo.core.nn.enets import create_enet_with_projection_layer_and_dense_resnet
-from dingo.core.nn.resnet import DenseResidualNet
-from typing import Union, Callable, Tuple
+from dingo.core.nn.resnet import DenseResidualNet, check_norm_option
+from typing import Union, Callable, Tuple, Optional
 
 
 def create_linear_transform(param_dim: int):
@@ -42,8 +42,7 @@ def create_base_transform(
     num_transform_blocks: int = 2,
     activation: str = "relu",
     dropout_probability: float = 0.0,
-    batch_norm: bool = False,
-    layer_norm: bool = False,
+    norm: Optional[str] = None,
     num_bins: int = 8,
     tail_bound: float = 1.0,
     apply_unconditional_transform: bool = False,
@@ -84,12 +83,10 @@ def create_base_transform(
         Activation function.
     dropout_probability : float
         Dropout probability for regularization.
-    batch_norm : bool
-        Whether to use batch normalization.
-    layer_norm : bool
-        Whether to use layer normalization in the conditioner network
-        (rq-coupling only; uses DenseResidualNet instead of glasflow's
-        ResidualNet when True).
+    norm : str or None
+        Normalization used in the conditioner network: "BatchNorm", "LayerNorm"
+        or None. "LayerNorm" uses DenseResidualNet instead of glasflow's
+        ResidualNet (rq-coupling only).
     num_bins : int
         Number of bins for the spline.
     tail_bound : float
@@ -106,6 +103,7 @@ def create_base_transform(
     """
 
     activation_fn = torchutils.get_activation_function_from_string(activation)
+    check_norm_option(norm)
 
     if base_transform_type == "rq-coupling":
         if param_dim == 1:
@@ -114,27 +112,25 @@ def create_base_transform(
             mask = nflows.utils.create_alternating_binary_mask(
                 param_dim, even=(i % 2 == 0)
             )
-
-        if layer_norm:
-            # DenseResidualNet supports layer_norm. Unlike glasflow's ResidualNet it
-            # does not concatenate the context to the initial layer's input; context
-            # enters only via the per-block GLU gating (see its docstring).
-            transform_net_create_fn = lambda in_f, out_f: DenseResidualNet(
-                input_dim=in_f,
-                output_dim=out_f,
-                hidden_dims=(hidden_dim,) * num_transform_blocks,
-                activation=activation_fn,
-                dropout=dropout_probability,
-                batch_norm=batch_norm,
-                layer_norm=True,
-                context_features=context_dim,
+        # DenseResidualNet supports LayerNorm. Unlike glasflow's ResidualNet it does
+        # not concatenate the context to the initial layer's input; context enters
+        # only via the per-block GLU gating (see its docstring). glasflow's ResidualNet
+        # is kept for the other norm options for backward compatibility: it names its
+        # layers differently, so old checkpoints cannot be loaded into
+        # DenseResidualNet.
+        if norm == "LayerNorm":
+            transform_net_create_fn = (
+                lambda in_features, out_features: DenseResidualNet(
+                    input_dim=in_features,
+                    output_dim=out_features,
+                    hidden_dims=(hidden_dim,) * num_transform_blocks,
+                    context_features=context_dim,
+                    activation=activation_fn,
+                    dropout=dropout_probability,
+                    norm=norm,
+                )
             )
         else:
-            # glasflow's ResidualNet is kept here for backward compatibility. Both
-            # nets GLU-gate the context in every residual block, but ResidualNet
-            # additionally concatenates it to the initial layer's input and names its
-            # layers differently, so old checkpoints cannot be loaded into
-            # DenseResidualNet. See the DenseResidualNet docstring for details.
             transform_net_create_fn = (
                 lambda in_features, out_features: nflows_nets.ResidualNet(
                     in_features=in_features,
@@ -144,10 +140,9 @@ def create_base_transform(
                     num_blocks=num_transform_blocks,
                     activation=activation_fn,
                     dropout_probability=dropout_probability,
-                    use_batch_norm=batch_norm,
+                    use_batch_norm=norm == "BatchNorm",
                 )
             )
-
         return transforms.PiecewiseRationalQuadraticCouplingTransform(
             mask=mask,
             transform_net_create_fn=transform_net_create_fn,
@@ -158,6 +153,14 @@ def create_base_transform(
         )
 
     elif base_transform_type == "rq-autoregressive":
+        if norm == "LayerNorm":
+            # The MADE layers impose a causal structure along the feature axis,
+            # which LayerNorm (normalizing across all features) would violate.
+            raise ValueError(
+                "norm='LayerNorm' is not supported for base_transform_type="
+                "'rq-autoregressive', since LayerNorm breaks the autoregressive "
+                "structure of the MADE layers. Use 'BatchNorm' or None instead."
+            )
         return transforms.MaskedPiecewiseRationalQuadraticAutoregressiveTransform(
             features=param_dim,
             hidden_features=hidden_dim,
@@ -170,7 +173,7 @@ def create_base_transform(
             random_mask=False,
             activation=activation_fn,
             dropout_probability=dropout_probability,
-            use_batch_norm=batch_norm,
+            use_batch_norm=norm == "BatchNorm",
         )
 
     else:

@@ -45,7 +45,7 @@ class NormalizingFlowPosteriorModel(BasePosteriorModel):
         if self.initial_weights is not None:
             model_kwargs["initial_weights"] = self.initial_weights
 
-        embedding_type = self.model_kwargs.get("embedding_type", "").lower()
+        embedding_type = (self.model_kwargs.get("embedding_type") or "").lower()
         if embedding_type == "transformer":
             self.network = create_nsf_with_transformer_embedding_net(**model_kwargs)
         elif self.model_kwargs.get("embedding_kwargs", False):

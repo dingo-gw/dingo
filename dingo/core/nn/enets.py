@@ -1,6 +1,6 @@
 """Implementation of embedding networks."""
 
-from typing import Tuple, Union, List
+from typing import Tuple, Union, List, Optional
 import torch
 import numpy as np
 import torch.nn as nn
@@ -205,8 +205,7 @@ def create_enet_with_projection_layer_and_dense_resnet(
     svd: dict,
     activation: str = "elu",
     dropout: float = 0.0,
-    batch_norm: bool = True,
-    layer_norm: bool = False,
+    norm: Optional[str] = "BatchNorm",
     added_context: bool = False,
 ):
     """
@@ -262,11 +261,10 @@ def create_enet_with_projection_layer_and_dense_resnet(
         str that specifies activation function used in residual blocks
     dropout : float
         dropout probability for residual blocks used for reqularization
-    batch_norm : bool
-        flag that specifies whether to use batch normalization
-    layer_norm : bool
-        flag that specifies whether to use layer normalization
-    added_context : bool
+    :param norm: str or None
+        normalization used in the residual blocks: "BatchNorm", "LayerNorm" or
+        None
+    :param added_context: bool
         if set to True, additional context z is concatenated to the embedded
         feature vector enet(x); note that in this case, the expected input is
         a tuple with 2 elements, input = (x, z) rather than just the tensor x.
@@ -283,8 +281,7 @@ def create_enet_with_projection_layer_and_dense_resnet(
         hidden_dims=hidden_dims,
         activation=activation_fn,
         dropout=dropout,
-        batch_norm=batch_norm,
-        layer_norm=layer_norm,
+        norm=norm,
     )
     enet = nn.Sequential(module_1, module_2)
 

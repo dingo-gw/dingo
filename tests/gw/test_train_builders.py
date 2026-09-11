@@ -69,8 +69,7 @@ MODEL_SETTINGS = {
             "hidden_dim": 16,
             "num_transform_blocks": 1,
             "activation": "elu",
-            "batch_norm": False,
-            "layer_norm": True,
+            "norm": "LayerNorm",
             "dropout_probability": 0.0,
             "num_bins": 4,
             "base_transform_type": "rq-coupling",
@@ -81,7 +80,7 @@ MODEL_SETTINGS = {
         "tokenizer_kwargs": {
             "hidden_dims": [32],
             "activation": "elu",
-            "layer_norm": True,
+            "norm": "LayerNorm",
         },
         "transformer_kwargs": {
             "d_model": 32,
@@ -97,7 +96,7 @@ MODEL_SETTINGS = {
 }
 FMPE_POSTERIOR_KWARGS = {
     "activation": "elu",
-    "batch_norm": False,
+    "norm": None,
     "hidden_dims": [32, 32],
     "dropout": 0.0,
     "sigma_min": 0.001,

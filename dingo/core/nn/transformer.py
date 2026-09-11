@@ -44,8 +44,7 @@ class TokenEmbedding(nn.Module):
         position_continuous_dim: int,
         position_category_sizes: Sequence[int],
         dropout: float = 0.0,
-        batch_norm: bool = False,
-        layer_norm: bool = False,
+        norm: Optional[str] = None,
     ):
         """
         Parameters
@@ -65,18 +64,18 @@ class TokenEmbedding(nn.Module):
             position columns, in order); each is one-hot encoded
         dropout : float
             dropout rate for the DenseResidualNet
-        batch_norm : bool
-            not supported (raises): the residual net runs on [..., num_tokens,
-            features] and nn.BatchNorm1d normalizes over axis 1, the token axis
-        layer_norm : bool
-            whether to use layer normalization in the DenseResidualNet
+        norm : str or None
+            normalization used in the DenseResidualNet: "LayerNorm" or None.
+            "BatchNorm" is not supported (raises): the residual net runs on
+            [..., num_tokens, features] and nn.BatchNorm1d normalizes over axis 1,
+            the token axis
         """
         super().__init__()
-        if batch_norm:
+        if norm == "BatchNorm":
             raise ValueError(
-                "batch_norm is not supported in TokenEmbedding: nn.BatchNorm1d treats "
+                "BatchNorm is not supported in TokenEmbedding: nn.BatchNorm1d treats "
                 "axis 1 of the [..., num_tokens, features] input as the channel axis, "
-                "i.e. it would normalize per token position. Use layer_norm instead."
+                "i.e. it would normalize per token position. Use LayerNorm instead."
             )
         self.num_features = input_dim
         self.position_continuous_dim = position_continuous_dim
@@ -89,8 +88,7 @@ class TokenEmbedding(nn.Module):
             context_features=position_continuous_dim
             + sum(self.position_category_sizes),
             dropout=dropout,
-            batch_norm=batch_norm,
-            layer_norm=layer_norm,
+            norm=norm,
         )
 
     def forward(self, x: Tensor, position: Tensor) -> Tensor:
@@ -304,7 +302,7 @@ def create_transformer_enet(
     final_net_kwargs : Optional[dict]
         settings for the network applied after pooling. Must contain output_dim. If
         it also contains hidden_dims, a DenseResidualNet is built and activation is
-        required (dropout, batch_norm, layer_norm are then read from this dict as
+        required (dropout and norm are then read from this dict as
         well, analogous to tokenizer_kwargs). Otherwise, a single linear layer is
         used, followed by activation if one is given. If final_net_kwargs is None,
         no final_net is used and the pooled d_model-dim vector is returned directly.

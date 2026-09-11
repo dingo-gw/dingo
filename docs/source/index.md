@@ -60,10 +60,13 @@ As training a network from scratch can be expensive, we intend to also distribut
    noise_dataset
    network_architecture
    training
+   training_multi_gpu
    inference
+   sampling_chains
    gnpe
    result
    dingo_pipe
+   bns
    asimov
    
 .. toctree::

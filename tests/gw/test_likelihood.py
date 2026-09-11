@@ -1,4 +1,5 @@
 import numpy as np
+import pandas as pd
 import pytest
 from bilby.core.prior import Uniform
 from scipy.integrate import trapezoid
@@ -211,3 +212,95 @@ def test_time_marginalization_matches_brute_force_integral(domain, event_data):
     # delta_t / n_fft = 1 / (f_max * n_fft)); observed ~0.019 for n_fft=5. The
     # tolerance is set just above that. (bilby's own test uses a looser delta=0.5.)
     assert marginalized == pytest.approx(brute_force, abs=0.05)
+
+
+# ---------------------------------------------------------------------------
+# Likelihood decomposition and complex d_inner_h
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def likelihood_and_theta():
+    """Set up a simple likelihood for testing."""
+    f_min = 20.0
+    f_max = 1024.0
+    T = 8.0
+    domain = UniformFrequencyDomain(f_min, f_max, delta_f=1 / T)
+
+    waveform = {
+        "H1": np.where(domain.frequency_mask, (1.0 + 1j) * 1e-20, 0.0),
+        "L1": np.where(domain.frequency_mask, (1.0 + 1j) * 1e-20, 0.0),
+    }
+    asds = {
+        "H1": np.where(domain.frequency_mask, 1e-20, 1.0),
+        "L1": np.where(domain.frequency_mask, 1e-20, 1.0),
+    }
+
+    sample = {"waveform": waveform, "asds": asds}
+
+    likelihood = StationaryGaussianGWLikelihood(
+        wfg_kwargs={
+            "approximant": "IMRPhenomXPHM",
+            "f_ref": 20.0,
+            "spin_conversion_phase": 0.0,
+        },
+        wfg_domain=domain,
+        data_domain=domain,
+        event_data=sample,
+        t_ref=1248242632.0,
+    )
+
+    theta = {
+        "chirp_mass": 50.0,
+        "mass_ratio": 0.8,
+        "a_1": 0.3,
+        "a_2": 0.4,
+        "tilt_1": 1.3,
+        "tilt_2": 1.4,
+        "phi_12": 0.3,
+        "phi_jl": 3.3,
+        "theta_jn": 1.2,
+        "luminosity_distance": 4000.0,
+        "geocent_time": -0.03,
+        "dec": -0.3,
+        "ra": 1.5,
+        "psi": 1.2,
+        "phase": 1.4,
+    }
+
+    return likelihood, theta
+
+
+def test_d_inner_h_complex_returns_complex(likelihood_and_theta):
+    likelihood, theta = likelihood_and_theta
+    result = likelihood.d_inner_h_complex(theta)
+    assert np.isscalar(result) or isinstance(result, (complex, np.complexfloating))
+
+
+def test_d_inner_h_complex_multi_returns_complex_array(likelihood_and_theta):
+    likelihood, theta = likelihood_and_theta
+    theta_df = pd.DataFrame([theta, theta])
+    result = likelihood.d_inner_h_complex_multi(theta_df)
+    assert isinstance(result, np.ndarray)
+    assert result.shape == (2,)
+    assert np.iscomplexobj(result)
+    assert np.isclose(result[0], likelihood.d_inner_h_complex(theta))
+
+
+def test_phase_marginalized_aux_snr_is_phase_maximized(domain, event_data):
+    """Under phase marginalization the auxiliary SNR is the phase-maximized
+    matched-filter statistic |<d, h_c>| / sqrt(<h, h>), not the marginalized
+    likelihood term ln_i0(|<d, h_c>|)."""
+    likelihood = make_likelihood(
+        domain,
+        event_data,
+        phase_marginalization_kwargs={"approximation_22_mode": True},
+    )
+    likelihood.return_aux_snr = True
+    theta = dict(THETA)
+    theta.pop("phase", None)
+    _, snr = likelihood.log_likelihood(theta)
+    kappa2C = likelihood.d_inner_h_complex({**theta, "phase": 0.0})
+    mu = likelihood.signal({**theta, "phase": 0.0})["waveform"]
+    rho2opt = sum(inner_product(m, m) for m in mu.values())
+    assert snr == pytest.approx(np.abs(kappa2C) / rho2opt**0.5)

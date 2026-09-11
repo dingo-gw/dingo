@@ -60,8 +60,7 @@ model:
       hidden_dim: 512
       num_transform_blocks: 5
       activation: elu
-      batch_norm: False
-      layer_norm: True
+      norm: LayerNorm
       dropout_probability: 0.0
       num_bins: 8
       base_transform_type: rq-coupling
@@ -70,7 +69,7 @@ model:
     tokenizer_kwargs:
       hidden_dims: [ 512,]
       activation: elu
-      layer_norm: True
+      norm: LayerNorm
     transformer_kwargs:
       d_model: 1024
       dim_feedforward: 2048

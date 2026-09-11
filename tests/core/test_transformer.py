@@ -18,9 +18,7 @@ NUM_BLOCKS = 2
 OUTPUT_DIM = 8
 
 
-def make_tokenizer(
-    num_blocks=NUM_BLOCKS, layer_norm=False, batch_norm=False, position_continuous_dim=2
-):
+def make_tokenizer(num_blocks=NUM_BLOCKS, norm=None, position_continuous_dim=2):
     return TokenEmbedding(
         input_dim=NUM_FEATURES,
         hidden_dims=[16, 16],
@@ -28,8 +26,7 @@ def make_tokenizer(
         activation=F.elu,
         position_continuous_dim=position_continuous_dim,
         position_category_sizes=[num_blocks],
-        layer_norm=layer_norm,
-        batch_norm=batch_norm,
+        norm=norm,
     )
 
 
@@ -124,7 +121,7 @@ def test_position_does_not_mix_across_tokens():
 
 
 def test_backward_pass():
-    tokenizer = make_tokenizer(layer_norm=True)
+    tokenizer = make_tokenizer(norm="LayerNorm")
     x = torch.rand(8, NUM_TOKENS, NUM_FEATURES)
     position = make_position(batch_size=8)
     target = torch.rand(8, NUM_TOKENS, OUTPUT_DIM)
@@ -155,8 +152,7 @@ def make_enet_kwargs():
         "position_category_sizes": [NUM_BLOCKS],
         "hidden_dims": [16],
         "activation": "elu",
-        "batch_norm": False,
-        "layer_norm": True,
+        "norm": "LayerNorm",
     }
     transformer_kwargs = {
         "d_model": D_MODEL,
@@ -223,7 +219,7 @@ def test_create_transformer_enet_with_dense_residual_final_net():
         "activation": "elu",
         "output_dim": 5,
         "hidden_dims": [8, 8],
-        "layer_norm": True,
+        "norm": "LayerNorm",
     }
     model = create_transformer_enet(
         tokenizer_kwargs=tokenizer_kwargs,
@@ -395,8 +391,8 @@ def test_wrong_position_width_raises():
 
 
 def test_tokenizer_refuses_batch_norm():
-    with pytest.raises(ValueError, match="batch_norm"):
-        make_tokenizer(batch_norm=True)
+    with pytest.raises(ValueError, match="BatchNorm"):
+        make_tokenizer(norm="BatchNorm")
 
 
 def test_create_transformer_enet_backward_pass():

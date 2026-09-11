@@ -25,7 +25,7 @@ def data_setup_nsf_large():
         "num_transform_blocks": 5,
         "activation": "elu",
         "dropout_probability": 0.0,
-        "batch_norm": True,
+        "norm": "BatchNorm",
         "num_bins": 8,
         "base_transform_type": "rq-coupling",
     }
@@ -63,7 +63,7 @@ def data_setup_nsf_large():
         ],
         "activation": "elu",
         "dropout": 0.0,
-        "batch_norm": True,
+        "norm": "BatchNorm",
         "added_context": True,
     }
     d.embedding_net_builder = create_enet_with_projection_layer_and_dense_resnet
@@ -88,7 +88,7 @@ def data_setup_nsf_small():
         "num_transform_blocks": 2,
         "activation": "elu",
         "dropout_probability": 0.0,
-        "batch_norm": True,
+        "norm": "BatchNorm",
         "num_bins": 8,
         "base_transform_type": "rq-coupling",
     }
@@ -100,7 +100,7 @@ def data_setup_nsf_small():
         "hidden_dims": [32, 16, 8],
         "activation": "elu",
         "dropout": 0.0,
-        "batch_norm": True,
+        "norm": "BatchNorm",
         "added_context": True,
         "svd": {"size": 10},
     }
@@ -282,7 +282,7 @@ def _make_transformer_posterior_kwargs():
             "num_transform_blocks": 2,
             "activation": "elu",
             "dropout_probability": 0.0,
-            "batch_norm": False,
+            "norm": None,
             "num_bins": 4,
             "base_transform_type": "rq-coupling",
         },
@@ -297,8 +297,7 @@ def _make_transformer_embedding_kwargs():
             "position_category_sizes": [_NUM_BLOCKS],
             "hidden_dims": [16],
             "activation": "elu",
-            "batch_norm": False,
-            "layer_norm": False,
+            "norm": None,
         },
         "transformer_kwargs": {
             "d_model": _D_MODEL,
@@ -382,67 +381,47 @@ def test_nsf_with_transformer_enet_does_not_mutate_kwargs():
     assert embedding_kwargs == embedding_kwargs_ref
 
 
-# ---------------------------------------------------------------------------
-# create_base_transform / create_transform — layer_norm=True path
-# ---------------------------------------------------------------------------
-
-
-def test_create_transform_layer_norm_output_shape():
-    """create_transform with layer_norm=True in base_transform_kwargs must produce
-    log-probs of the same shape as without layer_norm."""
-    param_dim = 6
-    context_dim = 8
-    batch_size = 10
-
-    base_transform_kwargs = {
+def _layer_norm_kwargs(base_transform_type):
+    return {
         "hidden_dim": 16,
         "num_transform_blocks": 2,
         "activation": "elu",
         "dropout_probability": 0.0,
-        "batch_norm": False,
-        "layer_norm": True,
+        "norm": "LayerNorm",
         "num_bins": 4,
-        "base_transform_type": "rq-coupling",
+        "base_transform_type": base_transform_type,
     }
-    transform = create_transform(
-        num_flow_steps=3,
-        param_dim=param_dim,
-        context_dim=context_dim,
-        base_transform_kwargs=base_transform_kwargs,
-    )
-
-    y = torch.randn(batch_size, param_dim)
-    context = torch.randn(batch_size, context_dim)
-    y_transformed, log_det = transform(y, context=context)
-
-    assert y_transformed.shape == (batch_size, param_dim)
-    assert log_det.shape == (batch_size,)
 
 
-def test_create_transform_layer_norm_backward_pass():
-    """Backward pass through a coupling flow with layer_norm=True must not error."""
-    param_dim = 4
-    context_dim = 6
-
-    base_transform_kwargs = {
-        "hidden_dim": 16,
-        "num_transform_blocks": 2,
-        "activation": "elu",
-        "dropout_probability": 0.0,
-        "batch_norm": False,
-        "layer_norm": True,
-        "num_bins": 4,
-        "base_transform_type": "rq-coupling",
-    }
-    transform = create_transform(
+def test_nsf_layer_norm():
+    """
+    With norm="LayerNorm" the flow must contain LayerNorm layers and no
+    BatchNorm1d, and evaluate the log_prob on a batch of one, which BatchNorm
+    rejects in training mode.
+    """
+    torch.manual_seed(0)
+    flow = create_nsf_model(
+        input_dim=3,
+        context_dim=5,
         num_flow_steps=2,
-        param_dim=param_dim,
-        context_dim=context_dim,
-        base_transform_kwargs=base_transform_kwargs,
+        base_transform_kwargs=_layer_norm_kwargs("rq-coupling"),
     )
+    modules = list(flow.modules())
+    assert not any(isinstance(m, torch.nn.BatchNorm1d) for m in modules)
+    assert any(isinstance(m, torch.nn.LayerNorm) for m in modules)
+    flow.train()
+    assert flow.log_prob(torch.randn(1, 3), context=torch.randn(1, 5)).shape == (1,)
 
-    y = torch.randn(8, param_dim, requires_grad=True)
-    context = torch.randn(8, context_dim)
-    _, log_det = transform(y, context=context)
-    log_det.sum().backward()
-    assert y.grad is not None
+
+def test_nsf_layer_norm_rejects_autoregressive():
+    """
+    LayerNorm mixes information across the feature axis, which violates the
+    causal structure imposed by the MADE layers of the autoregressive transform.
+    """
+    with pytest.raises(ValueError, match="autoregressive"):
+        create_nsf_model(
+            input_dim=3,
+            context_dim=5,
+            num_flow_steps=2,
+            base_transform_kwargs=_layer_norm_kwargs("rq-autoregressive"),
+        )

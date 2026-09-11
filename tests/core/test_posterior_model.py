@@ -1,3 +1,4 @@
+import copy
 import pytest
 import types
 import os
@@ -26,7 +27,7 @@ def data_setup_pm_1():
             "num_transform_blocks": 2,
             "activation": "elu",
             "dropout_probability": 0.0,
-            "batch_norm": True,
+            "norm": "BatchNorm",
             "num_bins": 8,
             "base_transform_type": "rq-coupling",
         },
@@ -40,7 +41,7 @@ def data_setup_pm_1():
         "hidden_dims": [32, 16, 8],
         "activation": "elu",
         "dropout": 0.0,
-        "batch_norm": True,
+        "norm": "BatchNorm",
         "added_context": True,
     }
 
@@ -225,6 +226,101 @@ def test_pm_scheduler(data_setup_pm_1, data_setup_optimizer_scheduler):
     assert np.allclose(factors, e.cosine_factors), "Scheduler does not load correctly."
 
 
+def test_legacy_batch_norm_setting_is_converted():
+    """
+    Checkpoints and settings from before the `norm` option carry a boolean
+    `batch_norm` key; it must map to norm="BatchNorm"/None at any nesting level
+    so that old networks are rebuilt with the same layers.
+    """
+    model_kwargs = {
+        "posterior_model_type": "normalizing_flow",
+        "posterior_kwargs": {
+            "input_dim": 3,
+            "context_dim": 5,
+            "num_flow_steps": 2,
+            "base_transform_kwargs": {
+                "hidden_dim": 16,
+                "num_transform_blocks": 2,
+                "activation": "elu",
+                "dropout_probability": 0.0,
+                "batch_norm": "true",
+                "num_bins": 4,
+                "base_transform_type": "rq-coupling",
+            },
+        },
+        "embedding_type": None,
+        "embedding_kwargs": None,
+    }
+    pm = NormalizingFlowPosteriorModel(
+        metadata={"train_settings": {"model": model_kwargs}}, device="cpu"
+    )
+    base_kwargs = pm.model_kwargs["posterior_kwargs"]["base_transform_kwargs"]
+    assert "batch_norm" not in base_kwargs
+    assert base_kwargs["norm"] == "BatchNorm"
+    assert any(isinstance(m, torch.nn.BatchNorm1d) for m in pm.network.modules())
+
+    base_kwargs["batch_norm"] = False
+    del base_kwargs["norm"]
+    pm = NormalizingFlowPosteriorModel(
+        metadata={"train_settings": {"model": model_kwargs}}, device="cpu"
+    )
+    assert pm.model_kwargs["posterior_kwargs"]["base_transform_kwargs"]["norm"] is None
+    assert not any(
+        isinstance(m, (torch.nn.BatchNorm1d, torch.nn.LayerNorm))
+        for m in pm.network.modules()
+    )
+
+
+def test_legacy_layer_norm_setting_is_converted():
+    """
+    Checkpoints from the dingo-t1 branch carry boolean `batch_norm` and
+    `layer_norm` keys; they must map to norm="LayerNorm" so that the network
+    is rebuilt with LayerNorm layers (stored under `layer_norm_layers`).
+    """
+    from dingo.core.utils.backward_compatibility import update_model_config
+
+    model_kwargs = {
+        "posterior_model_type": "normalizing_flow",
+        "posterior_kwargs": {
+            "input_dim": 3,
+            "context_dim": 5,
+            "num_flow_steps": 2,
+            "base_transform_kwargs": {
+                "hidden_dim": 16,
+                "num_transform_blocks": 2,
+                "activation": "elu",
+                "dropout_probability": 0.0,
+                "batch_norm": False,
+                "layer_norm": True,
+                "num_bins": 4,
+                "base_transform_type": "rq-coupling",
+            },
+        },
+        "embedding_type": None,
+        "embedding_kwargs": None,
+    }
+    pm = NormalizingFlowPosteriorModel(
+        metadata={"train_settings": {"model": model_kwargs}}, device="cpu"
+    )
+    base_kwargs = pm.model_kwargs["posterior_kwargs"]["base_transform_kwargs"]
+    assert "batch_norm" not in base_kwargs and "layer_norm" not in base_kwargs
+    assert base_kwargs["norm"] == "LayerNorm"
+    assert any(isinstance(m, torch.nn.LayerNorm) for m in pm.network.modules())
+    assert not any(isinstance(m, torch.nn.BatchNorm1d) for m in pm.network.modules())
+    assert any(".layer_norm_layers." in k for k in pm.network.state_dict())
+
+    # Conversion is idempotent: a second call leaves the converted settings alone.
+    converted = copy.deepcopy(pm.model_kwargs)
+    update_model_config(converted)
+    assert converted == pm.model_kwargs
+
+    # Both flags set is contradictory and must be rejected.
+    with pytest.raises(ValueError, match="both batch_norm and layer_norm"):
+        update_model_config(
+            {"embedding_kwargs": {"batch_norm": True, "layer_norm": True}}
+        )
+
+
 # ---------------------------------------------------------------------------
 # NormalizingFlowPosteriorModel — embedding_type dispatch
 # ---------------------------------------------------------------------------
@@ -250,7 +346,7 @@ def _make_transformer_model_kwargs():
                 "num_transform_blocks": 2,
                 "activation": "elu",
                 "dropout_probability": 0.0,
-                "batch_norm": False,
+                "norm": None,
                 "num_bins": 4,
                 "base_transform_type": "rq-coupling",
             },
@@ -262,8 +358,7 @@ def _make_transformer_model_kwargs():
                 "position_category_sizes": [_T_BLOCKS],
                 "hidden_dims": [16],
                 "activation": "elu",
-                "batch_norm": False,
-                "layer_norm": False,
+                "norm": None,
             },
             "transformer_kwargs": {
                 "d_model": _T_D_MODEL,

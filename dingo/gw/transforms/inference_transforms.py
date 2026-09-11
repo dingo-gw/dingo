@@ -16,7 +16,11 @@ class PostCorrectGeocentTime(object):
         sample = input_sample.copy()
         parameters = sample["parameters"].copy()
         extrinsic_parameters = sample["extrinsic_parameters"].copy()
-        parameters["geocent_time"] -= extrinsic_parameters.pop("geocent_time") * sign
+        # Out of place: `-=` on a tensor/array would mutate storage shared with the
+        # caller through the shallow dict copies above.
+        parameters["geocent_time"] = (
+            parameters["geocent_time"] - extrinsic_parameters.pop("geocent_time") * sign
+        )
         sample["parameters"] = parameters
         sample["extrinsic_parameters"] = extrinsic_parameters
         return sample
@@ -35,7 +39,7 @@ class CopyToExtrinsicParameters(object):
         sample = input_sample.copy()
         extrinsic_parameters = sample["extrinsic_parameters"].copy()
         for par in self.parameter_list:
-            if par in sample['parameters']:
+            if par in sample["parameters"]:
                 extrinsic_parameters[par] = sample["parameters"][par]
         sample["extrinsic_parameters"] = extrinsic_parameters
         return sample

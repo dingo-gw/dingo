@@ -128,8 +128,7 @@ def test_update_model_config_maps_dingo_t1_transformer_kwargs():
     assert embedding_kwargs["tokenizer_kwargs"] == {
         "hidden_dims": [512],
         "activation": "elu",
-        "batch_norm": False,
-        "layer_norm": True,
+        "norm": "LayerNorm",
         "input_dim": 48,
         "position_continuous_dim": 2,
         "position_category_sizes": [3],

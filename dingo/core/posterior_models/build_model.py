@@ -89,7 +89,7 @@ def autocomplete_model_kwargs(model_kwargs: dict, data_sample: list):
     """
     model_kwargs["posterior_kwargs"]["input_dim"] = len(data_sample[0])
 
-    embedding_type = model_kwargs.get("embedding_type", "resnet").lower()
+    embedding_type = (model_kwargs.get("embedding_type") or "resnet").lower()
 
     if embedding_type == "transformer":
         tokenizer_kwargs = model_kwargs["embedding_kwargs"]["tokenizer_kwargs"]

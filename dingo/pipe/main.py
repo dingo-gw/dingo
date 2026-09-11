@@ -10,6 +10,7 @@ import numpy as np
 import dingo.pipe.create_injections
 
 from bilby.core.prior import PriorDict
+from bilby.gw.detector import InterferometerList
 from bilby_pipe.input import Input
 from bilby_pipe.main import MainInput as BilbyMainInput
 from bilby_pipe.utils import (
@@ -29,9 +30,10 @@ from .utils import dict_to_string
 from ..gw.domains.build_domain import build_domain_from_model_metadata
 from ..gw.gwutils import add_defaults_for_missing_detectors, parse_psd_notch_dict
 from dingo.core.posterior_models.build_model import build_model_from_kwargs
-from ..gw.inference.gw_samplers import (
-    check_frequency_updates,
+from ..gw.frequency_updates import (
     check_detector_update,
+    check_frequency_updates,
+    check_importance_sampling_frequency_range,
     check_psd_notches,
 )
 from ..gw.injection import Injection
@@ -222,8 +224,19 @@ def fill_in_arguments_from_model(args, perform_arg_checks=True):
         psd_dict = {}
         rng = np.random.default_rng(args.generation_seed)
         for ifo_name in args.detectors:
-            psd_path = asd_dataset.save_psd(args.outdir, ifo_name, rng=rng)
-            psd_dict[ifo_name] = str(psd_path)
+            if ifo_name in asd_dataset.asds:
+                asd_key = ifo_name # normal detector, e.g. 'H1'
+            else:
+                # Triangular detector ('ET'): the ASD dataset is keyed by arm name
+                # (ET1/ET2/ET3), but bilby_pipe only accepts 'ET' as a psd_dict key,
+                # so we save the first arm's PSD and use it for all three arms.
+                # Note: different PSDs per-arm are NOT supported. This matches
+                # bilby's current ET definition (all arms share one sensitivity curve);
+                # supporting this would require bilby/bilby_pipe to treat ET1/ET2/ET3
+                # as separate detectors.
+                asd_key = [ifo.name for ifo in InterferometerList([ifo_name])][0]  # 'ET'-> 'ET1' and fixing 'ET1'
+            psd_path = asd_dataset.save_psd(args.outdir, asd_key, rng=rng)
+            psd_dict[ifo_name] = str(psd_path) # keyed by 'ET'
         args.asd_dataset = None
         args.psd_dict = str(psd_dict)
 
@@ -237,7 +250,41 @@ def fill_in_arguments_from_model(args, perform_arg_checks=True):
         importance_sampling_updates = {
             k.replace("-", "_"): v for k, v in importance_sampling_updates.items()
         }
-    return {**changed_args, **importance_sampling_updates}, model_args
+    # A frequency range under importance-sampling-updates applies to the likelihood
+    # only, so the strain-cropping check above (for the [data] keys) does not apply.
+    sampling_frequency = importance_sampling_updates.get(
+        "sampling_frequency", args.sampling_frequency
+    )
+    check_importance_sampling_frequency_range(
+        model_metadata,
+        importance_sampling_updates.get("minimum_frequency"),
+        importance_sampling_updates.get("maximum_frequency"),
+        sampling_frequency=(
+            float(sampling_frequency) if sampling_frequency is not None else None
+        ),
+    )
+    updates = {**changed_args, **importance_sampling_updates}
+    # A Dingo injection is generated on the network's band, so its data cannot be
+    # regenerated for a wider range or another duration.
+    if args.injection and (
+        "duration" in updates
+        or _outside(updates.get("minimum_frequency"), domain.f_min, min)
+        or _outside(updates.get("maximum_frequency"), domain.f_max, max)
+    ):
+        raise ValueError(
+            "Importance sampling of a Dingo injection at a wider frequency range or "
+            "another duration than the network's is not supported."
+        )
+    return updates, model_args
+
+
+def _outside(requested, bound, pick):
+    """Whether a requested frequency (a float or a per-detector dict) lies beyond
+    `bound` on the side `pick` selects (`min` below f_min, `max` above f_max)."""
+    if requested is None:
+        return False
+    value = pick(requested.values()) if isinstance(requested, dict) else requested
+    return value < bound if pick is min else value > bound
 
 
 class MainInput(BilbyMainInput):
@@ -252,6 +299,7 @@ class MainInput(BilbyMainInput):
         self.importance_sampling_updates = importance_sampling_updates
         self.prior_dict_updates = args.prior_dict_updates
         self.model_reference_time = args.model_reference_time
+        self.sampling_seed = args.sampling_seed
 
         Input.__init__(self, args, unknown_args, print_msg=False)
 

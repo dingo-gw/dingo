@@ -1,7 +1,7 @@
-"""Dense residual networks with GLU context gating, supporting layer normalization
-and multi-dimensional (e.g., token-batched) inputs. Used by the transformer
-tokenizer, as the NSF coupling conditioner when layer_norm=True, and by the
-continuous-flow (FMPE) networks."""
+"""Dense residual networks with GLU context gating, a selectable normalization
+layer, and support for multi-dimensional (e.g., token-batched) inputs. Used by the
+transformer token embedding, as the NSF coupling conditioner when norm="LayerNorm",
+and by the continuous-flow (FMPE) networks."""
 
 from typing import Callable, Optional, Tuple
 
@@ -9,14 +9,28 @@ import torch
 from torch import nn, Tensor
 from torch.nn import functional as F, init
 
+NORM_OPTIONS = ("BatchNorm", "LayerNorm", None)
+
+
+def check_norm_option(norm: Optional[str]) -> None:
+    if norm not in NORM_OPTIONS:
+        raise ValueError(
+            f"norm must be 'BatchNorm', 'LayerNorm' or None, got {norm!r}."
+        )
+
 
 class MyResidualBlock(nn.Module):
     """
-    A general-purpose residual block, supporting batch norm or layer norm.
+    A general-purpose residual block.
 
-    Context features are injected via a gated linear unit. The GLU is applied along
-    the last dimension, so this supports both [batch, features] and
-    [batch, tokens, features] inputs.
+    This is taken from nflows, but modified to allow for LayerNorm instead of
+    BatchNorm1d, and to apply the context GLU along the last dimension so that
+    token-batched ``[batch, tokens, features]`` inputs are gated per token
+    (LayerNorm or no normalization only; BatchNorm1d treats dim 1 as the channel
+    axis). The parameter names (``batch_norm_layers``, ``linear_layers``,
+    ...) match those of the nflows ``ResidualBlock`` so that state dicts of
+    networks trained with BatchNorm remain loadable; LayerNorm parameters are
+    stored under ``layer_norm_layers`.
     """
 
     def __init__(
@@ -25,8 +39,7 @@ class MyResidualBlock(nn.Module):
         context_features: Optional[int] = None,
         activation: Callable = F.relu,
         dropout_probability: float = 0.0,
-        use_batch_norm: bool = False,
-        use_layer_norm: bool = False,
+        norm: Optional[str] = None,
         zero_initialization: bool = True,
     ):
         """
@@ -41,27 +54,21 @@ class MyResidualBlock(nn.Module):
             activation function used between linear layers
         dropout_probability : float
             dropout probability applied for regularization
-        use_batch_norm : bool
-            whether to use batch normalization
-        use_layer_norm : bool
-            whether to use layer normalization
+        norm : str or None
+            normalization used in the block: "BatchNorm", "LayerNorm" or None
         zero_initialization : bool
             whether to initialize the final linear layer with small weights
         """
         super().__init__()
+        check_norm_option(norm)
         self.activation = activation
+        self.norm = norm
 
-        if use_batch_norm and use_layer_norm:
-            raise ValueError(
-                "Residual block should not use both batch norm and layer norm."
-            )
-        self.use_batch_norm = use_batch_norm
-        self.use_layer_norm = use_layer_norm
-        if use_batch_norm:
+        if norm == "BatchNorm":
             self.batch_norm_layers = nn.ModuleList(
                 [nn.BatchNorm1d(features, eps=1e-3) for _ in range(2)]
             )
-        if use_layer_norm:
+        elif norm == "LayerNorm":
             self.layer_norm_layers = nn.ModuleList(
                 [nn.LayerNorm(features) for _ in range(2)]
             )
@@ -75,18 +82,18 @@ class MyResidualBlock(nn.Module):
             init.uniform_(self.linear_layers[-1].weight, -1e-3, 1e-3)
             init.uniform_(self.linear_layers[-1].bias, -1e-3, 1e-3)
 
+    def _normalize(self, x: Tensor, index: int) -> Tensor:
+        if self.norm == "BatchNorm":
+            return self.batch_norm_layers[index](x)
+        if self.norm == "LayerNorm":
+            return self.layer_norm_layers[index](x)
+        return x
+
     def forward(self, inputs: Tensor, context: Optional[Tensor] = None) -> Tensor:
-        temps = inputs
-        if self.use_batch_norm:
-            temps = self.batch_norm_layers[0](temps)
-        if self.use_layer_norm:
-            temps = self.layer_norm_layers[0](temps)
+        temps = self._normalize(inputs, 0)
         temps = self.activation(temps)
         temps = self.linear_layers[0](temps)
-        if self.use_batch_norm:
-            temps = self.batch_norm_layers[1](temps)
-        if self.use_layer_norm:
-            temps = self.layer_norm_layers[1](temps)
+        temps = self._normalize(temps, 1)
         temps = self.activation(temps)
         temps = self.dropout(temps)
         temps = self.linear_layers[1](temps)
@@ -116,9 +123,9 @@ class DenseResidualNet(nn.Module):
        normalization and 2D [batch, features] inputs. This implementation adds layer
        normalization and supports inputs with an arbitrary number of leading batch
        dimensions (e.g., [batch, tokens, features]), as needed by the transformer
-       tokenizer.
+       token embedding.
 
-    Because of difference (1) — and differently named layers — the two classes are
+    Because of difference (1) -- and differently named layers -- the two classes are
     not state-dict compatible: a checkpoint trained with glasflow's ResidualNet
     cannot be loaded into DenseResidualNet (the residual blocks themselves are
     compatible).
@@ -135,10 +142,9 @@ class DenseResidualNet(nn.Module):
         output_dim: int,
         hidden_dims: Tuple,
         activation: Callable = F.elu,
-        context_features: Optional[int] = None,
         dropout: float = 0.0,
-        batch_norm: bool = False,
-        layer_norm: bool = False,
+        norm: Optional[str] = "BatchNorm",
+        context_features: int = None,
     ):
         """
         Parameters
@@ -149,23 +155,25 @@ class DenseResidualNet(nn.Module):
             output dimension of this module
         hidden_dims : tuple
             tuple with dimensions of hidden layers of this module
-        activation : Callable
+        activation: callable
             activation function used in residual blocks
-        context_features : Optional[int]
-            number of additional context features, which are provided to the
-            residual blocks via gated linear units; if None, no context expected
-        dropout : float
-            dropout probability for residual blocks, used for regularization
-        batch_norm : bool
-            whether to use batch normalization
-        layer_norm : bool
-            whether to use layer normalization
+        dropout: float
+            dropout probability for residual blocks used for reqularization
+        norm: str or None
+            normalization used in the residual blocks: "BatchNorm", "LayerNorm"
+            or None
+        context_features: int
+            Number of additional context features, which are provided to the residual
+            blocks via gated linear units. If None, no additional context expected.
         """
+
         super().__init__()
+        check_norm_option(norm)
         self.input_dim = input_dim
         self.output_dim = output_dim
         self.hidden_dims = hidden_dims
         self.num_res_blocks = len(self.hidden_dims)
+
         # Read by nflows' piecewise coupling transforms (duck-typed, hasattr): when
         # this attribute exists, the conditioner's spline widths/heights are divided
         # by sqrt(hidden_features). Removing it changes the flow, and networks
@@ -182,8 +190,7 @@ class DenseResidualNet(nn.Module):
                     context_features=context_features,
                     activation=activation,
                     dropout_probability=dropout,
-                    use_batch_norm=batch_norm,
-                    use_layer_norm=layer_norm,
+                    norm=norm,
                 )
                 for n in range(self.num_res_blocks)
             ]

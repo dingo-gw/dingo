@@ -21,7 +21,7 @@ def data_setup_rb():
         "hidden_dims": [32, 16, 16, 8],
         "activation": "elu",
         "dropout": 0.0,
-        "batch_norm": True,
+        "norm": "BatchNorm",
         "svd": {"size": n_rb},
     }
     return {
@@ -190,11 +190,11 @@ def test_backward_pass_of_2stage_enet(data_setup_rb):
 def test_forward_pass_of_2stage_enet_with_layer_norm(data_setup_rb):
     """
     Test forward pass of the embedding network built by
-    create_enet_with_projection_layer_and_dense_resnet with layer_norm enabled
-    instead of batch_norm, exercising the layer_norm plumbing through the builder.
+    create_enet_with_projection_layer_and_dense_resnet with norm="LayerNorm"
+    instead of "BatchNorm", exercising the norm plumbing through the builder.
     """
     d = data_setup_rb
-    enet_kwargs = {**d["enet_kwargs"], "batch_norm": False, "layer_norm": True}
+    enet_kwargs = {**d["enet_kwargs"], "norm": "LayerNorm"}
     enet = create_enet_with_projection_layer_and_dense_resnet(**enet_kwargs)
     check_model_forward_pass(
         enet, [enet_kwargs["output_dim"]], enet_kwargs["input_dims"], d["batch_size"]
