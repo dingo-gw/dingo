@@ -1,3 +1,4 @@
+from pathlib import Path
 from typing import List, Mapping, Optional, TypeAlias, Union
 import ast
 import h5py
@@ -144,7 +145,7 @@ class DingoDataset:
 
     def __init__(
         self,
-        file_name: Optional[str] = None,
+        file_name: Optional[Union[str, Path]] = None,
         dictionary: Optional[dict] = None,
         data_keys: Optional[List] = None,
         leave_on_disk_keys: Optional[list] = None,
@@ -156,7 +157,7 @@ class DingoDataset:
 
         Parameters
         ----------
-        file_name : str
+        file_name : str or Path
             HDF5 file containing a dataset
         dictionary : dict
             Contains settings and data entries. The data keys should be the same as
@@ -191,7 +192,7 @@ class DingoDataset:
         elif dictionary is not None:
             self.from_dictionary(dictionary)
 
-    def to_file(self, file_name: str, mode: str = "w"):
+    def to_file(self, file_name: Union[str, Path], mode: str = "w"):
         print("Saving dataset to " + str(file_name))
         save_dict = {
             k: v
@@ -205,7 +206,9 @@ class DingoDataset:
             if self.dataset_type:
                 f.attrs["dataset_type"] = self.dataset_type
 
-    def from_file(self, file_name: str, dtype_map: Optional[DTypeMap] = None):
+    def from_file(
+        self, file_name: Union[str, Path], dtype_map: Optional[DTypeMap] = None
+    ):
         print(f"Loading dataset from {str(file_name)}.")
         if self._leave_on_disk_keys:
             print(f"Omitting data keys {self._leave_on_disk_keys}.")

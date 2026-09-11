@@ -94,9 +94,11 @@ Injections mirror the [approach of `bilby_pipe`](https://lscsoft.docs.ligo.org/b
 
 ## Sampling
 
-The next step is sampling from the Dingo model. The model is loaded into a [GWSampler](dingo.gw.inference.gw_samplers.GWSampler) or [GWSamplerGNPE](dingo.gw.inference.gw_samplers.GWSamplerGNPE) object. (If using [GNPE](gnpe) it is necessary to specify a `model-init`.) The Sampler `context` is then set from the EventDataset prepared in the previous step. `num-samples` samples are then generated in batches of size `batch-size`. The samples (and context) are stored in a [Result](dingo.gw.result.Result) object and saved in HDF5 format.
+The next step is sampling from the Dingo model. The model is loaded into a [GWComposedSampler](dingo.gw.inference.sampler.GWComposedSampler), built from the EventDataset prepared in the previous step. (If using [GNPE](gnpe) it is necessary to specify a `model-init`.) `num-samples` samples are then generated in batches of size `batch-size`, seeded by `sampling-seed` (each job draws and logs its own if not given; importance-sampling job n uses the seed plus n). The seed used is recorded with the sampling result. The samples (and context) are stored in a [Result](dingo.gw.result.Result) object and saved in HDF5 format.
 
 If using GNPE, one can optionally specify `num-gnpe-iterations` (it defaults to 30). Importantly, obtaining the log probability when using GNPE requires an [extra step of training an unconditional flow](result.md#density-recovery). This is done using the `recover-log-prob` flag, which defaults to `True`. The default density recovery settings can be overwritten by providing a `density-recovery-settings` dictionary in the `.ini` file.
+
+Single-network models that condition on context parameters (e.g., chirp-mass-conditioned [BNS](bns.md) networks) take their pinned values from `fixed-context-parameters`, or determine the trigger chirp mass from the data with `chirp-mass-scan`. Both options are described on the [binary neutron stars](bns.md) page.
 
 Since sampling uses GPU hardware, there is an additional key `sampling-requirements` for HTCondor requirements during the sampling stage. This is intended for specifying GPU requirements such as memory or CUDA version.
 
@@ -104,13 +106,15 @@ Since sampling uses GPU hardware, there is an additional key `sampling-requireme
 
 For importance sampling, the Result saved in the previous step is loaded. Since this contains the strain data and ASDs, as well as all settings used for training the network, the likelihood and prior can be evaluated for each sample point. If it is necessary to change data conditioning or PSD for importance sampling (i.e., if the `importance-sampling-updates` dictionary is non-empty), then a second [data generation](#data-generation) step is first carried using the new settings, and used as importance sampling context. The importance sampled result is finally saved as HDF5, including the estimated Bayesian evidence.
 
+A frequency range can be requested in two ways. `minimum-frequency` and `maximum-frequency` in the `[data]` section (a float, or a per-detector dictionary) apply to sampling and importance sampling alike: both the network input and the likelihood are restricted to the range, which requires a model trained with random strain cropping that covers it. The same keys under `importance-sampling-updates` apply to the likelihood only. The importance-sampling data are then generated for the requested range, which may extend beyond the network's band up to the Nyquist frequency, and no cropping is required. In both cases the likelihood masks the ASDs outside each detector's range and places the calibration spline nodes across it, as Bilby does.
+
 If `prior-dict-updates` is specified in the `.ini` file, then this will be used for the importance sampling prior. One example where this is useful is for the luminosity distance prior. Indeed, Dingo tends to train better using a uniform prior over luminosity distance, but physically one would prefer a uniform in volume prior. By specifying `prior-dict-updates` this change can be made in importance sampling.
 
 ```{caution}
 If extending the prior support during importance sampling, be sure that the posterior does not rail up against the prior boundary being extended.
 ```
 
-By default, dingo_pipe assumes that it is necessary to sample the phase synthetically, so it will do so before importance sampling. This can be turned off by passing an empty dictionary to `importance-sampling-settings`. Note that importance sampling itself can be switched off by setting the `importance-sample` flag to False (it defaults to True). 
+By default, dingo_pipe assumes that it is necessary to sample the phase synthetically, so it will do so before importance sampling. This can be turned off by setting `importance-sampling-settings = none` (an empty dictionary keeps the default; `none` also clears the multibanding default below). Note that importance sampling itself can be switched off by setting the `importance-sample` flag to False (it defaults to True). For models using a multibanded frequency domain, the likelihood is evaluated on the undecimated base domain by default (`use_base_domain` in `importance-sampling-settings`).
 
 Importance sampling (including synthetic phase sampling) is an expensive step, so dingo_pipe allows for parallelization: this step is split over `n-parallel` jobs, each of which uses `request-cpus-importance-sampling` processes. In the backend, this makes use of the Result [split()](dingo.core.result.Result.split) and [merge()](dingo.core.result.Result.merge) methods.
 

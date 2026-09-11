@@ -554,6 +554,17 @@ class BasePosteriorModel(ABC):
             if is_primary:
                 print(f"Finished training epoch {self.epoch}.\n")
 
+    @property
+    def base_metadata(self) -> dict:
+        """The analysis metadata (dataset, domain, detector, and data settings). For
+        an unconditional (density-recovery) model this is the metadata of the base
+        model whose samples it was trained on, stored under `metadata["base"]`; the
+        network's own settings (`standardization`, `inference_parameters`) are
+        always read from `metadata` directly."""
+        if self.metadata["train_settings"]["data"].get("unconditional", False):
+            return self.metadata["base"]
+        return self.metadata
+
 
 def _dataset_len(dataloader: torch.utils.data.DataLoader) -> int:
     """Return the number of samples in a DataLoader's dataset.
