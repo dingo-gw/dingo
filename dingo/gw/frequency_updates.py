@@ -43,10 +43,12 @@ def _validate_frequency_bound(
     dict constraining only the detectors it names; keys must be analyzed detectors.
     Values equal to the domain bound are always allowed. A changed
     value requires frequency flexibility from training: ``random_strain_cropping``
-    and/or ``tokenization.mask_frequency_range`` are validated against their
-    envelopes; a model with only ``tokenization.mask_random_tokens`` passes with a
-    warning, since the contiguous masking pattern differs from the random training
-    distribution.
+    (bin masking, non-tokenized networks) or ``tokenization.mask_frequency_range``
+    (token masking) is validated against its envelope; a tokenized model with only
+    ``tokenization.mask_random_tokens`` passes with a warning, since the contiguous
+    masking pattern differs from the random training distribution. A tokenized
+    network is refused the cropping license: at inference it is given token masks,
+    which cropping-only training never produced.
 
     Parameters
     ----------
@@ -99,6 +101,13 @@ def _validate_frequency_bound(
     tok = data_settings.get("tokenization") or {}
     range_settings = tok.get("mask_frequency_range")
 
+    if tok and crop_settings is not None:
+        raise ValueError(
+            f"A tokenized network licenses frequency-range updates through "
+            f"tokenization.mask_frequency_range, not random_strain_cropping: at "
+            f"inference tokens are masked, which cropping-only training never "
+            f"produced. Cannot update {bound}."
+        )
     if crop_settings is None and range_settings is None:
         if "mask_random_tokens" in tok:
             warnings.warn(
@@ -176,7 +185,7 @@ def _validate_psd_notches(
     Validate PSD notch intervals against the domain and the model's training settings.
 
     ``psd_notch_dict`` maps detectors to one ``[f_lo, f_hi]`` interval or a list of
-    them. Configuration errors raise: a detector the model was not trained with, an
+    them (lists or arrays, e.g. after an HDF5 round trip). Configuration errors raise: a detector the model was not trained with, an
     empty interval, or an interval touching the domain bounds (at data generation a
     high-ASD run at an edge is taken for PSD padding, see ``detect_asd_notches``, so
     the frequency bound must be moved instead). A mismatch with the training
@@ -208,7 +217,7 @@ def _validate_psd_notches(
         )
     intervals = []
     for det, notch in psd_notch_dict.items():
-        ranges = [notch] if not isinstance(notch[0], (list, tuple)) else notch
+        ranges = np.atleast_2d(np.asarray(notch, dtype=float)).tolist()
         for f_lo, f_hi in ranges:
             if not f_lo <= f_hi:
                 raise ValueError(

@@ -501,3 +501,23 @@ def test_reset_event_with_wider_data_gives_the_likelihood_the_recorded_grid():
         result.base_metadata, _context(), proposal_record
     )
     assert proposal.likelihood().data_domain == result.domain
+
+
+def test_old_schema_settings_are_converted_on_load():
+    # A Result written by the dingo-t1 branch carries the old tokenization keys and
+    # no normalize_position; reconstruction runs the converters, as the model
+    # loaders do for checkpoints, so the context can be rebuilt.
+    settings = _metadata()
+    settings["train_settings"]["data"]["tokenization"] = {"num_tokens": 8}
+    result = Result(
+        dictionary={
+            "samples": make_gw_result().samples,
+            "context": _context(),
+            "event_metadata": {},
+            "settings": settings,
+        }
+    )
+    tokenization = result.settings["train_settings"]["data"]["tokenization"]
+    assert tokenization == {"num_tokens_per_block": 8, "normalize_position": False}
+    waveform, position, token_mask = result.sampler_context.prepared_data()
+    assert position.shape == (2 * 8, 3)

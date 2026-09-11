@@ -268,3 +268,19 @@ def test_tokenization_with_gnpe_is_refused(tmp_path):
             data_settings,
             _toy_asd_file(tmp_path / "asds.hdf5"),
         )
+
+
+def test_tokenization_with_cropping_is_refused(tmp_path):
+    # Variable frequency ranges for a tokenized network come from token masking;
+    # bin cropping would train an input pattern inference never produces.
+    data_settings = {
+        "waveform_dataset_path": None,
+        **DATA_SETTINGS,
+        "random_strain_cropping": {"cropping_probability": 0.5, "f_min_upper": 60.0},
+    }
+    with pytest.raises(ValueError, match="random_strain_cropping"):
+        set_train_transforms(
+            _toy_waveform_dataset(),
+            data_settings,
+            _toy_asd_file(tmp_path / "asds.hdf5"),
+        )

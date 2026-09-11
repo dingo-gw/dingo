@@ -8,7 +8,12 @@ from bilby.gw.prior import CalibrationPriorDict
 from bilby_pipe.utils import CALIBRATION_CORRECTION_TYPE_LOOKUP
 
 from dingo.core.result import Result as CoreResult
-from dingo.core.utils.backward_compatibility import check_minimum_version
+from dingo.core.utils.backward_compatibility import (
+    check_minimum_version,
+    update_data_config,
+    update_model_config,
+)
+from bilby.gw.detector import InterferometerList
 from dingo.gw.frequency_updates import resolve_frequency_bounds
 
 
@@ -56,18 +61,6 @@ class Result(CoreResult):
     """
 
     dataset_type = "gw_result"
-
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        # Correct bug in recursive hdf5 load: If we want to analyze a single detector event, the detector list gets
-        # loaded as a string instead of a list (i.e., 'L1' instead of ['L1']). This has to be reverted because the code
-        # expects detectors to be a list in result.reset_event(). If it is not a list, event_metadata is not the same as
-        # the event metadata loaded from the events file (where detectors is a list) and it assumes that a domain update
-        # is necessary (which is not implemented for MFD).
-        if self.event_metadata is not None and isinstance(
-            self.event_metadata.get("detectors"), str
-        ):
-            self.event_metadata["detectors"] = [self.event_metadata["detectors"]]
 
     @property
     def synthetic_phase_kwargs(self):
@@ -130,6 +123,12 @@ class Result(CoreResult):
 
     @property
     def interferometers(self):
+        """The analyzed detectors (arm names for a triangular detector), from the
+        sampler context; the event data's detectors for a transport-only result."""
+        if self.sampler_context is not None:
+            return [
+                ifo.name for ifo in InterferometerList(self.sampler_context.detectors)
+            ]
         return list(self.context["waveform"].keys())
 
     @property
@@ -179,6 +178,13 @@ class Result(CoreResult):
         if self.settings is None:
             return None
         from dingo.gw.inference.context import GWSamplerContext
+
+        # Settings written by older code are mapped to the current schema in place
+        # (idempotent), as the model loaders do for checkpoints.
+        metadata = self.base_metadata
+        update_data_config(metadata)
+        if "model" in metadata["train_settings"]:
+            update_model_config(metadata["train_settings"]["model"])
 
         # base_metadata resolves the unconditional ("base") indirection, so
         # density-recovery results reconstruct from the analysis metadata. The

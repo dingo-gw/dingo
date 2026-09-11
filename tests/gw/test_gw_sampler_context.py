@@ -144,10 +144,7 @@ def test_likelihood_grid_comes_from_the_event_record(monkeypatch):
     assert wide.domain.f_max == 1024.0  # the network's, unchanged
     assert kwargs["data_domain"] == build_domain(_grid(15.0, 2048.0, delta_f))
     assert (kwargs["wfg_domain"].f_min, kwargs["wfg_domain"].f_max) == (15.0, 2048.0)
-    assert kwargs["frequency_update"]["maximum_frequency"] == {
-        "H1": 2048.0,
-        "L1": 2048.0,
-    }
+    assert kwargs["frequency_update"]["maximum_frequency"] == {"H1": 2048.0}
     # Data generated at another duration.
     longer = GWSamplerContext.from_model_metadata(
         _BASE_METADATA,
@@ -208,17 +205,18 @@ def test_likelihood_frequency_range_follows_event_metadata(context):
     # the event data's detectors: without an event override the range defaults to
     # the domain bounds; a float applies to all detectors, and a dict may name
     # only some of them.
+    # (The fixture's model analyzes H1 only; the event data also carry L1.)
     default_update = context.likelihood().kwargs["frequency_update"]
     assert default_update == {
-        "minimum_frequency": {"H1": 20.0, "L1": 20.0},
-        "maximum_frequency": {"H1": 1024.0, "L1": 1024.0},
+        "minimum_frequency": {"H1": 20.0},
+        "maximum_frequency": {"H1": 1024.0},
     }
     with_event = GWSamplerContext(
         domain=build_domain(_DOMAIN_SETTINGS),
         data_prep=None,
         event_data=_event_data(_bins(_DOMAIN_SETTINGS["f_max"])),
         event_metadata={"minimum_frequency": {"H1": 21.0}, "maximum_frequency": 512.0},
-        model_metadata=_BASE_METADATA,
+        model_metadata=_MODEL_METADATA,
     )
     update = with_event.likelihood().kwargs["frequency_update"]
     assert update == {
@@ -498,9 +496,10 @@ def test_tokenized_context_detector_subset_needs_detector_masking():
     with pytest.raises(ValueError, match="do not match"):
         _tokenized_context({"detectors": ["H1"]}, detectors=("H1",)).prepared_data()
     ctx = _tokenized_context({"detectors": ["L1", "H1"]}, detectors=("L1", "H1"))
+    assert ctx.detectors == ["H1", "L1"]
     _, position, _ = ctx.prepared_data()
     half = position.shape[0] // 2
-    assert torch.all(position[:half, 2] == 1) and torch.all(position[half:, 2] == 0)
+    assert torch.all(position[:half, 2] == 0) and torch.all(position[half:, 2] == 1)
     # With detector masking, a subset is analyzed on its own.
     ctx = _tokenized_context(
         {"detectors": ["H1"]},
@@ -536,3 +535,62 @@ def test_frequency_range_expands_over_the_analyzed_detectors():
         _tokenized_context(
             {"detectors": ["H1"], "minimum_frequency": {"L1": 30.0}}, **kwargs
         ).prepared_data()
+
+
+def test_event_detector_order_is_the_training_order():
+    # A network's detector blocks are positional, so the event record's list is
+    # taken in training order whatever order it is written in.
+    data = _event_data(_bins(_DOMAIN_SETTINGS["f_max"]))
+    data["waveform"]["L1"] *= 2
+    ctx = GWSamplerContext.from_model_metadata(
+        _MODEL_METADATA, data, event_metadata={"detectors": ["L1", "H1"]}
+    )
+    assert ctx.detectors == ["H1", "L1"]
+    out = ctx.prepared_data()
+    assert torch.allclose(out[1, 0], 2 * out[0, 0])
+
+
+def test_likelihood_sees_the_analyzed_detectors_only(monkeypatch):
+    monkeypatch.setattr(
+        context_module, "StationaryGaussianGWLikelihood", _StubLikelihood
+    )
+    data = _event_data(_bins(_DOMAIN_SETTINGS["f_max"]))  # H1 and L1
+
+    def context(detectors):
+        return GWSamplerContext(
+            domain=build_domain(_DOMAIN_SETTINGS),
+            data_prep=None,
+            event_data=data,
+            event_metadata={"detectors": detectors},
+            model_metadata=_BASE_METADATA,
+        )
+
+    kwargs = context(["H1"]).likelihood().kwargs
+    assert list(kwargs["event_data"]["waveform"]) == ["H1"]
+    assert list(kwargs["event_data"]["asds"]) == ["H1"]
+    assert kwargs["frequency_update"] == {
+        "minimum_frequency": {"H1": 20.0},
+        "maximum_frequency": {"H1": 1024.0},
+    }
+    with pytest.raises(ValueError, match="no strain"):
+        context(["H1", "V1"]).likelihood()
+
+
+def test_psd_notch_dict_survives_an_hdf5_round_trip(tmp_path):
+    # Nested interval lists come back from a Result file as 2-D arrays.
+    import h5py
+
+    from dingo.core.dataset import recursive_hdf5_load, recursive_hdf5_save
+
+    event_metadata = {"psd_notch_dict": {"L1": [[60.0, 61.0], [120.0, 121.0]]}}
+    with h5py.File(tmp_path / "m.hdf5", "w") as fp:
+        recursive_hdf5_save(fp, event_metadata)
+    with h5py.File(tmp_path / "m.hdf5", "r") as fp:
+        reloaded = recursive_hdf5_load(fp)
+    assert isinstance(reloaded["psd_notch_dict"]["L1"], np.ndarray)
+    notches = {"p_per_detector": 0.3, "max_width": 4.0}
+    masks = [
+        _tokenized_context(metadata, mask_frequency_notches=notches).prepared_data()[2]
+        for metadata in (event_metadata, reloaded)
+    ]
+    assert torch.equal(masks[0], masks[1]) and masks[0].sum() == 2

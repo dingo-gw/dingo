@@ -12,6 +12,7 @@ covers the functions directly.
 
 import warnings
 
+import numpy as np
 import pytest
 
 from dingo.gw.domains import UniformFrequencyDomain
@@ -399,6 +400,21 @@ def test_psd_notches_inside_envelope_pass_silently(domain):
         )
 
 
+def test_psd_notches_accept_arrays(domain):
+    # Interval lists reloaded from an HDF5 file are 2-D arrays.
+    settings = _notch_data_settings(mask_frequency_notches=NOTCH_SETTINGS)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        _validate_psd_notches(
+            {
+                "H1": np.array([[59.0, 61.0], [119.0, 121.0]]),
+                "L1": np.array([59.0, 61.0]),
+            },
+            domain,
+            settings,
+        )
+
+
 def test_psd_notches_unknown_detector_raises(domain):
     settings = _notch_data_settings(mask_frequency_notches=NOTCH_SETTINGS)
     with pytest.raises(ValueError, match="not.*trained with"):
@@ -477,6 +493,18 @@ def test_resolve_frequency_bounds_partial_dict(domain):
     assert bounds == {"H1": (20.0, 512.0), "L1": (20.0, 1024.0)}
     with pytest.raises(ValueError, match="not analyzed"):
         resolve_frequency_bounds(DETECTORS, domain, maximum_frequency={"V1": 512.0})
+
+
+def test_frequency_bound_tokenized_network_refuses_the_crop_license(domain):
+    settings = {
+        "detectors": DETECTORS,
+        "tokenization": {"token_size": 16},
+        "random_strain_cropping": {"cropping_probability": 0.5, "f_min_upper": 60.0},
+    }
+    # The model values (dingo_pipe always passes them) are fine; a change is not.
+    _validate_frequency_bound(20.0, "minimum_frequency", domain, settings)
+    with pytest.raises(ValueError, match="mask_frequency_range"):
+        _validate_frequency_bound(40.0, "minimum_frequency", domain, settings)
 
 
 def test_frequency_bound_expands_over_the_analyzed_detectors(domain):

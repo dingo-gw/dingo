@@ -785,9 +785,10 @@ class MaskTokensForFrequencyRangeUpdate(object):
             bounds[name] = add_defaults_for_missing_detectors(value, default, detectors)
         self.minimum_frequency = bounds["minimum_frequency"]
         self.maximum_frequency = bounds["maximum_frequency"]
-        # Each notch entry is stored as a list of [f_lo, f_hi] pairs.
+        # Each notch entry is stored as a list of [f_lo, f_hi] pairs (given as one
+        # pair or a list of pairs, as lists or arrays).
         self.psd_notch_dict = {
-            det: [notch] if not isinstance(notch[0], (list, tuple)) else notch
+            det: np.atleast_2d(np.asarray(notch, dtype=float)).tolist()
             for det, notch in (psd_notch_dict or {}).items()
         }
         self.print_output = print_output

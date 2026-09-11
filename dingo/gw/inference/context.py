@@ -43,14 +43,21 @@ from dingo.gw.transforms import (
 
 
 def _event_detectors(data_settings: dict, event_metadata) -> list[str]:
-    """The analyzed detectors: the event record's list when it carries one, else the
-    training list. Per-detector event settings are expanded over this list: a float
-    bound applies to all of them, a dict may name any subset of them. A strict
-    subset of the training detectors is allowed only for a network trained with
-    detector masking (checked with the other event settings before network input
-    is prepared)."""
+    """The analyzed detectors, in training order: the event record's list when it
+    carries one, else the training list. Per-detector event settings are expanded
+    over this list: a float bound applies to all of them, a dict may name any subset
+    of them. A strict subset of the training detectors is allowed only for a network
+    trained with detector masking (checked with the other event settings before
+    network input is prepared). Training order because a network's detector blocks
+    are positional; names the network was not trained with are kept at the end for
+    that check to reject."""
+    training = data_settings["detectors"]
     detectors = (event_metadata or {}).get("detectors")
-    return list(detectors) if detectors is not None else data_settings["detectors"]
+    if detectors is None:
+        return training
+    return [d for d in training if d in detectors] + [
+        d for d in detectors if d not in training
+    ]
 
 
 def _frequency_range_update(domain, event_metadata, detectors) -> Optional[dict]:
@@ -288,6 +295,7 @@ class GWSamplerContext:
                     num_tokens_per_block=tokenization.get("num_tokens_per_block"),
                     drop_last_token=tokenization.get("drop_last_token", False),
                     training_detectors=training_detectors,
+                    print_output=False,
                 )
             )
             notches = (event_metadata or {}).get("psd_notch_dict")
@@ -299,6 +307,7 @@ class GWSamplerContext:
                         **(range_update or {}),
                         psd_notch_dict=notches,
                         training_detectors=training_detectors,
+                        print_output=False,
                     )
                 )
             if tokenization["normalize_position"]:
@@ -633,9 +642,23 @@ class GWSamplerContext:
         else:
             t_ref = self.t_ref
 
+        # The likelihood sees the analyzed detectors only (the event data may carry
+        # more, e.g. a stored three-detector event analyzed with two), keyed by arm
+        # name for a triangular detector, as the data are.
+        ifo_names = [ifo.name for ifo in InterferometerList(self.detectors)]
+        missing = [d for d in ifo_names if d not in self.event_data["waveform"]]
+        if missing:
+            raise ValueError(
+                f"The event data carry no strain for the analyzed detectors "
+                f"{missing} (data: {list(self.event_data['waveform'])})."
+            )
+        event_data = {
+            part: {d: data[d] for d in ifo_names} if isinstance(data, dict) else data
+            for part, data in self.event_data.items()
+        }
         metadata = self.event_metadata or {}
         bounds = resolve_frequency_bounds(
-            list(self.event_data["waveform"]),
+            ifo_names,
             data_domain,
             metadata.get("minimum_frequency"),
             metadata.get("maximum_frequency"),
@@ -649,7 +672,7 @@ class GWSamplerContext:
             wfg_kwargs=dataset_settings["waveform_generator"],
             wfg_domain=wfg_domain,
             data_domain=data_domain,
-            event_data=self.event_data,
+            event_data=event_data,
             t_ref=t_ref,
             time_marginalization_kwargs=time_marginalization_kwargs,
             phase_marginalization_kwargs=phase_marginalization_kwargs,

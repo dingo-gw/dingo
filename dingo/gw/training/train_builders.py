@@ -157,6 +157,12 @@ def set_train_transforms(
             f"context_parameters {data_settings['context_parameters']}) is not yet "
             "supported: the transformer embedding network does not take them."
         )
+    if "tokenization" in data_settings and "random_strain_cropping" in data_settings:
+        raise ValueError(
+            "Tokenization with random_strain_cropping is not supported: a tokenized "
+            "network learns variable frequency ranges through token masking; use "
+            "tokenization.mask_frequency_range instead."
+        )
 
     # If the standardization factors have already been set, use those. Otherwise,
     # calculate them, and save them within the data settings.
