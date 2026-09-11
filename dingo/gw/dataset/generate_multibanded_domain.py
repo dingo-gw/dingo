@@ -595,6 +595,25 @@ def _output_settings_path(settings_file: str) -> str:
     return os.path.join(directory, out_name)
 
 
+def _same_nodes(nodes_a: np.ndarray, nodes_b: np.ndarray) -> bool:
+    """Return whether two MFD node arrays describe the same banding.
+
+    Node arrays of MFDs with a different number of bands have different lengths, which
+    ``np.allclose`` cannot broadcast; such MFDs are simply not the same.
+
+    Parameters
+    ----------
+    nodes_a, nodes_b : np.ndarray
+        MFD node arrays.
+
+    Returns
+    -------
+    bool
+        True if both arrays have the same shape and all nodes agree.
+    """
+    return np.shape(nodes_a) == np.shape(nodes_b) and np.allclose(nodes_a, nodes_b)
+
+
 def generate_multibanded_domain_settings(
     settings_file: str,
     num_samples: int,
@@ -822,7 +841,7 @@ def generate_multibanded_domain_settings(
             delta_f_max_time_shift,
             min_mfd_bins_per_band=min_mfd_bins_per_band,
         ).nodes
-        if np.allclose(lo_nodes, hi_nodes):
+        if _same_nodes(lo_nodes, hi_nodes):
             print("\n  Bracket maps to identical MFD nodes; no bisection needed.")
         else:
             print(f"\n  Refining bracket [{threshold_low:.3e}, {threshold_high:.3e}]:")
@@ -838,7 +857,7 @@ def generate_multibanded_domain_settings(
                 else:
                     threshold_high = threshold
 
-                if previous_nodes is not None and np.allclose(
+                if previous_nodes is not None and _same_nodes(
                     mfd.nodes, previous_nodes
                 ):
                     print("  Nodes unchanged; bisection converged.")
