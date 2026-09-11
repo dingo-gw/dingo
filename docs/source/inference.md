@@ -74,6 +74,23 @@ The full interface is documented under
 {py:class}`dingo.gw.inference.sampler.GWComposedSampler` (and its base class
 {py:class}`dingo.core.inference.composer.ComposedSampler`) in the API reference.
 
+### Per-event settings (transformer models)
+
+For transformer-based (Dingo-T1) models, the analyzed detectors, the frequency band and PSD notches can be changed per event without retraining. They are passed as keys of `event_metadata` (dingo_pipe writes them into the event file from the ini settings) and are validated against the model's training settings before the network input is prepared:
+
+`detectors`
+: The analyzed detectors, a subset of the training detectors in any order. The model must have been trained with `mask_detectors` (a model without detector masking requires its training detectors).
+
+`minimum_frequency` / `maximum_frequency`
+: Restrict the frequency band per detector.  Accepts a single float (all analyzed detectors) or a `{det: value}` dict naming any of them.  
+The model must have been trained with `mask_frequency_range` or sufficient `mask_random_tokens` augmentation for a non-default range to be in-distribution.
+
+`psd_notch_dict`
+: Mask tokens that overlap one or more interior frequency intervals.  Accepts a `{det: [f_lo, f_hi]}` dict (single interval) 
+or `{det: [[f_lo1, f_hi1], ...]}` (multiple intervals). Either, this argument can be included in the `.ini` file 
+or the `psd_notch_dict` is detected automatically if a modified ASD dataset is specified where certain ASD values have been set to 1 (see [PSD notching](dingo_pipe.md#psd-notching) for details).
+
+
 ## Injections
 
 Injections (simulated signals in stationary Gaussian noise) are produced with the

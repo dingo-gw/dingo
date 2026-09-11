@@ -842,3 +842,57 @@ def test_sample_table_factor_emits_on_context_device():
     samples, log_prob = factor.sample_and_log_prob(1, context)
     assert samples["x"].device.type == "cuda"
     assert log_prob.device.type == "cuda"
+
+
+class _FakeCondModel:
+    """A fake data-conditional model recording the shapes of its data inputs."""
+
+    def __init__(self):
+        from types import SimpleNamespace
+
+        self.metadata = {
+            "train_settings": {
+                "data": {
+                    "inference_parameters": ["a", "b"],
+                    "standardization": {
+                        "mean": {"a": 0.0, "b": 0.0},
+                        "std": {"a": 1.0, "b": 1.0},
+                    },
+                }
+            }
+        }
+        self.network = SimpleNamespace(eval=lambda: None)
+        self.seen = []
+
+    def sample_and_log_prob(self, *x, num_samples=None):
+        self.seen.append([tuple(t.shape) for t in x])
+        return torch.zeros(1, num_samples, 2), torch.zeros(1, num_samples)
+
+    def log_prob(self, z, *x):
+        self.seen.append([tuple(t.shape) for t in x])
+        return torch.zeros(z.shape[0])
+
+
+class _DataContext:
+    def __init__(self, data):
+        self.data = data
+
+    def prepared_data(self, conditioning=None):
+        return self.data
+
+
+@pytest.mark.parametrize("tokenized", [False, True])
+def test_flow_factor_batches_the_network_inputs(tokenized):
+    # The shared representation is one tensor, or a tokenized network's list of
+    # three (waveform, position, token mask). The factor adds the batch row for
+    # sampling, views the representation across the scored rows for log_prob, and
+    # passes each tensor as its own network argument.
+    tensors = [torch.randn(86, 48), torch.randn(86, 3), torch.zeros(86, dtype=bool)]
+    model = _FakeCondModel()
+    factor = FlowFactor(model)
+    context = _DataContext(tensors if tokenized else tensors[0])
+    theta, log_prob = factor.sample_and_log_prob(5, context)
+    assert theta["a"].shape == (5,) and log_prob.shape == (5,)
+    factor.log_prob(theta, context)
+    shapes = [tuple(t.shape) for t in tensors] if tokenized else [(86, 48)]
+    assert model.seen == [[(1, *s) for s in shapes], [(5, *s) for s in shapes]]

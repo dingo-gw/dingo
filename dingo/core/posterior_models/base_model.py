@@ -40,7 +40,10 @@ except ImportError:
 
 import dingo.core.utils as utils
 import dingo.core.utils.trainutils
-from dingo.core.utils.backward_compatibility import update_model_config
+from dingo.core.utils.backward_compatibility import (
+    update_data_config,
+    update_model_config,
+)
 from dingo.core.utils.misc import get_version
 from dingo.core.utils.trainutils import EarlyStopping, RuntimeLimits
 
@@ -367,6 +370,7 @@ class BasePosteriorModel(ABC):
         self.iteration = d.get("iteration", 0)
 
         self.metadata = d["metadata"]
+        update_data_config(self.metadata)  # Backward compat
 
         if "context" in d:
             self.context = d["context"]

@@ -8,7 +8,12 @@ from bilby.gw.prior import CalibrationPriorDict
 from bilby_pipe.utils import CALIBRATION_CORRECTION_TYPE_LOOKUP
 
 from dingo.core.result import Result as CoreResult
-from dingo.core.utils.backward_compatibility import check_minimum_version
+from dingo.core.utils.backward_compatibility import (
+    check_minimum_version,
+    update_data_config,
+    update_model_config,
+)
+from bilby.gw.detector import InterferometerList
 from dingo.gw.frequency_updates import resolve_frequency_bounds
 
 
@@ -56,9 +61,6 @@ class Result(CoreResult):
     """
 
     dataset_type = "gw_result"
-
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
 
     @property
     def synthetic_phase_kwargs(self):
@@ -121,6 +123,12 @@ class Result(CoreResult):
 
     @property
     def interferometers(self):
+        """The analyzed detectors (arm names for a triangular detector), from the
+        sampler context; the event data's detectors for a transport-only result."""
+        if self.sampler_context is not None:
+            return [
+                ifo.name for ifo in InterferometerList(self.sampler_context.detectors)
+            ]
         return list(self.context["waveform"].keys())
 
     @property
@@ -170,6 +178,13 @@ class Result(CoreResult):
         if self.settings is None:
             return None
         from dingo.gw.inference.context import GWSamplerContext
+
+        # Settings written by older code are mapped to the current schema in place
+        # (idempotent), as the model loaders do for checkpoints.
+        metadata = self.base_metadata
+        update_data_config(metadata)
+        if "model" in metadata["train_settings"]:
+            update_model_config(metadata["train_settings"]["model"])
 
         # base_metadata resolves the unconditional ("base") indirection, so
         # density-recovery results reconstruct from the analysis metadata. The
@@ -414,7 +429,7 @@ class Result(CoreResult):
 
         # Removing the delta function priors on the frequency nodes, amplitude and phase.
         # Usually the frequency nodes are set to delta functions, but we also remove the
-        # amplitude and phase delta functions if present.
+        # the amplitude and phase delta functions if present.
         # This avoids large log probs and log priors, since the density of a delta function
         # at the sampled point is infinite. The delta functions do not affect the sampling,
         # since they just fix certain parameters to constant values.

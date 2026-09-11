@@ -19,11 +19,17 @@ from dingo.gw.transforms import (
     CropMaskStrainRandom,
     GetDetectorTimes,
     GNPECoalescenceTimes,
+    MaskDetectors,
+    MaskFrequencyNotches,
+    MaskFrequencyRange,
+    MaskRandomTokens,
+    NormalizePosition,
     ProjectOntoDetectors,
     RepackageStrainsAndASDS,
     SampleExtrinsicParameters,
     SampleNoiseASD,
     SelectStandardizeRepackageParameters,
+    StrainTokenization,
     UnpackDict,
     WhitenAndScaleStrain,
 )
@@ -145,6 +151,18 @@ def set_train_transforms(
     for p in extra_context_parameters:
         if p not in data_settings["context_parameters"]:
             data_settings["context_parameters"].append(p)
+    if "tokenization" in data_settings and data_settings["context_parameters"]:
+        raise NotImplementedError(
+            "Tokenization with context parameters (GNPE proxies or other "
+            f"context_parameters {data_settings['context_parameters']}) is not yet "
+            "supported: the transformer embedding network does not take them."
+        )
+    if "tokenization" in data_settings and "random_strain_cropping" in data_settings:
+        raise ValueError(
+            "Tokenization with random_strain_cropping is not supported: a tokenized "
+            "network learns variable frequency ranges through token masking; use "
+            "tokenization.mask_frequency_range instead."
+        )
 
     # If the standardization factors have already been set, use those. Otherwise,
     # calculate them, and save them within the data settings.
@@ -188,10 +206,43 @@ def set_train_transforms(
         transforms.append(
             CropMaskStrainRandom(domain, **data_settings["random_strain_cropping"])
         )
+    if "tokenization" in data_settings:
+        tok = data_settings["tokenization"]
+        transforms.append(
+            StrainTokenization(
+                domain=domain,
+                detectors=data_settings["detectors"],
+                token_size=tok.get("token_size"),
+                num_tokens_per_block=tok.get("num_tokens_per_block"),
+                drop_last_token=tok.get("drop_last_token", False),
+            )
+        )
+        if "mask_random_tokens" in tok:
+            transforms.append(MaskRandomTokens(**tok["mask_random_tokens"]))
+        if "mask_detectors" in tok:
+            transforms.append(
+                MaskDetectors(data_settings["detectors"], **tok["mask_detectors"])
+            )
+        if "mask_frequency_range" in tok:
+            transforms.append(
+                MaskFrequencyRange(domain=domain, **tok["mask_frequency_range"])
+            )
+        if "mask_frequency_notches" in tok:
+            transforms.append(
+                MaskFrequencyNotches(domain=domain, **tok["mask_frequency_notches"])
+            )
+        # Recorded in the settings so the saved network states what it was trained
+        # with; the loader backfills False for networks saved before this key.
+        tok["normalize_position"] = tok.get("normalize_position", True)
+        if tok["normalize_position"]:
+            # After all mask transforms, which compare positions in Hz.
+            transforms.append(NormalizePosition(domain.f_min, domain.f_max))
+
+    selected_keys = ["inference_parameters", "waveform"]
+    if "tokenization" in data_settings:
+        selected_keys += ["position", "token_mask"]
     if data_settings["context_parameters"]:
-        selected_keys = ["inference_parameters", "waveform", "context_parameters"]
-    else:
-        selected_keys = ["inference_parameters", "waveform"]
+        selected_keys += ["context_parameters"]
 
     transforms.append(UnpackDict(selected_keys=selected_keys))
 

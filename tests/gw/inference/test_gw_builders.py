@@ -151,3 +151,15 @@ def test_from_model_plain_chain_shape():
     sampler = GWComposedSampler.from_model(PLAIN, EVENT_DATA)
     assert _step_names(sampler) == ["FlowFactor", "RAToEventFrame", "DeltaFactor"]
     assert sampler.metadata is PLAIN.base_metadata
+
+
+def test_gnpe_refuses_a_tokenized_network():
+    tokenized = _StubModel(copy.deepcopy(MAIN.metadata))
+    tokenized.metadata["train_settings"]["data"]["tokenization"] = {
+        "token_size": 16,
+        "normalize_position": False,
+    }
+    with pytest.raises(NotImplementedError, match="tokenized"):
+        GWComposedSampler.from_gnpe_models(
+            INIT, tokenized, EVENT_DATA, num_iterations=1
+        )

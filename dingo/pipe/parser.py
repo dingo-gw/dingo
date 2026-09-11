@@ -504,6 +504,21 @@ def create_parser(top_level=True, usage=None):
         ),
     )
     det_parser.add(
+        "--psd-notch-dict",
+        default=None,
+        type=nonestr,
+        help=(
+            "Dictionary of PSD notch intervals per detector, e.g. "
+            "{H1: [50, 60], L1: [50, 60]}.  Each value is [f_lo, f_hi] in Hz "
+            "(a single interval) or [[f_lo1, f_hi1], [f_lo2, f_hi2]] "
+            "(multiple intervals).  The ASD is set to 1 in these regions "
+            "during data generation.  At sampling time the same regions are "
+            "automatically detected from the stored ASD and the corresponding "
+            "tokens are masked.  Not needed when the ASD has already been "
+            "pre-notched externally (e.g. by the Asimov pipeline)."
+        ),
+    )
+    det_parser.add(
         "--tukey-roll-off",
         default=1.0,
         type=nonefloat,
