@@ -146,6 +146,88 @@ If a network with `BatchNorm` layers is trained on multiple GPUs, they are conve
 `LayerNorm` is only available for `base_transform_type: rq-coupling`. For `rq-autoregressive` transforms
 it would break the causal structure of the MADE layers, so `BatchNorm` or `null` must be used there.
 
+### Compiling the network (`torch_compile`)
+
+The neural spline flow launches tens of thousands of small CUDA kernels per step, so on a
+modern GPU the step is bound by kernel-launch overhead rather than by arithmetic (GPU
+utilization plateaus well below 100% even at large batch sizes). Setting `torch_compile: true`
+in the `local` section wraps the network with
+[`torch.compile`](https://pytorch.org/docs/stable/generated/torch.compile.html), which fuses
+these kernels. The gain depends on how launch-bound the network is: for the `npe_model` example
+network (30 flow steps, `hidden_dim` 1024) trained on a 10M-waveform dataset at a per-GPU batch
+size of 4096 (A100), the training step is 1.22× faster on one GPU and 1.14× faster on four GPUs;
+with `hidden_dim` 512 it is 1.4× / 1.35×. Peak GPU memory drops by about 20%. The speedup is
+independent of `num_gpus` and larger at smaller per-GPU batch sizes.
+
+```yaml
+local:
+  torch_compile: true                    # default: false
+  torch_compile_cache_dir: /scratch/tmp  # optional; see note below
+```
+
+Notes:
+
+- Compilation is slow: 4–12 minutes for a production-size network, paid on the first training
+  step of a run and again at every stage boundary that changes which parameters are trainable.
+  The compiled steps that follow are the fast ones, so `torch_compile` pays off for trainings
+  of tens of epochs or more, not for short runs. To avoid further compilations the *training*
+  loader drops the last, smaller batch of each epoch (the compiled graph is specialized to the
+  batch shape; the test loader keeps it) and the test epoch runs the network eagerly (an
+  eval-mode graph would cost another compilation that a short test epoch never amortizes).
+- A stage boundary that changes `freeze_rb_layer` discards the compiled graphs and the next
+  step recompiles (a compiled graph does not track which parameters are trainable).
+- `torch_compile_cache_dir` sets the base directory of the on-disk Inductor/Triton cache
+  (default: the system temp directory); under DDP each rank gets its own subdirectory. That
+  cache must live on **node-local** disk. If the system temp directory is a shared network
+  filesystem, set it to a node-local path (e.g. the HTCondor scratch directory); otherwise a
+  just-compiled kernel can be unloadable on another rank and the run hangs on an NCCL timeout.
+- Once the network step is faster, the dataloader can become the bottleneck: watch
+  `Time Dataloader` in the log and raise `num_workers` if needed.
+
+### TensorFloat-32 matrix multiplications (`float32_matmul_precision`)
+
+PyTorch runs float32 matrix multiplications at full precision by default, which leaves the
+tensor cores of Ampere and newer GPUs unused. Setting
+
+```yaml
+local:
+  float32_matmul_precision: high   # default: highest
+```
+
+lets them use TensorFloat-32: matmul inputs are rounded to 10 mantissa bits (the range of
+float32 is kept, and accumulation, weights, gradients and optimizer state stay float32). For
+the `npe_model` network (`hidden_dim` 1024) this roughly doubles the speed of the network step
+and combines with `torch_compile`: with both (and the fused optimizer below) the network step
+drops from 0.85 s to 0.28 s per 4096 samples on an A100, a 3× gain in GPU time. All non-matmul
+operations (splines, normalization, the optimizer) are unaffected.
+
+TF32 and `automatic_mixed_precision` are alternatives, not a stack: under AMP the matmuls
+already run in float16, so `float32_matmul_precision: high` changes nothing there. On the
+`npe_model` network TF32 alone and AMP alone give the same speedup (0.90 to 0.47 s per step);
+TF32 is the option for trainings that stay in float32. The value in effect is stored in the
+checkpoint metadata (`float32_matmul_precision`).
+
+### Fused optimizer (`fused`)
+
+Unlike the settings above, this one is not in the `local` section: it belongs to the
+`optimizer` block of an individual training stage, and is passed straight through to the
+PyTorch optimizer. Setting `fused: true` selects the fused CUDA kernel, which performs the
+whole optimizer update in one kernel instead of one per step of the update math, and is about
+10% faster per step for large networks:
+
+```yaml
+training:
+  stage_0:
+    optimizer:
+      type: adam
+      lr: 0.0001
+      fused: true   # default: false
+```
+
+Each stage builds its own optimizer, so this has to be repeated in every stage that should use
+it. It is supported by `adam`, `adamw`, `adagrad` and `sgd` (not `lbfgs`); the fused kernel
+exists for CUDA and (since PyTorch 2.4) CPU tensors, the speedup matters on the GPU.
+
 ### Freezing layers
 
 It is currently not possible to set `freeze_rb_layer: True` in DDP. The reason is that when starting the separate 
