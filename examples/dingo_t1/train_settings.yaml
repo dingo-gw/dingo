@@ -114,6 +114,7 @@ local:
     max_epochs_per_run: 500
   checkpoint_epochs: 25
   local_cache_path: /tmp
+#  torch_compile: true  # Fuse the network kernels with torch.compile; see the multi-GPU guide.
   condor:
     memory_cpus: 256000
     memory_gpus: 80000
