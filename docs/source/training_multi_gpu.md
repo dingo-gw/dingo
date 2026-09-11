@@ -153,8 +153,7 @@ modern GPU the step is bound by kernel-launch overhead rather than by arithmetic
 utilization plateaus well below 100% even at large batch sizes). Setting `torch_compile: true`
 in the `local` section wraps the network with
 [`torch.compile`](https://pytorch.org/docs/stable/generated/torch.compile.html), which fuses
-these kernels. **This option is experimental** until the static-shape spline (see the glasflow note
-below) is part of a glasflow release. The gain depends on how launch-bound the network is: for the `npe_model` example
+these kernels. The gain depends on how launch-bound the network is: for the `npe_model` example
 network (30 flow steps, `hidden_dim` 1024) trained on a 10M-waveform dataset at a per-GPU batch
 size of 4096 (A100), the training step is 1.22× faster on one GPU and 1.14× faster on four GPUs;
 with `hidden_dim` 512 it is 1.4× / 1.35×. Peak GPU memory drops by about 20%. The speedup is
@@ -175,11 +174,6 @@ Notes:
   loader drops the last, smaller batch of each epoch (the compiled graph is specialized to the
   batch shape; the test loader keeps it) and the test epoch runs the network eagerly (an
   eval-mode graph would cost another compilation that a short test epoch never amortizes).
-- `torch.compile` only pays off with a static-shape rational-quadratic spline. The spline in
-  released glasflow selects its tails with mask indexing, which breaks the compiled graph in
-  every transform, so with it `torch_compile: true` runs but is *slower* than eager. Until the
-  rewrite is released, install the fork:
-  `pip install git+https://github.com/nihargupte-ph/glasflow@compile-friendly-rqs`.
 - A stage boundary that changes `freeze_rb_layer` discards the compiled graphs and the next
   step recompiles (a compiled graph does not track which parameters are trainable).
 - `torch_compile_cache_dir` sets the base directory of the on-disk Inductor/Triton cache
