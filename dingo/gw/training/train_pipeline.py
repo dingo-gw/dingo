@@ -16,6 +16,10 @@ from threadpoolctl import threadpool_limits
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader, DistributedSampler
 
+from dingo.core.nn.compile_utils import (
+    compile_network,
+    reset_graphs_if_requires_grad_changes,
+)
 from dingo.core.posterior_models.base_model import BasePosteriorModel
 from dingo.core.posterior_models.build_model import (
     autocomplete_model_kwargs,
@@ -31,6 +35,7 @@ from dingo.core.utils.torchutils import (
     contains_BatchNorm,
     document_gpus,
     replace_BatchNorm_with_SyncBatchNorm,
+    set_float32_matmul_precision,
     set_seed_based_on_rank,
     setup_ddp,
 )
@@ -214,6 +219,7 @@ def initialize_stage(
     world_size: Optional[int] = None,
     rank: Optional[int] = None,
     resume: bool = False,
+    drop_last: bool = False,
 ) -> Tuple[DataLoader, DataLoader, Optional[DistributedSampler]]:
     """
     Initializes training based on PosteriorModel metadata and current stage:
@@ -279,6 +285,7 @@ def initialize_stage(
         num_workers=num_workers_per_gpu,
         world_size=world_size,
         rank=rank,
+        drop_last=drop_last,
     )
 
     if not resume:
@@ -292,6 +299,15 @@ def initialize_stage(
 
     # Freeze/unfreeze RB layer if necessary
     if "freeze_rb_layer" in stage:
+        if reset_graphs_if_requires_grad_changes(
+            pm.network,
+            name_contains="layers_rb",
+            requires_grad=not stage["freeze_rb_layer"],
+        ) and print_output:
+            print(
+                "freeze_rb_layer changes the trainable parameters: compiled graphs "
+                "(if any) discarded, the next training step (re)compiles."
+            )
         if stage["freeze_rb_layer"]:
             if world_size is not None and world_size > 1:
                 raise ValueError(
@@ -345,6 +361,9 @@ def train_stages(
     rank = local_settings.get("rank", None)
     world_size = local_settings.get("world_size", None)
     print_primary = rank is None or rank == 0
+    # A compiled network is specialized to the batch shape; skip the smaller last
+    # batch of each epoch rather than compiling a second graph for it.
+    drop_last = bool(local_settings.get("torch_compile", False))
 
     # Extract list of stages from settings dict
     stages = []
@@ -374,6 +393,7 @@ def train_stages(
                 world_size=world_size,
                 rank=rank,
                 resume=False,
+                drop_last=drop_last,
             )
         else:
             if print_primary:
@@ -387,6 +407,7 @@ def train_stages(
                 world_size=world_size,
                 rank=rank,
                 resume=True,
+                drop_last=drop_last,
             )
 
         early_stopping = None
@@ -506,6 +527,13 @@ def get_num_gpus(local_settings: dict) -> int:
     return 1
 
 
+def _record_float32_matmul_precision(pm: BasePosteriorModel) -> None:
+    """Store the matmul precision in the checkpoint metadata: unlike torch_compile
+    it changes the numerics of training, so it belongs with the model."""
+    if isinstance(pm.metadata, dict):
+        pm.metadata["float32_matmul_precision"] = torch.get_float32_matmul_precision()
+
+
 def run_training(
     train_settings: Optional[dict],
     local_settings: dict,
@@ -530,10 +558,17 @@ def run_training(
     -------
     (complete, resume, epoch) : (bool, bool, int)
     """
+    set_float32_matmul_precision(local_settings)
     if not resume:
         pm, wfd = prepare_training_new(train_settings, train_dir, local_settings)
     else:
         pm, wfd = prepare_training_resume(ckpt_file, local_settings, train_dir)
+    _record_float32_matmul_precision(pm)
+
+    if local_settings.get("torch_compile", False):
+        pm.network = compile_network(
+            pm.network, cache_dir=local_settings.get("torch_compile_cache_dir")
+        )
 
     with threadpool_limits(limits=1, user_api="blas"):
         complete, resume_flag = train_stages(
@@ -585,6 +620,7 @@ def run_training_ddp(
         # avoid collisions between their process groups.
         setup_ddp(rank, world_size, port=local_settings.get("ddp_port", 12355))
         set_seed_based_on_rank(rank)
+        set_float32_matmul_precision(local_settings)
 
         if rank == 0:
             document_gpus(train_dir)
@@ -640,6 +676,8 @@ def run_training_ddp(
                 except ImportError:
                     print("WandB is enabled but not installed.")
 
+        _record_float32_matmul_precision(pm)
+
         if contains_BatchNorm(pm.network):
             if rank == 0:
                 warnings.warn(
@@ -651,6 +689,15 @@ def run_training_ddp(
                 )
             pm.network = replace_BatchNorm_with_SyncBatchNorm(pm.network)
         pm.network = DDP(pm.network, device_ids=[rank])
+
+        # Compile after the DDP wrap so the gradient all-reduce keeps overlapping
+        # with the backward pass (torch.compile splits the graph at DDP buckets).
+        if local_settings.get("torch_compile", False):
+            pm.network = compile_network(
+                pm.network,
+                rank=rank,
+                cache_dir=local_settings.get("torch_compile_cache_dir"),
+            )
 
         with threadpool_limits(limits=1, user_api="blas"):
             complete, resume_flag = train_stages(

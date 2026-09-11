@@ -19,7 +19,6 @@ import torch
 import torch.distributed as dist
 from threadpoolctl import threadpool_limits
 from torch.amp import autocast
-from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import Dataset
 
 try:
@@ -40,11 +39,13 @@ except ImportError:
 
 import dingo.core.utils as utils
 import dingo.core.utils.trainutils
+from dingo.core.nn.compile_utils import eager_mode
 from dingo.core.utils.backward_compatibility import (
     update_data_config,
     update_model_config,
 )
 from dingo.core.utils.misc import get_version
+from dingo.core.utils.torchutils import get_ddp_module, unwrap_network
 from dingo.core.utils.trainutils import EarlyStopping, RuntimeLimits
 
 
@@ -262,11 +263,9 @@ class BasePosteriorModel(ABC):
             saved, e.g. optimizer state dict
 
         """
-        # Strip the DDP wrapper so the checkpoint can be loaded on any number of GPUs.
-        if isinstance(self.network, DDP):
-            model_state_dict = self.network.module.state_dict()
-        else:
-            model_state_dict = self.network.state_dict()
+        # Strip the DDP and torch.compile wrappers so the checkpoint can be loaded
+        # on any number of GPUs, with or without compilation.
+        model_state_dict = unwrap_network(self.network).state_dict()
 
         model_dict = {
             "model_kwargs": self.model_kwargs,
@@ -663,7 +662,7 @@ def train_epoch(
         if scaler is None:
             scaler = _build_grad_scaler(pm.device)
 
-    is_ddp = isinstance(pm.network, DDP)
+    ddp_module = get_ddp_module(pm.network)
 
     for batch_idx, data in enumerate(dataloader):
         loss_info.update_timer("Dataloader")
@@ -678,7 +677,9 @@ def train_epoch(
         # Under DDP, gradients only need to be all-reduced on the final backward
         # pass of an accumulation window; skip the synchronization otherwise.
         sync_ctx = (
-            pm.network.no_sync() if is_ddp and not is_step_batch else nullcontext()
+            ddp_module.no_sync()
+            if ddp_module is not None and not is_step_batch
+            else nullcontext()
         )
 
         # Gradients are summed over the accumulated mini-batches, so divide each
@@ -740,7 +741,9 @@ def test_epoch(
     float
         Average loss over the test set.
     """
-    with torch.no_grad():
+    # eager_mode: evaluating a compiled network in eval mode would trigger another
+    # full compilation, which a short test epoch never amortizes.
+    with torch.no_grad(), eager_mode():
         pm.network.eval()
 
         if pm.rank is None:

@@ -972,7 +972,7 @@ requires-dist = [
     { name = "sphinxcontrib-bibtex", marker = "extra == 'dev'" },
     { name = "sphinxcontrib-mermaid", marker = "extra == 'dev'" },
     { name = "threadpoolctl" },
-    { name = "torch", specifier = ">=2.0" },
+    { name = "torch", specifier = ">=2.6" },
     { name = "torchdiffeq" },
     { name = "torchvision" },
     { name = "tqdm" },

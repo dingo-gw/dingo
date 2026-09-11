@@ -22,6 +22,7 @@ from torch.utils.data import TensorDataset
 from dingo.core.utils.torchutils import (
     build_train_and_test_loaders,
     get_cuda_info,
+    set_float32_matmul_precision,
     set_seed_based_on_rank,
 )
 from dingo.core.utils.trainutils import LossInfo, RuntimeLimits
@@ -98,6 +99,25 @@ class TestGetNumGpus:
 
     def test_returns_int(self):
         assert isinstance(get_num_gpus({"num_gpus": "2"}), int)
+
+
+class TestSetFloat32MatmulPrecision:
+    def test_default_leaves_torch_setting_unchanged(self):
+        before = torch.get_float32_matmul_precision()
+        set_float32_matmul_precision({})
+        assert torch.get_float32_matmul_precision() == before
+
+    def test_applies_setting(self):
+        before = torch.get_float32_matmul_precision()
+        try:
+            set_float32_matmul_precision({"float32_matmul_precision": "high"})
+            assert torch.get_float32_matmul_precision() == "high"
+        finally:
+            torch.set_float32_matmul_precision(before)
+
+    def test_rejects_unknown_value(self):
+        with pytest.raises(ValueError, match="float32_matmul_precision"):
+            set_float32_matmul_precision({"float32_matmul_precision": "fast"})
 
 
 class TestGetCudaInfo:
@@ -189,6 +209,27 @@ class TestDDPStateDictStripping:
 
 
 class TestBuildTrainAndTestLoaders:
+    def test_drop_last_default_keeps_partial_batch(self):
+        dataset = TensorDataset(torch.randn(100, 4))
+        train_loader, test_loader, _ = build_train_and_test_loaders(
+            dataset=dataset, train_fraction=0.8, batch_size=30, num_workers=0
+        )
+        assert [len(b[0]) for b in train_loader] == [30, 30, 20]
+        assert not train_loader.drop_last and not test_loader.drop_last
+
+    def test_drop_last_drops_partial_batch(self):
+        dataset = TensorDataset(torch.randn(100, 4))
+        train_loader, test_loader, _ = build_train_and_test_loaders(
+            dataset=dataset,
+            train_fraction=0.8,
+            batch_size=30,
+            num_workers=0,
+            drop_last=True,
+        )
+        assert [len(b[0]) for b in train_loader] == [30, 30]
+        assert train_loader.drop_last
+        assert not test_loader.drop_last  # eager test epoch; never empty a small split
+
     def test_single_gpu_returns_none_sampler(self):
         dataset = TensorDataset(torch.randn(100, 4))
         train_loader, test_loader, sampler = build_train_and_test_loaders(

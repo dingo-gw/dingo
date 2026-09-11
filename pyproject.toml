@@ -44,7 +44,7 @@ dependencies = [
     "scikit-learn",
     "scipy",
     "threadpoolctl",
-    "torch>=2.0",
+    "torch>=2.6",  
     "torchdiffeq",
     "torchvision",
     "tqdm",

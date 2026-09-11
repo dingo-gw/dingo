@@ -21,6 +21,26 @@ def fix_random_seeds(_):
         pass
 
 
+def set_float32_matmul_precision(local_settings: dict) -> None:
+    """Apply ``local.float32_matmul_precision`` (``highest`` | ``high`` | ``medium``).
+
+    ``high`` lets float32 matrix multiplications use TensorFloat-32 on Ampere and
+    newer GPUs (10-bit mantissa inputs, fp32 accumulation), roughly doubling the
+    speed of the network's linear layers; ``medium`` additionally allows bfloat16
+    inputs. PyTorch's default, ``highest``, keeps full fp32 and is left unchanged
+    when the setting is absent.
+    """
+    precision = local_settings.get("float32_matmul_precision")
+    if precision is None:
+        return
+    if precision not in ("highest", "high", "medium"):
+        raise ValueError(
+            f"float32_matmul_precision must be 'highest', 'high' or 'medium', "
+            f"got {precision!r}."
+        )
+    torch.set_float32_matmul_precision(precision)
+
+
 def get_cuda_info() -> dict[str, Any]:
     """Get information about the CUDA devices available in the system."""
     if not torch.cuda.is_available():
@@ -127,6 +147,34 @@ def replace_BatchNorm_with_SyncBatchNorm(network: nn.Module) -> nn.Module:
     therefore preferable for multi-GPU training.
     """
     return nn.SyncBatchNorm.convert_sync_batchnorm(network)
+
+
+def get_ddp_module(network: nn.Module) -> Optional[DDP]:
+    """Return the DDP wrapper inside *network* (looking through a ``torch.compile``
+    wrapper), or ``None`` if the network is not DDP-wrapped."""
+    while True:
+        if isinstance(network, DDP):
+            return network
+        if hasattr(network, "_orig_mod"):  # torch.compile OptimizedModule
+            network = network._orig_mod
+        else:
+            return None
+
+
+def unwrap_network(network: nn.Module) -> nn.Module:
+    """Strip ``torch.compile`` and DDP wrappers, returning the bare network.
+
+    Used to save checkpoints whose state-dict keys carry no wrapper prefixes, so
+    they load on any number of GPUs with or without compilation."""
+    # we need a while loop here because the network can be wrapped twice
+    # once by the DDP and once by torch.compile
+    while True:
+        if isinstance(network, DDP):
+            network = network.module
+        elif hasattr(network, "_orig_mod"):  # torch.compile OptimizedModule
+            network = network._orig_mod
+        else:
+            return network
 
 
 def print_number_of_model_parameters(network: nn.Module) -> None:
@@ -329,6 +377,7 @@ def build_train_and_test_loaders(
     num_workers: int,
     world_size: Optional[int] = None,
     rank: Optional[int] = None,
+    drop_last: bool = False,
 ) -> Tuple[DataLoader, DataLoader, Optional[DistributedSampler]]:
     """
     Split the dataset into train and test sets, and build corresponding DataLoaders.
@@ -350,6 +399,11 @@ def build_train_and_test_loaders(
         Total number of DDP processes (GPUs).
     rank : int, optional
         Rank of the current DDP process.
+    drop_last : bool
+        Drop the last, smaller batch of each training epoch, so that a compiled
+        network (specialized to the batch shape) is not recompiled for it. The test
+        loader always keeps its last batch: the test epoch runs eagerly, and dropping
+        it could leave a small per-rank test split with no batches at all.
 
     Returns
     -------
@@ -380,6 +434,7 @@ def build_train_and_test_loaders(
             num_workers=num_workers,
             worker_init_fn=fix_random_seeds,
             persistent_workers=persistent_workers,
+            drop_last=drop_last,
         )
         test_loader = DataLoader(
             test_dataset,
@@ -389,6 +444,7 @@ def build_train_and_test_loaders(
             num_workers=num_workers,
             worker_init_fn=fix_random_seeds,
             persistent_workers=persistent_workers,
+            drop_last=False,
         )
     else:
         train_sampler = None
@@ -400,6 +456,7 @@ def build_train_and_test_loaders(
             num_workers=num_workers,
             worker_init_fn=fix_random_seeds,
             persistent_workers=persistent_workers,
+            drop_last=drop_last,
         )
         test_loader = DataLoader(
             test_dataset,
@@ -409,6 +466,7 @@ def build_train_and_test_loaders(
             num_workers=num_workers,
             worker_init_fn=fix_random_seeds,
             persistent_workers=persistent_workers,
+            drop_last=False,
         )
 
     return train_loader, test_loader, train_sampler
