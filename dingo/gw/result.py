@@ -297,6 +297,7 @@ class Result(CoreResult):
         phase_marginalization_kwargs: Optional[dict] = None,
         calibration_marginalization_kwargs: Optional[dict] = None,
         phase_grid: Optional[np.ndarray] = None,
+        wfg_updates: Optional[dict] = None,
     ):
         """
         Build the likelihood function based on model metadata. This is called at the
@@ -312,6 +313,10 @@ class Result(CoreResult):
             kwargs for phase marginalization.
         calibration_marginalization_kwargs: dict
             Calibration marginalization parameters. If None, no calibration marginalization is used.
+        wfg_updates: dict, optional
+            Overrides applied on top of the waveform generator settings stored in
+            the network metadata. Only for settings that change how the waveform is
+            computed, not the waveform itself (e.g. use_dft_phase_decomposition).
         """
         if time_marginalization_kwargs is not None:
             if self.geocent_time_prior is None:
@@ -365,8 +370,13 @@ class Result(CoreResult):
                 wfg_domain_dict["delta_f"] = delta_f_new
         wfg_domain = build_domain(wfg_domain_dict)
 
+        wfg_kwargs = self.base_metadata["dataset_settings"]["waveform_generator"]
+        if wfg_updates:
+            print(f"Updating waveform generator settings: {wfg_updates}.")
+            wfg_kwargs = {**wfg_kwargs, **wfg_updates}
+
         self.likelihood = StationaryGaussianGWLikelihood(
-            wfg_kwargs=self.base_metadata["dataset_settings"]["waveform_generator"],
+            wfg_kwargs=wfg_kwargs,
             wfg_domain=wfg_domain,
             data_domain=self.domain,
             event_data=self.context,
@@ -533,6 +543,11 @@ class Result(CoreResult):
                 num_processes (optional)
                 n_grid
                 uniform_weight (optional)
+                use_dft_phase_decomposition (optional)
+            use_dft_phase_decomposition overrides the waveform generator setting of
+            the same name for this step only, selecting how the m-components are
+            obtained (see WaveformGenerator). If absent, the setting stored with
+            the network (or the WaveformGenerator default) applies.
         inverse : bool, default False
             Whether to apply instead the inverse transformation. This is used prior to
             calculating the log_prob. In inverse mode, the posterior probability over
@@ -561,7 +576,11 @@ class Result(CoreResult):
         param_keys = [k for k, v in self.prior.items() if not isinstance(v, Constraint)]
         theta = self.samples[param_keys]
         log_prior = self.prior.ln_prob(theta, axis=0)
-        constraints = self.prior.evaluate_constraints(theta)
+        # Convert DataFrame to dict of arrays: as of bilby 2.8,
+        # evaluate_constraints does np.ones_like(DataFrame) and then
+        # DataFrame *= Series, which raises with pandas >= 2.
+        theta_dict = {k: theta[k].values for k in theta.columns}
+        constraints = self.prior.evaluate_constraints(theta_dict)
         np.putmask(log_prior, constraints == 0, -np.inf)
         within_prior = np.isfinite(log_prior)
 
@@ -575,7 +594,14 @@ class Result(CoreResult):
         t0 = time.time()
 
         if not inverse:
-            self._build_likelihood()
+            wfg_updates = None
+            if "use_dft_phase_decomposition" in self.synthetic_phase_kwargs:
+                wfg_updates = {
+                    "use_dft_phase_decomposition": self.synthetic_phase_kwargs[
+                        "use_dft_phase_decomposition"
+                    ]
+                }
+            self._build_likelihood(wfg_updates=wfg_updates)
 
         if inverse:
             # We estimate the log_prob for given phases, so first save the evaluation
