@@ -212,6 +212,33 @@ class Result(CoreResult):
             if verbose:
                 print("No domain updates found; domain not rebuilt.")
 
+    def _get_data_domain(self):
+        """
+        Get the data domain on the grid of the event data in self.context.
+
+        The event file is on the network grid (sampling stage) or on the network band
+        narrowed/extended to the requested range (IS stage), so f_max is taken from the
+        strain length. Per-detector ranges are still applied by ASD masking.
+
+        Returns a Domain object.
+        """
+        if self.context is None or self.event_metadata is None:
+            return self.domain
+        base_domain = getattr(self.domain, "base_domain", self.domain)
+        T = self.event_metadata.get("T")
+        if T is not None and 1.0 / T != base_domain.delta_f:
+            raise NotImplementedError("Can't update delta_f")
+
+        num_bins = len(next(iter(self.context["waveform"].values())))
+        f_min = self.minimum_frequency
+        if isinstance(f_min, dict):
+            f_min = min(f_min.values())
+
+        data_domain = build_domain(self.base_metadata["dataset_settings"]["domain"])
+        f_max = (num_bins - 1) * base_domain.delta_f
+        data_domain.update({"f_min": f_min, "f_max": f_max})
+        return data_domain
+
     def _build_prior(self):
         """Build the prior based on model metadata. Called by __init__()."""
         intrinsic_prior = self.base_metadata["dataset_settings"]["intrinsic_prior"]
@@ -365,10 +392,12 @@ class Result(CoreResult):
                 wfg_domain_dict["delta_f"] = delta_f_new
         wfg_domain = build_domain(wfg_domain_dict)
 
+        data_domain = self._get_data_domain()
+
         self.likelihood = StationaryGaussianGWLikelihood(
             wfg_kwargs=self.base_metadata["dataset_settings"]["waveform_generator"],
             wfg_domain=wfg_domain,
-            data_domain=self.domain,
+            data_domain=data_domain,
             event_data=self.context,
             t_ref=self.t_ref,
             time_marginalization_kwargs=time_marginalization_kwargs,
@@ -428,12 +457,13 @@ class Result(CoreResult):
             raise ValueError(f"{correction_type} not understood")
 
         # Build calibration priors for sampling
+        data_domain = self._get_data_domain()
         calibration_priors = {}
         for ifo in self.interferometers:
             calibration_priors[ifo] = CalibrationPriorDict.from_envelope_file(
                 self.calibration_sampling_kwargs["calibration_envelope"][ifo],
-                self.domain.f_min,
-                self.domain.f_max,
+                data_domain.f_min,
+                data_domain.f_max,
                 self.calibration_sampling_kwargs["num_calibration_nodes"],
                 ifo,
                 correction_type=correction_type_dict[ifo],

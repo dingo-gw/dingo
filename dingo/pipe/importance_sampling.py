@@ -123,7 +123,8 @@ class ImportanceSamplingInput(Input):
 
     def _load_event(self):
         event_dataset = EventDataset(file_name=self.event_data_file)
-        self.result.reset_event(event_dataset)
+        self.result.context = event_dataset.data
+        self.result.event_metadata = event_dataset.settings
 
     @property
     def calibration_marginalization_kwargs(self):

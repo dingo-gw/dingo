@@ -78,11 +78,6 @@ class DataGenerationInput(BilbyDataGenerationInput):
         self.importance_sampling = args.importance_sampling_generation
         self.importance_sampling_updates = args.importance_sampling_updates
         if self.importance_sampling:
-            # Updates to frequency range should not affect the data generation for importance sampling
-            if "minimum_frequency" in self.importance_sampling_updates:
-                self.importance_sampling_updates.pop("minimum_frequency")
-            if "maximum_frequency" in self.importance_sampling_updates:
-                self.importance_sampling_updates.pop("maximum_frequency")
             vars(args).update(self.importance_sampling_updates)
 
         # Data arguments
@@ -112,8 +107,10 @@ class DataGenerationInput(BilbyDataGenerationInput):
 
         # Frequencies
         self.sampling_frequency = args.sampling_frequency
-        self.minimum_frequency = args.minimum_frequency
-        self.maximum_frequency = args.maximum_frequency
+        for k in "minimum_frequency", "maximum_frequency":
+            v = getattr(args, k)
+            v = str(v) if isinstance(v, dict) else v
+            setattr(self, k, v)
         self.reference_frequency = args.reference_frequency
 
         # Waveform, source model and likelihood
@@ -349,7 +346,14 @@ class DataGenerationInput(BilbyDataGenerationInput):
             model = build_model_from_kwargs(
                 filename=self.model, device="cpu", load_training_info=False
             )
-        domain = build_domain_from_model_metadata(model.metadata, base=True)
+
+        updates = {}
+        if self.importance_sampling:
+            updates = {
+                "f_min": min(self.minimum_frequency_dict.values()),
+                "f_max": max(self.maximum_frequency_dict.values()),
+            }
+        domain = build_domain_from_model_metadata(model.metadata, base=True, **updates)
         assert isinstance(domain, UniformFrequencyDomain)
 
         if self.save_bilby_data_dump:
