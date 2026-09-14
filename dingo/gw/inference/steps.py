@@ -79,6 +79,7 @@ class SyntheticPhaseFactor(Factor):
         uniform_weight: float = 0.01,
         num_processes: int = 1,
         use_base_domain: bool = False,
+        wfg_updates: Optional[dict] = None,
     ):
         """
         Parameters
@@ -97,6 +98,10 @@ class SyntheticPhaseFactor(Factor):
         use_base_domain : bool, default False
             For a multibanded model, evaluate the likelihood on the undecimated base
             domain (passed on to `SamplerContext.likelihood`).
+        wfg_updates : dict, optional
+            Overrides for the waveform generator settings stored with the network,
+            e.g. `use_dft_phase_decomposition` (passed on to
+            `SamplerContext.likelihood`).
         """
         self.parameters = ["phase"]
         self.conditioning = list(conditioning)
@@ -105,6 +110,7 @@ class SyntheticPhaseFactor(Factor):
         self.uniform_weight = uniform_weight
         self.num_processes = num_processes
         self.use_base_domain = use_base_domain
+        self.wfg_updates = wfg_updates
 
     def sample_and_log_prob(self, num_samples, context, given=None):
         """Draw one phase per `theta_rest` row (`num_samples` must be 1); return the phases
@@ -155,7 +161,9 @@ class SyntheticPhaseFactor(Factor):
         per sample: evaluate `log L` on the grid, exponentiate (shifted by the per-row
         max), and add the uniform floor."""
         theta = pd.DataFrame({k: _to_numpy(v) for k, v in given.items()})
-        likelihood = context.likelihood(use_base_domain=self.use_base_domain)
+        likelihood = context.likelihood(
+            use_base_domain=self.use_base_domain, wfg_updates=self.wfg_updates
+        )
         phases = np.linspace(0, 2 * np.pi, self.n_grid)
         if self.approximation_22_mode:
             # Assume the waveform is (2, 2)-dominated (transforms as exp(2i phase)), so the

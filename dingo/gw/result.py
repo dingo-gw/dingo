@@ -505,7 +505,10 @@ class Result(CoreResult):
             True assumes a (2, 2)-dominated waveform, otherwise the exact mode sum
             is used, which requires the waveform generator's
             `spin_conversion_phase = 0`), `uniform_weight` (optional),
-            `num_processes` (optional).
+            `num_processes` (optional), `use_dft_phase_decomposition` (optional;
+            overrides the waveform generator setting of the same name for this
+            step only, selecting how the m-components are obtained -- see
+            WaveformGenerator).
         """
         if self.sampler_context is None:
             raise ValueError(
@@ -576,6 +579,13 @@ class Result(CoreResult):
             {k: theta_within[k].to_numpy() for k in theta_within.columns},
             log_prob=self.samples["log_prob"].to_numpy()[within_prior],
         )
+        wfg_updates = None
+        if "use_dft_phase_decomposition" in self.synthetic_phase_kwargs:
+            wfg_updates = {
+                "use_dft_phase_decomposition": self.synthetic_phase_kwargs[
+                    "use_dft_phase_decomposition"
+                ]
+            }
         factor = SyntheticPhaseFactor(
             conditioning=list(theta_within.columns),
             n_grid=self.synthetic_phase_kwargs["n_grid"],
@@ -583,6 +593,7 @@ class Result(CoreResult):
             uniform_weight=self.synthetic_phase_kwargs.get("uniform_weight", 0.01),
             num_processes=num_processes,
             use_base_domain=self.use_base_domain,
+            wfg_updates=wfg_updates,
         )
         chain = ChainComposer([table, factor])
         # One phase draw per proposal sample (the table root is emitted once).

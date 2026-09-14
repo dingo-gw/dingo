@@ -516,6 +516,7 @@ class GWSamplerContext:
         phase_marginalization_kwargs: Optional[dict] = None,
         calibration_marginalization_kwargs: Optional[dict] = None,
         use_base_domain: bool = False,
+        wfg_updates: Optional[dict] = None,
     ) -> StationaryGaussianGWLikelihood:
         """
         Build the exact GW likelihood on this event's data, in physical parameter
@@ -548,6 +549,11 @@ class GWSamplerContext:
             Marginalize over detector calibration uncertainty.
         use_base_domain : bool, default False
             For a multibanded model, evaluate on the undecimated base domain.
+        wfg_updates : dict, optional
+            Overrides applied on top of the waveform generator settings stored in
+            the network metadata. Only for settings that change how the waveform
+            is computed, not the waveform itself (e.g.
+            `use_dft_phase_decomposition`).
 
         Returns
         -------
@@ -563,6 +569,7 @@ class GWSamplerContext:
                 "phase_marginalization_kwargs": phase_marginalization_kwargs,
                 "calibration_marginalization_kwargs": calibration_marginalization_kwargs,
                 "use_base_domain": use_base_domain,
+                "wfg_updates": wfg_updates,
             }
         )
         if settings == self._likelihood_settings:
@@ -669,7 +676,10 @@ class GWSamplerContext:
         )
 
         likelihood = StationaryGaussianGWLikelihood(
-            wfg_kwargs=dataset_settings["waveform_generator"],
+            wfg_kwargs={
+                **dataset_settings["waveform_generator"],
+                **(wfg_updates or {}),
+            },
             wfg_domain=wfg_domain,
             data_domain=data_domain,
             event_data=event_data,

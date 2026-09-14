@@ -114,8 +114,9 @@ def test_log_prob_replug_matches_sample():
 
 
 def test_factor_builds_likelihood_from_context():
-    # The factor takes the likelihood from the context, passing only its
-    # base-domain choice (the same one importance sampling evaluates with).
+    # The factor takes the likelihood from the context, passing its base-domain
+    # choice (the same one importance sampling evaluates with) and any waveform
+    # generator overrides.
     recorded = []
 
     class _RecordingContext(_MockContext):
@@ -132,4 +133,20 @@ def test_factor_builds_likelihood_from_context():
         )
         _seed()
         factor.sample_and_log_prob(1, _RecordingContext(), _given())
-        assert recorded[-1] == {"use_base_domain": use_base_domain}
+        assert recorded[-1] == {
+            "use_base_domain": use_base_domain,
+            "wfg_updates": None,
+        }
+
+    factor = SyntheticPhaseFactor(
+        conditioning=["chirp_mass"],
+        n_grid=11,
+        approximation_22_mode=True,
+        wfg_updates={"use_dft_phase_decomposition": False},
+    )
+    _seed()
+    factor.sample_and_log_prob(1, _RecordingContext(), _given())
+    assert recorded[-1] == {
+        "use_base_domain": False,
+        "wfg_updates": {"use_dft_phase_decomposition": False},
+    }
