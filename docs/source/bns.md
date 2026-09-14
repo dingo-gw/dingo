@@ -110,6 +110,37 @@ value, and the network draws per row. The scan result (trigger value, signal-to-
 ratio, maximum log likelihood, and the scan settings) is recorded in the sampler
 provenance. For a GW170817-like event the scan costs about a minute of CPU time.
 
+## Tidal parameters
+
+Tidal approximants such as `IMRPhenomXP_NRTidalv3` run through the standard LAL
+`WaveformGenerator` in both uniform and multibanded frequency domains: `lambda_1`
+and `lambda_2` are inserted into the LAL parameter dictionary whenever present.
+
+Beyond a BBH setup, a tidal run needs:
+
+- **Dataset, `waveform_generator`**: the tidal `approximant` and
+  `spin_conversion_phase: 0.0` (required for phase-marginalized training).
+- **Dataset, `intrinsic_prior`**: BNS-appropriate mass and spin ranges (the
+  `default` entries are tuned to BBH), plus `lambda_1: default` /
+  `lambda_2: default` (`Uniform(0, 5000)`) or explicit prior strings.
+- **Training**: list `inference_parameters` explicitly, including `lambda_1` and
+  `lambda_2` (the `default` list contains only the 15 BBH parameters).
+- **Importance sampling**: set `co_rotate_spins: true` in the synthetic-phase
+  settings (see below).
+
+For the synthetic phase, `co_rotate_spins: true` is recommended: for models with
+only a co-precessing $(2, \pm 2)$ pair it is exact at a single waveform
+evaluation per sample. It draws the phase in the physical spin convention —
+where a phase shift co-rotates the in-plane spins, so the waveform transforms as
+a global $e^{2i\phi}$ factor — and rotates `theta_jn` / `phi_jl` accordingly; a
+two-waveform probe verifies this property at runtime and falls back to the exact
+mode sum otherwise. The plain `approximation_22_mode: true` shortcut has the
+same cost but is approximate for precessing signals: precession mixes the
+inertial-frame $m$-components, placing a spurious phase peak at $\phi + \pi$. 
+The exact mode sum (`approximation_22_mode: false`) costs $2\ell_{\max}+1 = 5$ 
+evaluations per sample and, since NRTidal models have no frequency-domain modes in LALSimulation, requires the DFT phase decomposition with an explicit 
+`mode_list: [[2, 2], [2, -2]]` in the waveform-generator settings.
+
 ## Running through dingo_pipe
 
 Two [dingo_pipe](dingo_pipe.md) sampler options control BNS inference:
@@ -146,7 +177,7 @@ fixed-context-parameters = {chirp_mass_proxy: 1.19786, ra: 3.44616, dec: -0.4080
 # fixed-context-parameters = {ra: 3.44616, dec: -0.408084}
 
 importance-sample = true
-importance-sampling-settings = {synthetic_phase: {approximation_22_mode: true, n_grid: 5001, uniform_weight: 0.01}}
+importance-sampling-settings = {synthetic_phase: {co_rotate_spins: true, n_grid: 5001, uniform_weight: 0.01}}
 
 ################################################################################
 ## Data generation arguments
@@ -163,9 +194,10 @@ Importance sampling follows the standard [workflow](result.md). For a multibande
 model the likelihood is evaluated on the undecimated base domain by default
 (`use_base_domain`, set automatically and adjustable in
 `importance-sampling-settings`). Phase-marginalized networks reconstruct the phase
-synthetically before reweighting; setting `approximation_22_mode: true` treats the
-signal as dominated by the $(2, 2)$ mode, which is appropriate for BNS and
-substantially faster than the mode-summed default.
+synthetically before reweighting; for BNS models the recommended setting is
+`co_rotate_spins: true` — an exact phase draw at
+one waveform evaluation per sample. See
+[Tidal parameters](#tidal-parameters) for the alternatives.
 
 As an indication of expected performance, analyses of GW170817 on public data with a
 development network reach sample efficiencies of roughly 10% and a log Bayes factor

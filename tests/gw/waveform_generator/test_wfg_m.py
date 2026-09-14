@@ -496,6 +496,30 @@ def test_dft_phase_decomposition_is_the_default(uniform_fd_domain):
     assert wfg.use_dft_phase_decomposition is True
 
 
+def test_dft_falls_back_without_spin_conversion_phase(uniform_fd_domain):
+    """The DFT inverts waveforms that differ only by a phase shift; with
+    spin_conversion_phase=None a phase shift also rotates the in-plane spins, so
+    generate_hplus_hcross_m must warn and use the individual-mode path instead
+    (well-defined there: spins are converted once, at the sample's phase)."""
+    kwargs = dict(
+        approximant="IMRPhenomXPHM",
+        domain=uniform_fd_domain,
+        f_ref=10.0,
+        f_start=10.0,
+        spin_conversion_phase=None,
+    )
+    with pytest.warns(UserWarning, match="Falling back to the individual-mode"):
+        pol_m = WaveformGenerator(**kwargs).generate_hplus_hcross_m(DFT_PARAMETERS[0])
+
+    pol_m_std = WaveformGenerator(
+        **kwargs, use_dft_phase_decomposition=False
+    ).generate_hplus_hcross_m(DFT_PARAMETERS[0])
+
+    for m in pol_m_std:
+        for name in pol_m_std[m]:
+            np.testing.assert_array_equal(pol_m[m][name], pol_m_std[m][name])
+
+
 def test_dft_falls_back_without_ell_max(uniform_fd_domain, monkeypatch):
     """With the flag on (default) but no way to size the phase grid --
     no mode_list and no DEFAULT_ELL_MAX entry -- generate_hplus_hcross_m must
