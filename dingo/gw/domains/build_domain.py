@@ -39,7 +39,7 @@ def build_domain(settings: dict) -> Domain:
 
 
 def build_domain_from_model_metadata(
-    model_metadata: dict, base: bool = False
+    model_metadata: dict, base: bool = False, **domain_update: dict,
 ) -> Domain:
     """
     Instantiate a domain class from settings of model.
@@ -54,13 +54,17 @@ def build_domain_from_model_metadata(
         else return domain. Example: MultibandedFrequencyDomain has a UniformFrequencyDomain
         object as a base_domain. In dingo_pipe, we want to load data in the
         base_domain, and later decimate from base_domain to domain.
+    domain_update: dict
+        allow to overwrite the model's domain_update
 
     Returns
     -------
     A Domain instance of the correct type.
     """
     domain = build_domain(model_metadata["dataset_settings"]["domain"])
-    if "domain_update" in model_metadata["train_settings"]["data"]:
+    if domain_update:
+        domain.update(domain_update)
+    elif "domain_update" in model_metadata["train_settings"]["data"]:
         domain.update(model_metadata["train_settings"]["data"]["domain_update"])
     if base and hasattr(domain, "base_domain"):
         domain = domain.base_domain
