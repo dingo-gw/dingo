@@ -214,31 +214,29 @@ class Result(CoreResult):
 
     def _get_data_domain(self):
         """
-        Get the data domain, potentially updated with event metadata.
+        Get the data domain on the grid of the event data in self.context.
+
+        The event file is on the network grid (sampling stage) or on the network band
+        narrowed/extended to the requested range (IS stage), so f_max is taken from the
+        strain length. Per-detector ranges are still applied by ASD masking.
 
         Returns a Domain object.
         """
-        data_domain = self.domain
-        if self.event_metadata is not None and any(
-            k in self.event_metadata
-            for k in ["minimum_frequency", "maximum_frequency", "T"]
-        ):
-            domain_dict = {}
-            if "minimum_frequency" in self.event_metadata:
-                domain_dict["f_min"] = min(self.event_metadata["minimum_frequency"].values())
-            if "maximum_frequency" in self.event_metadata:
-                domain_dict["f_max"] = max(self.event_metadata["maximum_frequency"].values())
-            if "T" in self.event_metadata:
-                delta_f = 1. / self.event_metadata["T"]
-                if delta_f != getattr(self.domain,
-                                      "base_domain",
-                                      self.domain).domain_dict["delta_f"]:
-                    raise NotImplementedError("Can't update delta_f")
+        if self.context is None or self.event_metadata is None:
+            return self.domain
+        base_domain = getattr(self.domain, "base_domain", self.domain)
+        T = self.event_metadata.get("T")
+        if T is not None and 1.0 / T != base_domain.delta_f:
+            raise NotImplementedError("Can't update delta_f")
 
-            data_domain_dict = self.base_metadata["dataset_settings"]["domain"].copy()
-            data_domain = build_domain(data_domain_dict)
-            data_domain.update(domain_dict)
+        num_bins = len(next(iter(self.context["waveform"].values())))
+        f_min = self.minimum_frequency
+        if isinstance(f_min, dict):
+            f_min = min(f_min.values())
 
+        data_domain = build_domain(self.base_metadata["dataset_settings"]["domain"])
+        f_max = (num_bins - 1) * base_domain.delta_f
+        data_domain.update({"f_min": f_min, "f_max": f_max})
         return data_domain
 
     def _build_prior(self):
