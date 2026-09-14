@@ -92,11 +92,66 @@ Injections mirror the [approach of `bilby_pipe`](https://lscsoft.docs.ligo.org/b
 * Setting `zero-noise = True` will create a zero-noise injection, which is out-of-distribution with respect to Dingo training data. It should therefore be used with caution.
 * When running many injections `n-simulation > 1`, one may want to produce a PP plot. This can be done automatically by setting `plot-pp = true`.
 
+### Per-detector frequency range
+
+For transformer-based (Dingo-T1) models, the frequency band used for inference
+can be restricted per detector without retraining.  Both `minimum-frequency` and
+`maximum-frequency` accept either a single float (applied to all detectors) or a
+per-detector dict:
+
+```ini
+minimum-frequency = {H1: 30, L1: 30, V1: 40}
+maximum-frequency = {H1: 1024, L1: 1024, V1: 512}
+```
+
+Detectors absent from the dict fall back to the model's training range.  The
+model must have been trained with `mask_frequency_range` augmentation for a
+non-default range to be in-distribution; otherwise an error is raised.
+
+(psd-notching)=
+### PSD notching
+
+Specific frequency intervals can be suppressed (notched) to exclude spectral
+artifacts such as power-line harmonics.  Two
+equivalent paths produce the same result:
+
+**Standard path** — set `psd-notch-dict` in the ini file:
+
+```ini
+# Per-detector dict.  Each value is [f_lo, f_hi] or [[f_lo1, f_hi1], ...].
+psd-notch-dict = {H1: [[59.0, 61.0], [119.0, 121.0]], L1: [59.0, 61.0]}
+```
+
+dingo_pipe sets the ASD to `HIGH_ASD_VALUE = 1` in the specified bins during
+data generation, saves the modified ASD to the event HDF5, and records the
+notched intervals in the event metadata.  At sampling time the tokens
+overlapping these intervals are masked before the network forward pass.
+
+**Pre-notched path** — leave `psd-notch-dict` commented out.  If the ASD has
+already been set to 1 in the notch regions before dingo_pipe runs, the notched
+intervals are detected from the stored ASD at the end of data generation and
+recorded in the event metadata.  Runs touching f_min or f_max are taken for PSD edge
+padding rather than notches (with a warning if wider than one bin); to exclude an
+edge band, move `minimum-frequency` / `maximum-frequency` instead.  (The Asimov
+integration passes its notch dict through `psd-notch-dict`.)
+
+In both paths the importance-sampling likelihood contribution from notched bins
+is negligible because ASD = 1 ≫ real noise level (~10⁻²³ 1/√Hz), so the
+noise-weighted inner product for those bins approaches zero.
+
+```{note}
+PSD notching is not restricted to tokenized models.  A ResNet-based model has no
+tokens to mask, so the notched bins reach it as zeros in the whitened strain and
+inverse ASD, which it never saw in training; a warning is issued.
+```
+
 ## Sampling
 
-The next step is sampling from the Dingo model. The model is loaded into a [GWSampler](dingo.gw.inference.gw_samplers.GWSampler) or [GWSamplerGNPE](dingo.gw.inference.gw_samplers.GWSamplerGNPE) object. (If using [GNPE](gnpe) it is necessary to specify a `model-init`.) The Sampler `context` is then set from the EventDataset prepared in the previous step. `num-samples` samples are then generated in batches of size `batch-size`. The samples (and context) are stored in a [Result](dingo.gw.result.Result) object and saved in HDF5 format.
+The next step is sampling from the Dingo model. The model is loaded into a [GWComposedSampler](dingo.gw.inference.sampler.GWComposedSampler), built from the EventDataset prepared in the previous step. (If using [GNPE](gnpe) it is necessary to specify a `model-init`.) `num-samples` samples are then generated in batches of size `batch-size`, seeded by `sampling-seed` (each job draws and logs its own if not given; importance-sampling job n uses the seed plus n). The seed used is recorded with the sampling result. The samples (and context) are stored in a [Result](dingo.gw.result.Result) object and saved in HDF5 format.
 
 If using GNPE, one can optionally specify `num-gnpe-iterations` (it defaults to 30). Importantly, obtaining the log probability when using GNPE requires an [extra step of training an unconditional flow](result.md#density-recovery). This is done using the `recover-log-prob` flag, which defaults to `True`. The default density recovery settings can be overwritten by providing a `density-recovery-settings` dictionary in the `.ini` file.
+
+Single-network models that condition on context parameters (e.g., chirp-mass-conditioned [BNS](bns.md) networks) take their pinned values from `fixed-context-parameters`, or determine the trigger chirp mass from the data with `chirp-mass-scan`. Both options are described on the [binary neutron stars](bns.md) page.
 
 Since sampling uses GPU hardware, there is an additional key `sampling-requirements` for HTCondor requirements during the sampling stage. This is intended for specifying GPU requirements such as memory or CUDA version.
 
@@ -104,13 +159,15 @@ Since sampling uses GPU hardware, there is an additional key `sampling-requireme
 
 For importance sampling, the Result saved in the previous step is loaded. Since this contains the strain data and ASDs, as well as all settings used for training the network, the likelihood and prior can be evaluated for each sample point. If it is necessary to change data conditioning or PSD for importance sampling (i.e., if the `importance-sampling-updates` dictionary is non-empty), then a second [data generation](#data-generation) step is first carried using the new settings, and used as importance sampling context. The importance sampled result is finally saved as HDF5, including the estimated Bayesian evidence.
 
+A frequency range can be requested in two ways. `minimum-frequency` and `maximum-frequency` in the `[data]` section (a float, or a per-detector dictionary) apply to sampling and importance sampling alike: both the network input and the likelihood are restricted to the range, which requires a model trained with random strain cropping that covers it. The same keys under `importance-sampling-updates` apply to the likelihood only. The importance-sampling data are then generated for the requested range, which may extend beyond the network's band up to the Nyquist frequency, and no cropping is required. In both cases the likelihood masks the ASDs outside each detector's range and places the calibration spline nodes across it, as Bilby does.
+
 If `prior-dict-updates` is specified in the `.ini` file, then this will be used for the importance sampling prior. One example where this is useful is for the luminosity distance prior. Indeed, Dingo tends to train better using a uniform prior over luminosity distance, but physically one would prefer a uniform in volume prior. By specifying `prior-dict-updates` this change can be made in importance sampling.
 
 ```{caution}
 If extending the prior support during importance sampling, be sure that the posterior does not rail up against the prior boundary being extended.
 ```
 
-By default, dingo_pipe assumes that it is necessary to sample the phase synthetically, so it will do so before importance sampling. This can be turned off by passing an empty dictionary to `importance-sampling-settings`. Note that importance sampling itself can be switched off by setting the `importance-sample` flag to False (it defaults to True). 
+By default, dingo_pipe assumes that it is necessary to sample the phase synthetically, so it will do so before importance sampling. This can be turned off by setting `importance-sampling-settings = none` (an empty dictionary keeps the default; `none` also clears the multibanding default below). Note that importance sampling itself can be switched off by setting the `importance-sample` flag to False (it defaults to True). For models using a multibanded frequency domain, the likelihood is evaluated on the undecimated base domain by default (`use_base_domain` in `importance-sampling-settings`).
 
 Importance sampling (including synthetic phase sampling) is an expensive step, so dingo_pipe allows for parallelization: this step is split over `n-parallel` jobs, each of which uses `request-cpus-importance-sampling` processes. In the backend, this makes use of the Result [split()](dingo.core.result.Result.split) and [merge()](dingo.core.result.Result.merge) methods.
 

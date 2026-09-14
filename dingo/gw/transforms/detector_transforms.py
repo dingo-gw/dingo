@@ -280,7 +280,7 @@ class SampleCalibrationParameters(object):
     calibration envelope, and applies them to generate $N$ observed waveforms $\{h^n_{
     obs}(f)\}$. This is intended to be used for marginalizing over the calibration
     uncertainty when evaluating the likelihood for importance sampling.
-    
+
     This transform should be followed by ApplyCalibrationToWaveform to apply the
     sampled calibration curves to the waveform.
     """
@@ -293,6 +293,7 @@ class SampleCalibrationParameters(object):
         num_calibration_curves,
         num_calibration_nodes,
         correction_type="data",
+        frequency_bounds=None,
     ):
         r"""
         Parameters
@@ -311,14 +312,21 @@ class SampleCalibrationParameters(object):
             Number of log-spaced frequency nodes for the spline.
         correction_type : str = "data"
             Whether envelopes are over eta ("data") or alpha ("template").
+        frequency_bounds : dict[str, tuple[float, float]], optional
+            The frequency range ``(f_min, f_max)`` of each detector, across which
+            the spline nodes are placed. Defaults to the data-domain bounds.
         """
         self.ifo_list = ifo_list
         self.num_calibration_curves = num_calibration_curves
         self.data_domain = data_domain
+        self.frequency_bounds = frequency_bounds or {
+            ifo.name: (data_domain.f_min, data_domain.f_max) for ifo in ifo_list
+        }
 
         if correction_type is None:
             correction_type_dict = {
-                ifo.name: CALIBRATION_CORRECTION_TYPE_LOOKUP[ifo.name] for ifo in self.ifo_list
+                ifo.name: CALIBRATION_CORRECTION_TYPE_LOOKUP[ifo.name]
+                for ifo in self.ifo_list
             }
         elif correction_type == "data" or correction_type == "template":
             correction_type_dict = {ifo.name: correction_type for ifo in self.ifo_list}
@@ -331,7 +339,7 @@ class SampleCalibrationParameters(object):
         if all([s.endswith(".txt") for s in calibration_envelope.values()]):
             self.calibration_envelope = calibration_envelope
             for ifo in self.ifo_list:
-                # Setting a calibration prior. 
+                # Setting a calibration prior.
                 # Take the calibration envelope and use it to set a spline on
                 # the median and sigma of the amplitude and phase. Then in log
                 # frequency it will setup node points at frequency points, f_i
@@ -339,15 +347,16 @@ class SampleCalibrationParameters(object):
                 # spaced between f_min and f_max. Then for each node point f_i,
                 # it will create a gaussian prior according to the spline of
                 # the median and sigma found earlier
-                self.calibration_prior[
-                    ifo.name
-                ] = CalibrationPriorDict.from_envelope_file(
-                    self.calibration_envelope[ifo.name],
-                    self.data_domain.f_min,
-                    self.data_domain.f_max,
-                    num_calibration_nodes,
-                    ifo.name,
-                    correction_type=correction_type_dict[ifo.name],
+                f_min, f_max = self.frequency_bounds[ifo.name]
+                self.calibration_prior[ifo.name] = (
+                    CalibrationPriorDict.from_envelope_file(
+                        self.calibration_envelope[ifo.name],
+                        f_min,
+                        f_max,
+                        num_calibration_nodes,
+                        ifo.name,
+                        correction_type=correction_type_dict[ifo.name],
+                    )
                 )
         else:
             raise Exception("Calibration envelope must be specified in a .txt file!")
@@ -415,6 +424,7 @@ class ApplyCalibrationToWaveform(object):
         self,
         ifo_list,
         data_domain,
+        frequency_bounds=None,
     ):
         r"""
         Parameters
@@ -423,21 +433,33 @@ class ApplyCalibrationToWaveform(object):
             List of Interferometers present in the analysis.
         data_domain : Domain
             Domain on which data is defined.
+        frequency_bounds : dict[str, tuple[float, float]], optional
+            The frequency range ``(f_min, f_max)`` of each detector, across which
+            the spline nodes are placed. Must match the bounds the calibration
+            parameters were drawn with. Defaults to the data-domain bounds.
         """
         self.ifo_list = ifo_list
         self.data_domain = data_domain
+        self.frequency_bounds = frequency_bounds or {
+            ifo.name: (data_domain.f_min, data_domain.f_max) for ifo in ifo_list
+        }
 
     def _ensure_calibration_model(self, ifo, num_calibration_nodes):
-        """
-        Ensure the calibration model is set up on the ifo. Creates it if not present
-        or if it has a different number of nodes.
-        """
-        if not hasattr(ifo, "calibration_model") or ifo.calibration_model is None or isinstance(ifo.calibration_model, calibration.Recalibrate):
-            # using https://dcc.ligo.org/LIGO-T2300140 
+        """Set up the calibration spline on the interferometer, unless it already
+        has one with the same number of nodes and frequency bounds."""
+        f_min, f_max = self.frequency_bounds[ifo.name]
+        model = getattr(ifo, "calibration_model", None)
+        if (
+            not isinstance(model, calibration.CubicSpline)
+            or model.n_points != num_calibration_nodes
+            or model.minimum_frequency != f_min
+            or model.maximum_frequency != f_max
+        ):
+            # using https://dcc.ligo.org/LIGO-T2300140
             ifo.calibration_model = calibration.CubicSpline(
                 f"recalib_{ifo.name}_",
-                minimum_frequency=self.data_domain.f_min,
-                maximum_frequency=self.data_domain.f_max,
+                minimum_frequency=f_min,
+                maximum_frequency=f_max,
                 n_points=num_calibration_nodes,
             )
 
@@ -454,9 +476,7 @@ class ApplyCalibrationToWaveform(object):
             prefix = f"recalib_{ifo.name}_"
 
             # Extract calibration parameters for this ifo
-            calib_params = {
-                k: v for k, v in extrinsic.items() if k.startswith(prefix)
-            }
+            calib_params = {k: v for k, v in extrinsic.items() if k.startswith(prefix)}
 
             if not calib_params:
                 continue
@@ -486,12 +506,14 @@ class ApplyCalibrationToWaveform(object):
             # Compute calibration curve for each parameter set
             for i in range(num_curves):
                 params_i = {k: v[i] for k, v in calib_params.items()}
-                calibration_draws[
-                    i, self.data_domain.frequency_mask
-                ] = ifo.calibration_model.get_calibration_factor(
-                    self.data_domain.sample_frequencies[self.data_domain.frequency_mask],
-                    prefix=prefix,
-                    **params_i,
+                calibration_draws[i, self.data_domain.frequency_mask] = (
+                    ifo.calibration_model.get_calibration_factor(
+                        self.data_domain.sample_frequencies[
+                            self.data_domain.frequency_mask
+                        ],
+                        prefix=prefix,
+                        **params_i,
+                    )
                 )
 
             # Squeeze out leading dimension if input was scalar

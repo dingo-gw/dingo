@@ -1,3 +1,4 @@
 exclude .gitignore
 exclude uv.lock
 prune misc_scripts
+exclude CLAUDE.md

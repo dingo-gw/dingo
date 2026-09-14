@@ -195,15 +195,17 @@ class SVDBasis(DingoDataset):
         """
         return data @ self.V
 
-    def from_file(self, filename):
+    def from_file(self, filename, dtype_map=None):
         """
         Load the SVD basis from a HDF5 file.
 
         Parameters
         ----------
         filename : str
+        dtype_map : dict, optional
+            Passed through to `DingoDataset.from_file`.
         """
-        super().from_file(filename)
+        super().from_file(filename, dtype_map=dtype_map)
         if self.V is None:
             raise KeyError("File does not contain SVD V matrix. No SVD basis to load.")
         self.Vh = self.V.T.conj()

@@ -23,6 +23,8 @@ from dingo.core.posterior_models.build_model import build_model_from_kwargs
 from dingo.gw.data.event_dataset import EventDataset
 from dingo.gw.domains import UniformFrequencyDomain, build_domain_from_model_metadata
 from dingo.gw.injection import Injection
+from dingo.gw.gwutils import detect_asd_notches, parse_psd_notch_dict
+from dingo.gw.noise.asd_dataset import HIGH_ASD_VALUE
 from dingo.pipe.parser import create_parser
 
 logger.name = "dingo_pipe"
@@ -78,12 +80,14 @@ class DataGenerationInput(BilbyDataGenerationInput):
         self.importance_sampling = args.importance_sampling_generation
         self.importance_sampling_updates = args.importance_sampling_updates
         if self.importance_sampling:
-            # Updates to frequency range should not affect the data generation for importance sampling
-            if "minimum_frequency" in self.importance_sampling_updates:
-                self.importance_sampling_updates.pop("minimum_frequency")
-            if "maximum_frequency" in self.importance_sampling_updates:
-                self.importance_sampling_updates.pop("maximum_frequency")
-            vars(args).update(self.importance_sampling_updates)
+            # bilby_pipe's frequency setters parse strings, so a per-detector dict
+            # is passed in its string form.
+            vars(args).update(
+                {
+                    k: str(v) if isinstance(v, dict) else v
+                    for k, v in self.importance_sampling_updates.items()
+                }
+            )
 
         # Data arguments
         self.ignore_gwpy_data_quality_check = args.ignore_gwpy_data_quality_check
@@ -163,6 +167,12 @@ class DataGenerationInput(BilbyDataGenerationInput):
         # PSD
         self.psd_maximum_duration = args.psd_maximum_duration
         self.psd_dict = args.psd_dict
+        if args.psd_notch_dict is not None:
+            self.psd_notch_dict = parse_psd_notch_dict(
+                convert_string_to_dict(args.psd_notch_dict)
+            )
+        else:
+            self.psd_notch_dict = None
         self.psd_length = args.psd_length
         self.psd_fractional_overlap = args.psd_fractional_overlap
         self.psd_start_time = args.psd_start_time
@@ -349,8 +359,16 @@ class DataGenerationInput(BilbyDataGenerationInput):
             model = build_model_from_kwargs(
                 filename=self.model, device="cpu", load_training_info=False
             )
+        # The frequency grid of the saved data: the network's band, extended if
+        # importance sampling asked for a wider range, at the requested duration.
+        # A range inside the band is applied later by masking, not here.
         domain = build_domain_from_model_metadata(model.metadata, base=True)
         assert isinstance(domain, UniformFrequencyDomain)
+        domain = UniformFrequencyDomain(
+            min(domain.f_min, min(self.minimum_frequency_dict.values())),
+            max(domain.f_max, max(self.maximum_frequency_dict.values())),
+            1.0 / self.duration,
+        )
 
         if self.save_bilby_data_dump:
             # this is needed because we want bilby to use the updated DINGO
@@ -385,6 +403,29 @@ class DataGenerationInput(BilbyDataGenerationInput):
             # minimum frequency.
             strain = domain.update_data(strain)
             asd = domain.update_data(asd, low_value=1.0)
+            # A NaN ASD (e.g. estimated from a segment with gaps) would silently
+            # poison the whitened data; inf (bilby's fill beyond a PSD file's range)
+            # whitens to zero and is handled as a notch, so only NaN is rejected.
+            if np.isnan(asd[domain.min_idx :]).any():
+                raise ValueError(
+                    f"The ASD for {ifo.name} contains NaN within the model band. If "
+                    "it was estimated from strain, choose a PSD segment without gaps "
+                    "(psd-start-time, psd-length); otherwise check the PSD file "
+                    "(psd-dict)."
+                )
+
+            if self.psd_notch_dict is not None and ifo.name in self.psd_notch_dict:
+                notch = self.psd_notch_dict[ifo.name]
+                # Support single [f_lo, f_hi] or list of [[f_lo, f_hi], ...].
+                if not isinstance(notch[0], (list, tuple)):
+                    notch = [notch]
+                sample_freqs = domain.sample_frequencies
+                for f_lo, f_hi in notch:
+                    notch_mask = (sample_freqs >= f_lo) & (sample_freqs <= f_hi)
+                    asd[notch_mask] = HIGH_ASD_VALUE
+                logger.info(
+                    f"Applied PSD notch for {ifo.name}: {self.psd_notch_dict[ifo.name]}"
+                )
 
             # Dingo expects data to have trigger time 0, so we apply a cyclic time shift
             # by the post-trigger duration.
@@ -398,6 +439,14 @@ class DataGenerationInput(BilbyDataGenerationInput):
             data["waveform"][ifo.name] = strain
             data["asds"][ifo.name] = asd
 
+        # Detect notches from the final stored ASDs (covers both the ini flag,
+        # already applied above, and ASDs notched upstream, e.g. by Asimov), and
+        # record them so that sampling reads them from the event file. The key is
+        # omitted when there are none, keeping metadata comparisons clean.
+        detected_notches = detect_asd_notches(data["asds"], domain)
+        if detected_notches is not None:
+            logger.info(f"PSD notches recorded in event metadata: {detected_notches}")
+
         # Data conditioning settings.
         settings = {
             "time_event": self.trigger_time,
@@ -409,7 +458,10 @@ class DataGenerationInput(BilbyDataGenerationInput):
             "roll_off": self.tukey_roll_off,
             "minimum_frequency": self.minimum_frequency_dict,
             "maximum_frequency": self.maximum_frequency_dict,
+            "domain": domain.domain_dict,
         }
+        if detected_notches is not None:
+            settings["psd_notch_dict"] = detected_notches
 
         for k in [
             "psd_duration",

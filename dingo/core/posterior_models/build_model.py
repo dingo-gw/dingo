@@ -4,6 +4,7 @@ from dingo.core.posterior_models.normalizing_flow import NormalizingFlowPosterio
 from dingo.core.posterior_models.score_matching import ScoreDiffusionPosteriorModel
 from dingo.core.utils.backward_compatibility import (
     torch_load_with_fallback,
+    update_data_config,
     update_model_config,
     check_minimum_version,
 )
@@ -55,6 +56,7 @@ def build_model_from_kwargs(
         ]
     else:
         update_model_config(settings["train_settings"]["model"])  # Backward compat
+        update_data_config(settings)
         posterior_model_type = settings["train_settings"]["model"][
             "posterior_model_type"
         ]
@@ -73,7 +75,7 @@ def autocomplete_model_kwargs(model_kwargs: dict, data_sample: list):
 
     * set input dimension of embedding net to shape of data_sample[1]
     * set dimension of parameter space to len(data_sample[0])
-    * set added_context flag of embedding net if required for gnpe proxies
+    * set added_context flag of embedding net if required for gnpe proxies (resnet only)
     * set context dim of posterior model to output dim of embedding net + gnpe proxy dim
 
     Parameters
@@ -85,21 +87,51 @@ def autocomplete_model_kwargs(model_kwargs: dict, data_sample: list):
         Should be of format [parameters, GW data, gnpe_proxies], where the
         last element is only there is GNPE proxies are required.
     """
-
-    # set input dims from ifo_list and domain information
-    model_kwargs["embedding_kwargs"]["input_dims"] = list(data_sample[1].shape)
-    # set dimension of parameter space of posterior model
     model_kwargs["posterior_kwargs"]["input_dim"] = len(data_sample[0])
-    # set added_context flag of embedding net if GNPE proxies are required
-    # set context dim of nsf to output dim of embedding net + GNPE proxy dim
-    try:
-        gnpe_proxy_dim = len(data_sample[2])
-        model_kwargs["embedding_kwargs"]["added_context"] = True
-        model_kwargs["posterior_kwargs"]["context_dim"] = (
-            model_kwargs["embedding_kwargs"]["output_dim"] + gnpe_proxy_dim
-        )
-    except IndexError:
-        model_kwargs["embedding_kwargs"]["added_context"] = False
-        model_kwargs["posterior_kwargs"]["context_dim"] = model_kwargs[
-            "embedding_kwargs"
-        ]["output_dim"]
+
+    embedding_type = (model_kwargs.get("embedding_type") or "resnet").lower()
+
+    if embedding_type == "transformer":
+        tokenizer_kwargs = model_kwargs["embedding_kwargs"]["tokenizer_kwargs"]
+        tokenizer_kwargs["input_dim"] = int(data_sample[1].shape[-1])
+        # Position layout: position_continuous_dim continuous columns, then one
+        # column per categorical feature. Default: the last column is the single
+        # categorical feature (GW: the detector's position in the training detector
+        # list; every training sample contains all detectors, so max + 1 is its size).
+        if "position_category_sizes" not in tokenizer_kwargs or (
+            "position_continuous_dim" not in tokenizer_kwargs
+        ):
+            position = data_sample[2]  # [num_tokens, position_dim]
+            position_dim = int(position.shape[-1])
+            if "position_category_sizes" not in tokenizer_kwargs:
+                position_continuous_dim = tokenizer_kwargs.get(
+                    "position_continuous_dim", position_dim - 1
+                )
+                tokenizer_kwargs["position_category_sizes"] = [
+                    int(position[:, c].max()) + 1
+                    for c in range(position_continuous_dim, position_dim)
+                ]
+            tokenizer_kwargs.setdefault(
+                "position_continuous_dim",
+                position_dim - len(tokenizer_kwargs["position_category_sizes"]),
+            )
+        embedding_kwargs = model_kwargs["embedding_kwargs"]
+        if embedding_kwargs.get("final_net_kwargs"):
+            context_dim = embedding_kwargs["final_net_kwargs"]["output_dim"]
+        else:
+            context_dim = embedding_kwargs["transformer_kwargs"]["d_model"]
+        model_kwargs["posterior_kwargs"]["context_dim"] = context_dim
+    else:
+        # resnet: set input dims and handle optional GNPE proxies
+        model_kwargs["embedding_kwargs"]["input_dims"] = list(data_sample[1].shape)
+        try:
+            gnpe_proxy_dim = len(data_sample[2])
+            model_kwargs["embedding_kwargs"]["added_context"] = True
+            model_kwargs["posterior_kwargs"]["context_dim"] = (
+                model_kwargs["embedding_kwargs"]["output_dim"] + gnpe_proxy_dim
+            )
+        except IndexError:
+            model_kwargs["embedding_kwargs"]["added_context"] = False
+            model_kwargs["posterior_kwargs"]["context_dim"] = model_kwargs[
+                "embedding_kwargs"
+            ]["output_dim"]

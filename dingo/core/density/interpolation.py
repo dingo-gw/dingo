@@ -33,6 +33,8 @@ def interpolated_sample_and_log_prob_multi(
         data_generator = iter(values)
         task_fun = partial(interpolated_sample_and_log_prob, sample_points)
         if num_processes > 1:
+            # Workers are not re-seeded: under fork they copy one random stream,
+            # under spawn they start unseeded (#408).
             with Pool(processes=num_processes) as pool:
                 result_list = pool.map(task_fun, data_generator)
         else:

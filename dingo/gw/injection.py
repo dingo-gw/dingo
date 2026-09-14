@@ -8,6 +8,7 @@ from dingo.gw.domains import (
     MultibandedFrequencyDomain,
 )
 from dingo.gw.domains import build_domain, build_domain_from_model_metadata
+from dingo.gw.frequency_updates import resolve_frequency_bounds
 from dingo.gw.gwutils import get_extrinsic_prior_dict
 from dingo.gw.prior import build_prior_with_defaults, split_off_extrinsic_parameters
 from dingo.gw.transforms import (
@@ -38,6 +39,7 @@ class GWSignal(object):
         data_domain: UniformFrequencyDomain | MultibandedFrequencyDomain,
         ifo_list: list,
         t_ref: float,
+        frequency_update: dict | None = None,
     ):
         """
         Parameters
@@ -53,6 +55,10 @@ class GWSignal(object):
             Names of interferometers for projection.
         t_ref : float
             Reference time that specifies ifo locations.
+        frequency_update : dict, optional
+            The event's frequency range, `minimum_frequency` / `maximum_frequency`,
+            each a float or a per-detector dict. The calibration spline nodes are
+            placed across each detector's range. Defaults to the data-domain bounds.
         """
         self._use_base_domain = False
         self._check_domains(wfg_domain, data_domain)
@@ -77,6 +83,7 @@ class GWSignal(object):
         # When we set self.whiten, the projection transforms are automatically prepared.
         self._calibration_envelope = None
         self._calibration_marginalization_kwargs = None
+        self.frequency_update = frequency_update
         self.whiten = False
 
         self.asd = None
@@ -156,12 +163,20 @@ class GWSignal(object):
             GetDetectorTimes(self.ifo_list, self.t_ref),
             ProjectOntoDetectors(self.ifo_list, self.data_domain, self.t_ref),
         ]
+        frequency_update = self.frequency_update or {}
+        frequency_bounds = resolve_frequency_bounds(
+            [ifo.name for ifo in self.ifo_list],
+            self.data_domain,
+            minimum_frequency=frequency_update.get("minimum_frequency"),
+            maximum_frequency=frequency_update.get("maximum_frequency"),
+        )
         if self.calibration_marginalization_kwargs:
             # For calibration marginalization: sample parameters from prior
             transforms.append(
                 SampleCalibrationParameters(
                     self.ifo_list,
                     self.data_domain,
+                    frequency_bounds=frequency_bounds,
                     **self.calibration_marginalization_kwargs,
                 )
             )
@@ -171,6 +186,7 @@ class GWSignal(object):
             ApplyCalibrationToWaveform(
                 self.ifo_list,
                 self.data_domain,
+                frequency_bounds=frequency_bounds,
             )
         )
         if self.whiten:

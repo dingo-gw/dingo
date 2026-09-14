@@ -1,9 +1,12 @@
 #!/usr/bin/env python
-""" Script to importance sample based on Dingo samples. Based on bilby_pipe data
-analysis script. """
+"""Script to importance sample based on Dingo samples. Based on bilby_pipe data
+analysis script."""
 import os
 import sys
 
+import bilby
+import numpy as np
+import torch
 import yaml
 from bilby_pipe.input import Input
 from bilby_pipe.utils import (
@@ -58,7 +61,7 @@ class ImportanceSamplingInput(Input):
 
         # self.sampler = args.sampler
         # self.sampler_kwargs = args.sampler_kwargs
-        # self.sampling_seed = args.sampling_seed
+        self.sampling_seed = args.sampling_seed
 
         # Frequencies
         # self.sampling_frequency = args.sampling_frequency
@@ -113,6 +116,23 @@ class ImportanceSamplingInput(Input):
     def request_memory(self):
         return self.inputs.request_memory_importance_sampling
 
+    @property
+    def sampling_seed(self):
+        return self._sampling_seed
+
+    @sampling_seed.setter
+    def sampling_seed(self, sampling_seed):
+        """Mirrors bilby_pipe's DataAnalysisInput, plus torch. The Pool workers of
+        importance sampling and the synthetic phase are not re-seeded: under fork
+        they copy one stream, under spawn they start unseeded (#408)."""
+        if sampling_seed is None:
+            sampling_seed = np.random.randint(1, 1e6)
+        self._sampling_seed = int(sampling_seed)
+        torch.manual_seed(self._sampling_seed)
+        np.random.seed(self._sampling_seed)
+        bilby.core.utils.random.seed(self._sampling_seed)
+        logger.info(f"Sampling seed set to {self._sampling_seed}")
+
     def _load_proposal(self):
         self.result = Result(file_name=self.proposal_samples_file)
         if "log_prob" not in self.result.samples.columns:
@@ -127,7 +147,10 @@ class ImportanceSamplingInput(Input):
 
     @property
     def calibration_marginalization_kwargs(self):
-        if self.calibration_model == "CubicSpline" and self.calibration_mode == "marginalize":
+        if (
+            self.calibration_model == "CubicSpline"
+            and self.calibration_mode == "marginalize"
+        ):
             return {
                 "calibration_envelope": {
                     ifo: resolve_filename_with_transfer_fallback(path)
@@ -137,7 +160,10 @@ class ImportanceSamplingInput(Input):
                 "num_calibration_curves": self.spline_calibration_curves,
                 "correction_type": self.calibration_correction_type,
             }
-        elif self.calibration_model is None or self.calibration_mode in ["sample", None]:
+        elif self.calibration_model is None or self.calibration_mode in [
+            "sample",
+            None,
+        ]:
             return None
         else:
             raise ValueError(

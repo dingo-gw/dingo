@@ -1,0 +1,274 @@
+import copy
+
+import numpy as np
+import pytest
+import torch
+
+from dingo.core.posterior_models.build_model import (
+    autocomplete_model_kwargs,
+    build_model_from_kwargs,
+)
+from dingo.core.posterior_models.normalizing_flow import NormalizingFlowPosteriorModel
+
+
+BASE_TRANSFORM_KWARGS = {
+    "hidden_dim": 8,
+    "num_transform_blocks": 1,
+    "activation": "elu",
+    "dropout_probability": 0.0,
+    "norm": None,
+    "num_bins": 4,
+    "base_transform_type": "rq-coupling",
+}
+
+
+def _settings(posterior_model_type="normalizing_flow"):
+    return {
+        "train_settings": {
+            "model": {
+                "posterior_model_type": posterior_model_type,
+                "posterior_kwargs": {
+                    "input_dim": 3,
+                    "context_dim": None,
+                    "num_flow_steps": 2,
+                    "base_transform_kwargs": BASE_TRANSFORM_KWARGS,
+                },
+            }
+        }
+    }
+
+
+def test_build_model_dispatches_to_normalizing_flow():
+    model = build_model_from_kwargs(settings=_settings(), device="cpu")
+    assert isinstance(model, NormalizingFlowPosteriorModel)
+
+
+def test_build_model_dispatch_is_case_insensitive():
+    model = build_model_from_kwargs(
+        settings=_settings("Normalizing_Flow"), device="cpu"
+    )
+    assert isinstance(model, NormalizingFlowPosteriorModel)
+
+
+def test_build_model_requires_exactly_one_of_filename_or_settings():
+    # Neither provided.
+    with pytest.raises(ValueError, match="filename or a settings"):
+        build_model_from_kwargs()
+    # Both provided.
+    with pytest.raises(ValueError, match="filename or a settings"):
+        build_model_from_kwargs(filename="x.pt", settings=_settings())
+
+
+def test_build_model_rejects_unknown_type():
+    with pytest.raises(ValueError, match="No valid posterior model type"):
+        build_model_from_kwargs(settings=_settings("not_a_model"), device="cpu")
+
+
+def test_autocomplete_model_kwargs_without_gnpe_proxies():
+    model_kwargs = {"embedding_kwargs": {"output_dim": 8}, "posterior_kwargs": {}}
+    # data_sample = [parameters, GW data]  (no gnpe proxies)
+    autocomplete_model_kwargs(
+        model_kwargs, data_sample=[np.zeros(4), np.zeros((2, 3, 20))]
+    )
+
+    assert model_kwargs["embedding_kwargs"]["input_dims"] == [2, 3, 20]
+    assert model_kwargs["posterior_kwargs"]["input_dim"] == 4
+    assert model_kwargs["embedding_kwargs"]["added_context"] is False
+    # context_dim == embedding output_dim.
+    assert model_kwargs["posterior_kwargs"]["context_dim"] == 8
+
+
+def test_autocomplete_model_kwargs_with_gnpe_proxies():
+    model_kwargs = {"embedding_kwargs": {"output_dim": 8}, "posterior_kwargs": {}}
+    # data_sample = [parameters, GW data, gnpe_proxies (len 2)]
+    autocomplete_model_kwargs(
+        model_kwargs, data_sample=[np.zeros(4), np.zeros((2, 3, 20)), np.zeros(2)]
+    )
+
+    assert model_kwargs["embedding_kwargs"]["added_context"] is True
+    # context_dim == output_dim + gnpe_proxy_dim == 8 + 2.
+    assert model_kwargs["posterior_kwargs"]["context_dim"] == 10
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+_NUM_PARAMS = 4
+_CONTEXT_DIM = 8
+_D_MODEL = 16
+_NUM_TOKENS = 6
+_NUM_FEATURES = 12
+_NUM_BLOCKS = 2
+
+
+def _make_data_sample(
+    num_params=_NUM_PARAMS, waveform_shape=(_NUM_TOKENS, _NUM_FEATURES)
+):
+    parameters = torch.zeros(num_params)
+    waveform = torch.zeros(*waveform_shape)
+    return [parameters, waveform]
+
+
+def _make_transformer_model_kwargs(
+    final_net_output_dim=_CONTEXT_DIM, include_final_net=True, layout=True
+):
+    kwargs = {
+        "embedding_type": "transformer",
+        "posterior_kwargs": {"input_dim": None, "context_dim": None},
+        "embedding_kwargs": {
+            "tokenizer_kwargs": {
+                "hidden_dims": [16],
+                "activation": "elu",
+            },
+            "transformer_kwargs": {"d_model": _D_MODEL},
+            "pooling": "cls",
+        },
+    }
+    if layout:
+        kwargs["embedding_kwargs"]["tokenizer_kwargs"].update(
+            {"position_continuous_dim": 2, "position_category_sizes": [_NUM_BLOCKS]}
+        )
+    if include_final_net:
+        kwargs["embedding_kwargs"]["final_net_kwargs"] = {
+            "activation": "elu",
+            "output_dim": final_net_output_dim,
+        }
+    return kwargs
+
+
+def _make_resnet_model_kwargs(output_dim=_CONTEXT_DIM):
+    return {
+        "embedding_type": "resnet",
+        "posterior_kwargs": {"input_dim": None, "context_dim": None},
+        "embedding_kwargs": {
+            "output_dim": output_dim,
+            "hidden_dims": [32],
+        },
+    }
+
+
+# ---------------------------------------------------------------------------
+# autocomplete_model_kwargs — transformer path
+# ---------------------------------------------------------------------------
+
+
+def test_autocomplete_transformer_sets_tokenizer_input_dim():
+    model_kwargs = _make_transformer_model_kwargs()
+    data_sample = _make_data_sample()
+
+    autocomplete_model_kwargs(model_kwargs, data_sample)
+
+    tokenizer_kwargs = model_kwargs["embedding_kwargs"]["tokenizer_kwargs"]
+    assert tokenizer_kwargs["input_dim"] == data_sample[1].shape[-1]
+
+
+def test_autocomplete_transformer_context_dim_from_final_net():
+    model_kwargs = _make_transformer_model_kwargs(final_net_output_dim=_CONTEXT_DIM)
+    autocomplete_model_kwargs(model_kwargs, _make_data_sample())
+    assert model_kwargs["posterior_kwargs"]["context_dim"] == _CONTEXT_DIM
+
+
+def test_autocomplete_transformer_context_dim_from_d_model():
+    """When final_net_kwargs is absent, context_dim falls back to transformer d_model."""
+    model_kwargs = _make_transformer_model_kwargs(include_final_net=False)
+    autocomplete_model_kwargs(model_kwargs, _make_data_sample())
+    assert model_kwargs["posterior_kwargs"]["context_dim"] == _D_MODEL
+
+
+def test_autocomplete_transformer_sets_input_dim():
+    model_kwargs = _make_transformer_model_kwargs()
+    data_sample = _make_data_sample(num_params=7)
+    autocomplete_model_kwargs(model_kwargs, data_sample)
+    assert model_kwargs["posterior_kwargs"]["input_dim"] == 7
+
+
+def test_autocomplete_transformer_infers_layout_from_position():
+    """Default layout: last position column categorical (0 or 1 → size 2), the two
+    leading columns continuous."""
+    model_kwargs = _make_transformer_model_kwargs(layout=False)
+    f_min = torch.rand(_NUM_TOKENS)
+    detector = torch.tensor([0.0, 0.0, 0.0, 1.0, 1.0, 1.0])
+    position = torch.stack([f_min, f_min + 0.1, detector], dim=-1)
+    autocomplete_model_kwargs(model_kwargs, _make_data_sample() + [position])
+    tokenizer_kwargs = model_kwargs["embedding_kwargs"]["tokenizer_kwargs"]
+    assert tokenizer_kwargs["position_category_sizes"] == [2]
+    assert tokenizer_kwargs["position_continuous_dim"] == 2
+
+
+def test_autocomplete_transformer_preserves_explicit_category_sizes():
+    model_kwargs = _make_transformer_model_kwargs(layout=False)
+    model_kwargs["embedding_kwargs"]["tokenizer_kwargs"]["position_category_sizes"] = [
+        3
+    ]
+    f_min = torch.rand(_NUM_TOKENS)
+    detector = torch.tensor([0.0, 0.0, 0.0, 1.0, 1.0, 1.0])
+    position = torch.stack([f_min, f_min + 0.1, detector], dim=-1)
+    autocomplete_model_kwargs(model_kwargs, _make_data_sample() + [position])
+    tokenizer_kwargs = model_kwargs["embedding_kwargs"]["tokenizer_kwargs"]
+    assert tokenizer_kwargs["position_category_sizes"] == [3]
+    assert tokenizer_kwargs["position_continuous_dim"] == 2
+
+
+def test_autocomplete_transformer_two_categorical_columns():
+    """With position_continuous_dim given, every remaining column is categorical."""
+    model_kwargs = _make_transformer_model_kwargs(layout=False)
+    model_kwargs["embedding_kwargs"]["tokenizer_kwargs"]["position_continuous_dim"] = 1
+    position = torch.tensor([[0.1, 0.0, 2.0], [0.2, 1.0, 0.0], [0.3, 0.0, 1.0]])
+    autocomplete_model_kwargs(model_kwargs, _make_data_sample() + [position])
+    tokenizer_kwargs = model_kwargs["embedding_kwargs"]["tokenizer_kwargs"]
+    assert tokenizer_kwargs["position_category_sizes"] == [2, 3]
+    assert tokenizer_kwargs["position_continuous_dim"] == 1
+
+
+def test_autocomplete_transformer_does_not_set_added_context():
+    """added_context is a resnet-only concept; it must not appear in transformer kwargs."""
+    model_kwargs = _make_transformer_model_kwargs()
+    autocomplete_model_kwargs(model_kwargs, _make_data_sample())
+    assert "added_context" not in model_kwargs["embedding_kwargs"]
+
+
+# ---------------------------------------------------------------------------
+# autocomplete_model_kwargs — resnet path (regression)
+# ---------------------------------------------------------------------------
+
+
+def test_autocomplete_resnet_sets_input_dims():
+    raw_waveform_shape = (2, 3, 20)
+    model_kwargs = _make_resnet_model_kwargs()
+    data_sample = _make_data_sample(waveform_shape=raw_waveform_shape)
+
+    autocomplete_model_kwargs(model_kwargs, data_sample)
+
+    assert model_kwargs["embedding_kwargs"]["input_dims"] == list(raw_waveform_shape)
+
+
+def test_autocomplete_resnet_sets_context_dim():
+    model_kwargs = _make_resnet_model_kwargs(output_dim=10)
+    autocomplete_model_kwargs(model_kwargs, _make_data_sample())
+    assert model_kwargs["posterior_kwargs"]["context_dim"] == 10
+
+
+def test_autocomplete_resnet_sets_added_context_false_without_gnpe():
+    model_kwargs = _make_resnet_model_kwargs()
+    data_sample = _make_data_sample()  # only 2 elements, no GNPE proxies
+    autocomplete_model_kwargs(model_kwargs, data_sample)
+    assert model_kwargs["embedding_kwargs"]["added_context"] is False
+
+
+def test_autocomplete_resnet_sets_added_context_true_with_gnpe():
+    model_kwargs = _make_resnet_model_kwargs(output_dim=8)
+    gnpe_proxies = torch.zeros(3)
+    data_sample = _make_data_sample() + [gnpe_proxies]
+    autocomplete_model_kwargs(model_kwargs, data_sample)
+    assert model_kwargs["embedding_kwargs"]["added_context"] is True
+    assert model_kwargs["posterior_kwargs"]["context_dim"] == 8 + 3
+
+
+def test_autocomplete_does_not_mutate_data_sample():
+    model_kwargs = _make_transformer_model_kwargs()
+    data_sample = _make_data_sample()
+    data_sample_ref = [t.clone() for t in data_sample]
+    autocomplete_model_kwargs(model_kwargs, data_sample)
+    for original, ref in zip(data_sample, data_sample_ref):
+        assert torch.equal(original, ref)

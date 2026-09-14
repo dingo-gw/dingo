@@ -260,3 +260,164 @@ def test_wfd_size(wfd_settings: str, binary_prior: BinaryPrior):
     del wfd_settings["compression"]
     wfd = generate_dataset(wfd_settings, 1)
     assert len(wfd) == wfd_settings["num_samples"]
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("leave_waveforms_on_disk", [False, True])
+def test_precision_dtype_conversion(generate_waveform_dataset_small, leave_waveforms_on_disk):
+    """
+    Test that precision parameter correctly converts dtypes during HDF5 loading.
+
+    This tests the dtype_map functionality that enables direct dtype conversion
+    during HDF5 read, avoiding intermediate memory allocation.
+    """
+    wfd_path = generate_waveform_dataset_small
+    path = f"{wfd_path}/waveform_dataset.hdf5"
+
+    # Load with single precision
+    wfd_single = WaveformDataset(
+        file_name=path,
+        precision="single",
+        leave_waveforms_on_disk=leave_waveforms_on_disk,
+    )
+
+    # Check parameters dtype (should be float32)
+    for col in wfd_single.parameters.columns:
+        assert wfd_single.parameters[col].dtype == np.float32, (
+            f"Parameter {col} should be float32, got {wfd_single.parameters[col].dtype}"
+        )
+
+    # Check SVD dtypes (V should be complex64, s should be float32)
+    assert wfd_single.svd["V"].dtype == np.complex64, (
+        f"SVD V should be complex64, got {wfd_single.svd['V'].dtype}"
+    )
+    assert wfd_single.svd["s"].dtype == np.float32, (
+        f"SVD s should be float32, got {wfd_single.svd['s'].dtype}"
+    )
+
+    # Check polarizations dtype via __getitem__ (complex64)
+    el = wfd_single[0]
+    assert el["waveform"]["h_plus"].dtype == np.complex64, (
+        f"h_plus should be complex64, got {el['waveform']['h_plus'].dtype}"
+    )
+    assert el["waveform"]["h_cross"].dtype == np.complex64, (
+        f"h_cross should be complex64, got {el['waveform']['h_cross'].dtype}"
+    )
+
+    # Load with double precision
+    wfd_double = WaveformDataset(
+        file_name=path,
+        precision="double",
+        leave_waveforms_on_disk=leave_waveforms_on_disk,
+    )
+
+    # Check parameters dtype (should be float64)
+    for col in wfd_double.parameters.columns:
+        assert wfd_double.parameters[col].dtype == np.float64, (
+            f"Parameter {col} should be float64, got {wfd_double.parameters[col].dtype}"
+        )
+
+    # Check SVD dtypes (V should be complex128, s should be float64)
+    assert wfd_double.svd["V"].dtype == np.complex128, (
+        f"SVD V should be complex128, got {wfd_double.svd['V'].dtype}"
+    )
+    assert wfd_double.svd["s"].dtype == np.float64, (
+        f"SVD s should be float64, got {wfd_double.svd['s'].dtype}"
+    )
+
+    # Check polarizations dtype via __getitem__ (complex128)
+    el = wfd_double[0]
+    assert el["waveform"]["h_plus"].dtype == np.complex128, (
+        f"h_plus should be complex128, got {el['waveform']['h_plus'].dtype}"
+    )
+    assert el["waveform"]["h_cross"].dtype == np.complex128, (
+        f"h_cross should be complex128, got {el['waveform']['h_cross'].dtype}"
+    )
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("leave_waveforms_on_disk", [False, True])
+def test_no_precision_preserves_original_dtype(generate_waveform_dataset_small, leave_waveforms_on_disk):
+    """
+    Test that when precision is not specified, original HDF5 dtypes are preserved.
+    """
+    wfd_path = generate_waveform_dataset_small
+    path = f"{wfd_path}/waveform_dataset.hdf5"
+
+    # Load without specifying precision
+    wfd = WaveformDataset(
+        file_name=path,
+        precision=None,
+        leave_waveforms_on_disk=leave_waveforms_on_disk,
+    )
+
+    # dtype_map should be None when precision is not specified
+    assert wfd.dtype_map is None
+
+    # Parameters should be float64 (default numpy/HDF5 float type)
+    for col in wfd.parameters.columns:
+        assert wfd.parameters[col].dtype == np.float64, (
+            f"Parameter {col} should be float64 (original), got {wfd.parameters[col].dtype}"
+        )
+
+    # SVD should preserve original dtypes
+    assert wfd.svd["V"].dtype == np.complex128, (
+        f"SVD V should be complex128 (original), got {wfd.svd['V'].dtype}"
+    )
+    assert wfd.svd["s"].dtype == np.float64, (
+        f"SVD s should be float64 (original), got {wfd.svd['s'].dtype}"
+    )
+
+    # Polarizations should be complex128 (original)
+    el = wfd[0]
+    assert el["waveform"]["h_plus"].dtype == np.complex128, (
+        f"h_plus should be complex128 (original), got {el['waveform']['h_plus'].dtype}"
+    )
+
+
+@pytest.mark.slow
+def test_precision_conversion_values_unchanged(generate_waveform_dataset_small):
+    """
+    Test that precision conversion doesn't change the actual values (within precision limits).
+    """
+    wfd_path = generate_waveform_dataset_small
+    path = f"{wfd_path}/waveform_dataset.hdf5"
+
+    # Load with original precision
+    wfd_original = WaveformDataset(file_name=path, precision=None)
+
+    # Load with single precision
+    wfd_single = WaveformDataset(file_name=path, precision="single")
+
+    # Check that parameter values are close (within single precision tolerance)
+    for col in wfd_original.parameters.columns:
+        np.testing.assert_allclose(
+            wfd_original.parameters[col].values,
+            wfd_single.parameters[col].values,
+            rtol=1e-6,
+            err_msg=f"Parameter {col} values changed during precision conversion",
+        )
+
+    # Check that SVD values are close
+    np.testing.assert_allclose(
+        wfd_original.svd["V"],
+        wfd_single.svd["V"],
+        rtol=1e-6,
+        err_msg="SVD V values changed during precision conversion",
+    )
+    np.testing.assert_allclose(
+        wfd_original.svd["s"],
+        wfd_single.svd["s"],
+        rtol=1e-6,
+        err_msg="SVD s values changed during precision conversion",
+    )
+
+    # Check that waveform values are close
+    el_original = wfd_original[0]
+    el_single = wfd_single[0]
+    np.testing.assert_allclose(
+        el_original["waveform"]["h_plus"],
+        el_single["waveform"]["h_plus"],
+        rtol=1e-6,
+        err_msg="h_plus values changed during precision conversion",
+    )
