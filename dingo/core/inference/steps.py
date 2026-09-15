@@ -24,6 +24,7 @@ import math
 from abc import ABC, abstractmethod
 from typing import Optional, Protocol
 
+import numpy as np
 import torch
 
 from dingo.core.inference.context import SamplerContext
@@ -433,6 +434,58 @@ class DeltaFactor(Factor):
         return {
             **_describe_default(self),
             "values": {k: float(v) for k, v in self.values.items()},
+        }
+
+
+class PriorFactor(Factor):
+    """
+    An unconditioned factor that draws a block of parameters from a prior.
+
+    The prior is any object with the interface of a bilby `PriorDict` (`sample` and
+    `ln_prob`). Drawing from the prior makes the prior the proposal for this block, so
+    its log probability enters the chain's proposal density and cancels against the
+    importance-sampling target. It is used, for example, to add detector calibration
+    parameters to previously drawn samples, one draw per sample.
+    """
+
+    def __init__(self, prior):
+        """
+        Parameters
+        ----------
+        prior : bilby.core.prior.PriorDict
+            The prior to draw from. It should contain no delta functions, whose
+            density at the drawn point is infinite.
+        """
+        self.prior = prior
+        self.parameters = list(prior.keys())
+        self.conditioning: list[str] = []
+
+    def sample_and_log_prob(self, num_samples, context, given=None):
+        """Draw `num_samples` samples from the prior, with their prior log probability.
+        See `Factor.sample_and_log_prob`."""
+        # Fresh tensors are placed on the chain's device (as for DeltaFactor).
+        device = context.device if context is not None else None
+        draws = self.prior.sample(num_samples)
+        log_prob = self.prior.ln_prob(draws, axis=0)
+        samples = {
+            k: torch.as_tensor(np.asarray(v), device=device) for k, v in draws.items()
+        }
+        return samples, torch.as_tensor(np.asarray(log_prob), device=device)
+
+    def log_prob(self, theta_i, context, given=None):
+        """Evaluate the prior log probability. See `Factor.log_prob`."""
+        reference_column = next(iter(theta_i.values()))
+        theta = {k: theta_i[k].detach().cpu().numpy() for k in self.parameters}
+        return torch.as_tensor(
+            np.asarray(self.prior.ln_prob(theta, axis=0)),
+            device=reference_column.device,
+        )
+
+    def describe(self) -> dict:
+        """The default descriptor, plus the prior of each parameter."""
+        return {
+            **_describe_default(self),
+            "prior": {k: repr(v) for k, v in self.prior.items()},
         }
 
 

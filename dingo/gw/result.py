@@ -358,21 +358,73 @@ class Result(CoreResult):
     def sample_calibration_parameters(self, calibration_sampling_kwargs: dict):
         """
         Sample calibration parameters from the calibration prior and add them to the
-        samples DataFrame. Also updates self.prior with the calibration priors and
-        adjusts self.samples["log_prob"] accordingly.
-
-        This should be called before importance_sample() when importance sampling
-        over calibration uncertainty. The calibration prior log_prob is added to
-        self.samples["log_prob"] so that it is properly accounted for in the
-        importance sampling weights.
-
-        After calling this method, each sample will have calibration parameters
-        (e.g., recalib_H1_amplitude_0, recalib_H1_phase_0, etc.) that will be used
-        by the likelihood to apply calibration corrections.
+        samples. See `sample_proposal_extensions`, which runs this together with the
+        synthetic phase.
 
         Parameters
         ----------
         calibration_sampling_kwargs : dict
+            See `sample_proposal_extensions`.
+        """
+        self.sample_proposal_extensions(
+            calibration_sampling_kwargs=calibration_sampling_kwargs
+        )
+
+    def sample_synthetic_phase(self, synthetic_phase_kwargs):
+        """
+        Sample a synthetic phase for phase-marginalized samples. See
+        `sample_proposal_extensions`, which runs this together with calibration
+        sampling.
+
+        Parameters
+        ----------
+        synthetic_phase_kwargs : dict
+            See `sample_proposal_extensions`.
+        """
+        self.sample_proposal_extensions(synthetic_phase_kwargs=synthetic_phase_kwargs)
+
+    def sample_proposal_extensions(
+        self,
+        calibration_sampling_kwargs: Optional[dict] = None,
+        synthetic_phase_kwargs: Optional[dict] = None,
+    ):
+        """
+        Extend the proposal samples with calibration parameters and / or a synthetic
+        phase, in preparation for importance sampling.
+
+        Both run as one chain rooted in the proposal samples,
+
+            [SampleTableFactor, PriorFactor (per detector), SyntheticPhaseFactor],
+
+        with each optional step present only if its settings are given. The chain
+        folds every step's log probability into `log_prob`, the joint proposal
+        density `log q(theta) + log q(calibration) + log q(phase | theta,
+        calibration, d)`. The calibration parameters are drawn first, so the phase
+        distribution is built from the likelihood including the drawn calibration
+        curve.
+
+        Calibration: the parameters (e.g. `recalib_H1_amplitude_0`) are drawn from
+        the calibration prior, which acts as their proposal. The priors are added to
+        `self.prior` and recorded in the importance-sampling `prior_update`.
+
+        Synthetic phase: for samples in the full parameter space except the phase,
+        `q(phase | theta, d)` is constructed per sample by `SyntheticPhaseFactor`
+        from the likelihood on a phase grid (with a uniform floor for mass coverage,
+        so importance sampling remains exact even where the conditional is
+        approximate). The chain then runs on the within-prior samples only;
+        out-of-prior samples receive `phase = 0`, calibration parameters 0 and
+        `log_prob = nan`, and carry zero weight in importance sampling. Afterwards
+        the phase prior rejoins `self.prior`.
+
+        This method modifies self.samples in place.
+
+        Note: as discussed in the sampler revamp (dingo-gw/dingo#389), this
+        importance-sampling preparation, like the evolving prior, is to move out of
+        the Result object.
+
+        Parameters
+        ----------
+        calibration_sampling_kwargs : dict, optional
             Calibration sampling parameters. Keys:
 
             calibration_envelope : dict
@@ -384,123 +436,7 @@ class Result(CoreResult):
                 Whether envelopes are over eta ("data") or alpha ("template").
                 Can be a string (applied to all detectors), a dict mapping ifo names
                 to correction types, or None (uses defaults from CALIBRATION_CORRECTION_TYPE_LOOKUP).
-        """
-        self.calibration_sampling_kwargs = calibration_sampling_kwargs
-
-        # Handle correction_type defaults
-        correction_type = self.calibration_sampling_kwargs.get(
-            "correction_type", "data"
-        )
-        if correction_type is None:
-            correction_type_dict = {
-                ifo: CALIBRATION_CORRECTION_TYPE_LOOKUP[ifo]
-                for ifo in self.interferometers
-            }
-        elif correction_type == "data" or correction_type == "template":
-            correction_type_dict = {
-                ifo: correction_type for ifo in self.interferometers
-            }
-        elif isinstance(correction_type, dict):
-            correction_type_dict = correction_type
-        else:
-            raise ValueError(f"{correction_type} not understood")
-
-        # Build the calibration priors. As in Bilby, the spline nodes are placed
-        # across each detector's frequency range, the same range the likelihood
-        # masks the ASDs to. Without a range in the event metadata the domain
-        # bounds are used.
-        frequency_bounds = resolve_frequency_bounds(
-            self.interferometers,
-            self.domain,
-            minimum_frequency=self.minimum_frequency,
-            maximum_frequency=self.maximum_frequency,
-        )
-        calibration_priors = {}
-        for ifo in self.interferometers:
-            f_min, f_max = frequency_bounds[ifo]
-            calibration_priors[ifo] = CalibrationPriorDict.from_envelope_file(
-                self.calibration_sampling_kwargs["calibration_envelope"][ifo],
-                f_min,
-                f_max,
-                self.calibration_sampling_kwargs["num_calibration_nodes"],
-                ifo,
-                correction_type=correction_type_dict[ifo],
-            )
-
-        # Removing the delta function priors on the frequency nodes, amplitude and phase.
-        # Usually the frequency nodes are set to delta functions, but we also remove the
-        # the amplitude and phase delta functions if present.
-        # This avoids large log probs and log priors, since the density of a delta function
-        # at the sampled point is infinite. The delta functions do not affect the sampling,
-        # since they just fix certain parameters to constant values.
-        for ifo in calibration_priors:
-            for param_name, prior_obj in list(calibration_priors[ifo].items()):
-                if isinstance(prior_obj, DeltaFunction):
-                    calibration_priors[ifo].pop(param_name)
-
-        # Sample calibration parameters and calculate log_prob
-        num_samples = len(self.samples)
-        print(f"Sampling calibration parameters for {num_samples} samples.")
-
-        delta_log_prob = np.zeros(num_samples)
-
-        # Here we will sample the calibration parameters from the prior.
-        # We treat the *prior as the proposal* distribution and
-        # therefore add the log_prob of the sampled calibration parameters
-        # to the existing log_prob. We also will update the prior
-        # to include the calibration priors using the importance_sampling_metadata
-        prior_update = self.importance_sampling_metadata.get("prior_update", {})
-        for ifo, prior in calibration_priors.items():
-            draws = prior.sample(num_samples)
-
-            # Calculate log_prob of the calibration draws
-            delta_log_prob += prior.ln_prob(draws, axis=0)
-
-            # Add draws to samples
-            for param_name, values in draws.items():
-                self.samples[param_name] = np.array(values)
-
-            # Update prior_update dict with calibration parameters. This is for
-            # persistence when saving to hdf5
-            for param_name, prior_obj in prior.items():
-                # bilby's Prior.__repr__ isn't parseable for numpy scalars on numpy>2.0
-                # Upstream fix: https://github.com/bilby-dev/bilby/pull/1108
-                # Can be removed once dingo requires a bilby release that includes it.
-                for attr, value in prior_obj.get_instantiation_dict().items():
-                    if isinstance(value, np.generic):
-                        setattr(prior_obj, attr, value.item())
-                prior_update[param_name] = repr(prior_obj)
-
-        # Store prior_update for persistence on save/reload
-        self.importance_sampling_metadata["prior_update"] = prior_update
-
-        # Update log_prob (add the log probability of sampled calibration parameters)
-        self.samples["log_prob"] += delta_log_prob
-
-        # Rebuild the prior (which will include calibration priors from prior_update)
-        self._build_prior()
-
-    def sample_synthetic_phase(self, synthetic_phase_kwargs):
-        """
-        Sample a synthetic phase for the waveform. This is a post-processing step
-        applicable to samples theta in the full parameter space, except for the phase
-        parameter (i.e., 14D samples). It adds a `phase` column to the samples and
-        replaces `log_prob` with the joint proposal density
-        `log q(theta) + log q(phase | theta, d)`.
-
-        The phase distribution `q(phase | theta, d)` is constructed per sample by
-        `SyntheticPhaseFactor` from the likelihood on a phase grid (with a uniform
-        floor for mass coverage, so importance sampling remains exact even where the
-        conditional is approximate); the step runs as a chain rooted in the
-        within-prior proposal samples. Out-of-prior samples receive `phase = 0` and
-        `log_prob = nan`, and carry zero weight in importance sampling.
-
-        This method modifies self.samples in place. Afterwards the phase prior
-        rejoins `self.prior`.
-
-        Parameters
-        ----------
-        synthetic_phase_kwargs : dict
+        synthetic_phase_kwargs : dict, optional
             Keys: `n_grid` (required), `approximation_22_mode` (optional; default
             True assumes a (2, 2)-dominated waveform, otherwise the exact mode sum
             is used, which requires the waveform generator's
@@ -510,109 +446,186 @@ class Result(CoreResult):
             step only, selecting how the m-components are obtained -- see
             WaveformGenerator).
         """
-        if self.sampler_context is None:
-            raise ValueError(
-                "Synthetic phase requires a sampler context; this result does not "
-                "carry full model metadata."
-            )
-
-        self.synthetic_phase_kwargs = synthetic_phase_kwargs
-
-        approximation_22_mode = self.synthetic_phase_kwargs.get(
-            "approximation_22_mode", True
-        )
-
-        if not (
-            isinstance(self.phase_prior, Uniform)
-            and (self.phase_prior._minimum, self.phase_prior._maximum) == (0, 2 * np.pi)
-        ):
-            raise ValueError(
-                f"Phase prior should be uniform [0, 2pi) to work with synthetic phase."
-                f" However, the prior is {self.phase_prior}."
-            )
-
-        # Restrict to samples that are within the prior.
-        param_keys = [k for k, v in self.prior.items() if not isinstance(v, Constraint)]
-        theta = self.samples[param_keys]
-
-        # Compute log_prior only for non-DeltaFunction parameters.  DeltaFunction
-        # priors return ln_prob = +inf at the peak, which causes check_ln_prob to
-        # skip constraint evaluation and return +inf for every sample, so
-        # np.isfinite(log_prior) would be False for all samples.  Additionally, RA
-        # corrections (trigger_time vs model ref_time) can shift fixed parameters by
-        # tiny amounts, making DeltaFunction ln_prob = -inf for all samples.
-        prior_keys_for_lp = [
-            k
-            for k, v in self.prior.items()
-            if not isinstance(v, Constraint) and not isinstance(v, DeltaFunction)
-        ]
-        log_prior = self.prior.ln_prob(self.samples[prior_keys_for_lp], axis=0)
-        # Pass a plain dict so bilby's evaluate_constraints handles the argument
-        # correctly.  bilby's evaluate_constraints mishandles a DataFrame argument:
-        # its internal .values() call raises TypeError (DataFrame.values is a
-        # property, not a method), causing the try/except inside bilby to fall
-        # through to ``np.ones_like(out_sample)``, which returns a 2-D array and
-        # causes a shape-broadcast error in the subsequent element-wise multiplication.
-        constraints = self.prior.evaluate_constraints(dict(theta))
-        np.putmask(log_prior, constraints == 0, -np.inf)
-        within_prior = np.isfinite(log_prior)
-
-        # Put a cap on the number of processes to avoid overhead:
-        num_valid_samples = np.sum(within_prior)
-        num_processes = min(
-            self.synthetic_phase_kwargs.get("num_processes", 1), num_valid_samples // 10
-        )
-
-        print(f"Estimating synthetic phase for {num_valid_samples} samples.")
-        t0 = time.time()
-
-        # Synthetic phase as a chain over the sampler context: the root emits the
-        # within-prior proposal samples with their stored log-prob, and
-        # SyntheticPhaseFactor draws `phase`; the composer's ordinary log-prob
-        # fold returns the joint proposal density.
         from dingo.core.inference.composer import ChainComposer
-        from dingo.core.inference.steps import SampleTableFactor
+        from dingo.core.inference.steps import PriorFactor, SampleTableFactor
         from dingo.gw.inference.steps import SyntheticPhaseFactor
 
-        theta_within = theta.iloc[np.flatnonzero(within_prior)]
-        table = SampleTableFactor(
-            {k: theta_within[k].to_numpy() for k in theta_within.columns},
-            log_prob=self.samples["log_prob"].to_numpy()[within_prior],
-        )
-        wfg_updates = None
-        if "use_dft_phase_decomposition" in self.synthetic_phase_kwargs:
-            wfg_updates = {
-                "use_dft_phase_decomposition": self.synthetic_phase_kwargs[
-                    "use_dft_phase_decomposition"
-                ]
-            }
-        factor = SyntheticPhaseFactor(
-            conditioning=list(theta_within.columns),
-            n_grid=self.synthetic_phase_kwargs["n_grid"],
-            approximation_22_mode=approximation_22_mode,
-            uniform_weight=self.synthetic_phase_kwargs.get("uniform_weight", 0.01),
-            num_processes=num_processes,
-            use_base_domain=self.use_base_domain,
-            wfg_updates=wfg_updates,
-        )
-        chain = ChainComposer([table, factor])
-        # One phase draw per proposal sample (the table root is emitted once).
-        out, log_prob = chain.sample_and_log_prob(1, self.sampler_context)
+        if calibration_sampling_kwargs is None and synthetic_phase_kwargs is None:
+            raise ValueError(
+                "Pass calibration_sampling_kwargs and / or synthetic_phase_kwargs."
+            )
 
-        phase_array = np.full(len(theta), 0.0)
-        phase_array[within_prior] = out["phase"].cpu().numpy()
+        param_keys = [k for k, v in self.prior.items() if not isinstance(v, Constraint)]
+        theta = self.samples[param_keys]
+        within_prior = np.ones(len(theta), dtype=bool)
+
+        if synthetic_phase_kwargs is not None:
+            if self.sampler_context is None:
+                raise ValueError(
+                    "Synthetic phase requires a sampler context; this result does "
+                    "not carry full model metadata."
+                )
+            self.synthetic_phase_kwargs = synthetic_phase_kwargs
+            if not (
+                isinstance(self.phase_prior, Uniform)
+                and (self.phase_prior._minimum, self.phase_prior._maximum)
+                == (0, 2 * np.pi)
+            ):
+                raise ValueError(
+                    f"Phase prior should be uniform [0, 2pi) to work with synthetic "
+                    f"phase. However, the prior is {self.phase_prior}."
+                )
+
+            # Restrict to samples that are within the prior.
+            # Compute log_prior only for non-DeltaFunction parameters.  DeltaFunction
+            # priors return ln_prob = +inf at the peak, which causes check_ln_prob to
+            # skip constraint evaluation and return +inf for every sample, so
+            # np.isfinite(log_prior) would be False for all samples.  Additionally, RA
+            # corrections (trigger_time vs model ref_time) can shift fixed parameters
+            # by tiny amounts, making DeltaFunction ln_prob = -inf for all samples.
+            prior_keys_for_lp = [
+                k
+                for k, v in self.prior.items()
+                if not isinstance(v, Constraint) and not isinstance(v, DeltaFunction)
+            ]
+            log_prior = self.prior.ln_prob(self.samples[prior_keys_for_lp], axis=0)
+            # Pass a plain dict so bilby's evaluate_constraints handles the argument
+            # correctly.  bilby's evaluate_constraints mishandles a DataFrame
+            # argument: its internal .values() call raises TypeError (DataFrame.values
+            # is a property, not a method), causing the try/except inside bilby to
+            # fall through to ``np.ones_like(out_sample)``, which returns a 2-D array
+            # and causes a shape-broadcast error in the subsequent element-wise
+            # multiplication.
+            constraints = self.prior.evaluate_constraints(dict(theta))
+            np.putmask(log_prior, constraints == 0, -np.inf)
+            within_prior = np.isfinite(log_prior)
+
+        theta_within = theta.iloc[np.flatnonzero(within_prior)]
+        steps = [
+            SampleTableFactor(
+                {k: theta_within[k].to_numpy() for k in theta_within.columns},
+                log_prob=self.samples["log_prob"].to_numpy()[within_prior],
+            )
+        ]
+        new_columns = []
+
+        if calibration_sampling_kwargs is not None:
+            self.calibration_sampling_kwargs = calibration_sampling_kwargs
+
+            # Handle correction_type defaults
+            correction_type = calibration_sampling_kwargs.get("correction_type", "data")
+            if correction_type is None:
+                correction_type_dict = {
+                    ifo: CALIBRATION_CORRECTION_TYPE_LOOKUP[ifo]
+                    for ifo in self.interferometers
+                }
+            elif correction_type == "data" or correction_type == "template":
+                correction_type_dict = {
+                    ifo: correction_type for ifo in self.interferometers
+                }
+            elif isinstance(correction_type, dict):
+                correction_type_dict = correction_type
+            else:
+                raise ValueError(f"{correction_type} not understood")
+
+            # Build the calibration priors. As in Bilby, the spline nodes are placed
+            # across each detector's frequency range, the same range the likelihood
+            # masks the ASDs to. Without a range in the event metadata the domain
+            # bounds are used.
+            frequency_bounds = resolve_frequency_bounds(
+                self.interferometers,
+                self.domain,
+                minimum_frequency=self.minimum_frequency,
+                maximum_frequency=self.maximum_frequency,
+            )
+            prior_update = self.importance_sampling_metadata.get("prior_update", {})
+            for ifo in self.interferometers:
+                f_min, f_max = frequency_bounds[ifo]
+                calibration_prior = CalibrationPriorDict.from_envelope_file(
+                    calibration_sampling_kwargs["calibration_envelope"][ifo],
+                    f_min,
+                    f_max,
+                    calibration_sampling_kwargs["num_calibration_nodes"],
+                    ifo,
+                    correction_type=correction_type_dict[ifo],
+                )
+                # Remove the delta function priors on the frequency nodes (and on
+                # amplitude and phase, if present). Their density at the sampled
+                # point is infinite, and they only fix parameters to constants.
+                for param_name, prior_obj in list(calibration_prior.items()):
+                    if isinstance(prior_obj, DeltaFunction):
+                        calibration_prior.pop(param_name)
+                    else:
+                        # bilby's Prior.__repr__ isn't parseable for numpy scalars
+                        # on numpy>2.0. Upstream fix:
+                        # https://github.com/bilby-dev/bilby/pull/1108
+                        # Can be removed once dingo requires a bilby release that
+                        # includes it.
+                        for attr, value in prior_obj.get_instantiation_dict().items():
+                            if isinstance(value, np.generic):
+                                setattr(prior_obj, attr, value.item())
+                        # Recorded for persistence when saving to hdf5.
+                        prior_update[param_name] = repr(prior_obj)
+                # The prior is the proposal for the calibration parameters.
+                steps.append(PriorFactor(calibration_prior))
+                new_columns += list(calibration_prior.keys())
+            self.importance_sampling_metadata["prior_update"] = prior_update
+
+        if synthetic_phase_kwargs is not None:
+            wfg_updates = None
+            if "use_dft_phase_decomposition" in synthetic_phase_kwargs:
+                wfg_updates = {
+                    "use_dft_phase_decomposition": synthetic_phase_kwargs[
+                        "use_dft_phase_decomposition"
+                    ]
+                }
+            steps.append(
+                SyntheticPhaseFactor(
+                    conditioning=list(theta_within.columns) + new_columns,
+                    n_grid=synthetic_phase_kwargs["n_grid"],
+                    approximation_22_mode=synthetic_phase_kwargs.get(
+                        "approximation_22_mode", True
+                    ),
+                    uniform_weight=synthetic_phase_kwargs.get("uniform_weight", 0.01),
+                    # Put a cap on the number of processes to avoid overhead.
+                    num_processes=min(
+                        synthetic_phase_kwargs.get("num_processes", 1),
+                        np.sum(within_prior) // 10,
+                    ),
+                    use_base_domain=self.use_base_domain,
+                    wfg_updates=wfg_updates,
+                )
+            )
+            new_columns.append("phase")
+
+        print(
+            f"Sampling {', '.join(type(s).__name__ for s in steps[1:])} for "
+            f"{np.sum(within_prior)} samples."
+        )
+        t0 = time.time()
+        # One draw per proposal sample (the table root is emitted once).
+        out, log_prob = ChainComposer(steps).sample_and_log_prob(
+            1, self.sampler_context
+        )
+
+        # Out-of-prior samples get placeholder values 0 (finite, so that their prior
+        # is -inf rather than nan) and log_prob = nan.
+        for k in new_columns:
+            column = np.zeros(len(theta))
+            column[within_prior] = out[k].cpu().numpy()
+            self.samples[k] = column
         log_prob_array = np.full(len(theta), np.nan)
         log_prob_array[within_prior] = log_prob.cpu().numpy()
-        self.samples["phase"] = phase_array
         self.samples["log_prob"] = log_prob_array
 
-        # Insert the phase prior in the prior, since now the phase is present.
-        self.prior["phase"] = self.phase_prior
-        self.phase_prior = None
-        # Any previously built likelihood does not describe the now-phase-full
-        # samples; importance sampling rebuilds with its own marginalization
-        # settings.
-        self.likelihood = None
+        # Rebuild the prior: it now includes the calibration priors (from
+        # prior_update), and the phase prior rejoins it once phase is in the samples.
+        self._build_prior()
+        if synthetic_phase_kwargs is not None:
+            # Any previously built likelihood does not describe the now-phase-full
+            # samples; importance sampling rebuilds with its own marginalization
+            # settings.
+            self.likelihood = None
         print(f"Done. This took {time.time() - t0:.2f} s.")
 
     def get_samples_bilby_phase(self, num_processes=1):

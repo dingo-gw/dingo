@@ -521,3 +521,71 @@ def test_old_schema_settings_are_converted_on_load():
     assert tokenization == {"num_tokens_per_block": 8, "normalize_position": False}
     waveform, position, token_mask = result.sampler_context.prepared_data()
     assert position.shape == (2 * 8, 3)
+
+
+def test_calibration_and_synthetic_phase_run_as_one_chain(tmp_path):
+    # Calibration is drawn first in the chain, so the synthetic phase is conditioned
+    # on it: log_prob = stored + calibration prior + log q(phase | theta, recalib).
+    from dingo.gw.inference.steps import SyntheticPhaseFactor
+    import torch
+
+    bilby_random.seed(0)
+    np.random.seed(0)
+    result = make_gw_result(n=6, drop_phase=True)
+    # One sample outside the prior, which is skipped and carries zero weight.
+    result.samples.loc[5, "theta_jn"] = -1.0
+    log_prob_before = result.samples["log_prob"].to_numpy().copy()
+    theta_keys = [k for k, v in result.prior.items() if not isinstance(v, Constraint)]
+
+    kwargs = {"n_grid": 64, "approximation_22_mode": True}
+    result.sample_proposal_extensions(
+        calibration_sampling_kwargs=_calibration_kwargs(tmp_path),
+        synthetic_phase_kwargs=kwargs,
+    )
+
+    recalib = [c for c in result.samples.columns if c.startswith("recalib_")]
+    assert recalib and "phase" in result.prior and result.phase_prior is None
+    assert all(c in result.prior for c in recalib)
+
+    inside = result.samples.iloc[:5]
+    assert np.isnan(result.samples.loc[5, "log_prob"])
+    assert (result.samples.loc[5, recalib + ["phase"]] == 0.0).all()
+
+    log_q_calibration = PriorDict({k: result.prior[k] for k in recalib}).ln_prob(
+        inside[recalib], axis=0
+    )
+    factor = SyntheticPhaseFactor(
+        conditioning=theta_keys + recalib, n_grid=64, approximation_22_mode=True
+    )
+    given = {k: torch.as_tensor(inside[k].to_numpy()) for k in theta_keys + recalib}
+    log_q_phase = factor.log_prob(
+        {"phase": torch.as_tensor(inside["phase"].to_numpy())},
+        result.sampler_context,
+        given,
+    ).numpy()
+    np.testing.assert_allclose(
+        inside["log_prob"].to_numpy(),
+        log_prob_before[:5] + log_q_calibration + log_q_phase,
+        rtol=1e-5,
+    )
+
+    # The phase distribution depends on the drawn calibration.
+    given_uncalibrated = {k: given[k] for k in theta_keys}
+    log_q_phase_uncalibrated = (
+        SyntheticPhaseFactor(
+            conditioning=theta_keys, n_grid=64, approximation_22_mode=True
+        )
+        .log_prob(
+            {"phase": torch.as_tensor(inside["phase"].to_numpy())},
+            result.sampler_context,
+            given_uncalibrated,
+        )
+        .numpy()
+    )
+    assert not np.allclose(log_q_phase, log_q_phase_uncalibrated)
+
+    # Importance sampling gives the out-of-prior sample zero weight.
+    result.importance_sample()
+    weights = result.samples["weights"].to_numpy()
+    assert np.isfinite(result.log_evidence)
+    assert weights[5] == 0.0 and np.all(weights[:5] > 0)

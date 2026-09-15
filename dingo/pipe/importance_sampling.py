@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 """Script to importance sample based on Dingo samples. Based on bilby_pipe data
 analysis script."""
+
 import os
 import sys
 
@@ -238,18 +239,22 @@ class ImportanceSamplingInput(Input):
             )
             self.result.update_prior(self.prior_dict_updates)
 
+        # Calibration parameters and synthetic phase are drawn in one chain, the
+        # calibration first, so that the phase is conditioned on it.
+        synthetic_phase_kwargs = None
         if "synthetic_phase" in self.importance_sampling_settings:
-            logger.info("Sampling synthetic phase.")
             synthetic_phase_kwargs = {
                 **self.importance_sampling_settings["synthetic_phase"],
                 "num_processes": self.request_cpus,
             }
-            self.result.sample_synthetic_phase(synthetic_phase_kwargs)
-
-        if "calibration_sampling_settings" in self.importance_sampling_settings:
-            logger.info("Sampling calibration parameters for importance sampling.")
-            self.result.sample_calibration_parameters(
-                self.importance_sampling_settings["calibration_sampling_settings"]
+        calibration_sampling_kwargs = self.importance_sampling_settings.get(
+            "calibration_sampling_settings"
+        )
+        if synthetic_phase_kwargs or calibration_sampling_kwargs:
+            logger.info("Sampling calibration parameters and / or synthetic phase.")
+            self.result.sample_proposal_extensions(
+                calibration_sampling_kwargs=calibration_sampling_kwargs,
+                synthetic_phase_kwargs=synthetic_phase_kwargs,
             )
 
         self.result.importance_sample(
