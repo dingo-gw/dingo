@@ -67,7 +67,7 @@ class SyntheticPhaseFactor(Factor):
     `(d | h(phase=0))`. With `False` the modes are summed exactly, which requires
     the waveform generator's `spin_conversion_phase = 0`. The entry points differ
     on the default: this factor and `dingo_pipe`'s `PhaseRecoveryDefault` use the
-    exact mode, while `Result.sample_synthetic_phase` defaults to the (2, 2)
+    exact mode, while `Result.sample_proposal_extensions` defaults to the (2, 2)
     approximation when the key is omitted.
     """
 

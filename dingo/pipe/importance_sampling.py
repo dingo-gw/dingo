@@ -251,7 +251,10 @@ class ImportanceSamplingInput(Input):
             "calibration_sampling_settings"
         )
         if synthetic_phase_kwargs or calibration_sampling_kwargs:
-            logger.info("Sampling calibration parameters and / or synthetic phase.")
+            if synthetic_phase_kwargs:
+                logger.info("Sampling synthetic phase")
+            elif calibration_sampling_kwargs: 
+                logger.info("Sampling calibration parameters")
             self.result.sample_proposal_extensions(
                 calibration_sampling_kwargs=calibration_sampling_kwargs,
                 synthetic_phase_kwargs=synthetic_phase_kwargs,

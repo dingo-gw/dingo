@@ -199,12 +199,14 @@ def test_importance_sample_requires_log_prob():
         result.importance_sample()
 
 
-def test_sample_synthetic_phase_adds_phase_column():
+def test_synthetic_phase_adds_phase_column():
     result = make_gw_result(drop_phase=True)
     assert "phase" not in result.samples.columns
     log_prob_before = result.samples["log_prob"].to_numpy().copy()
 
-    result.sample_synthetic_phase({"n_grid": 16, "approximation_22_mode": True})
+    result.sample_proposal_extensions(
+        synthetic_phase_kwargs={"n_grid": 16, "approximation_22_mode": True}
+    )
 
     assert "phase" in result.samples.columns
     phase = result.samples["phase"].to_numpy()
@@ -213,12 +215,12 @@ def test_sample_synthetic_phase_adds_phase_column():
     assert not np.array_equal(result.samples["log_prob"].to_numpy(), log_prob_before)
 
 
-def test_sample_synthetic_phase_requires_uniform_phase_prior():
+def test_synthetic_phase_requires_uniform_phase_prior():
     # When `phase` is in the samples, the phase prior is not split off (it is None),
     # so synthetic phase sampling is not applicable and must raise.
     result = make_gw_result(drop_phase=False)
     with pytest.raises(ValueError, match="[Pp]hase prior"):
-        result.sample_synthetic_phase({"n_grid": 16})
+        result.sample_proposal_extensions(synthetic_phase_kwargs={"n_grid": 16})
 
 
 # ---------------------------------------------------------------------------
@@ -361,7 +363,7 @@ def test_update_prior_round_trips_through_file(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# sample_calibration_parameters
+# calibration sampling (sample_proposal_extensions)
 # ---------------------------------------------------------------------------
 
 
@@ -400,13 +402,13 @@ def _calibration_kwargs(tmp_path, correction_type="data", num_nodes=5):
     }
 
 
-def test_sample_calibration_parameters_adds_recalib_columns(tmp_path):
+def test_calibration_sampling_adds_recalib_columns(tmp_path):
     result = make_gw_result()
     log_prob_before = result.samples["log_prob"].to_numpy().copy()
     n_nodes = 5
 
-    result.sample_calibration_parameters(
-        _calibration_kwargs(tmp_path, num_nodes=n_nodes)
+    result.sample_proposal_extensions(
+        calibration_sampling_kwargs=_calibration_kwargs(tmp_path, num_nodes=n_nodes)
     )
 
     # Amplitude + phase nodes per detector (the frequency nodes are delta functions
@@ -420,28 +422,32 @@ def test_sample_calibration_parameters_adds_recalib_columns(tmp_path):
     assert any("recalib" in key for key in result.prior.keys())
 
 
-def test_sample_calibration_parameters_invalid_correction_type():
+def test_calibration_sampling_invalid_correction_type():
     result = make_gw_result()
     # Parsed before any envelope file is read, so no files are needed.
     with pytest.raises(ValueError, match="not understood"):
-        result.sample_calibration_parameters({"correction_type": "bogus"})
+        result.sample_proposal_extensions(
+            calibration_sampling_kwargs={"correction_type": "bogus"}
+        )
 
 
 @pytest.mark.parametrize(
     "correction_type",
     ["data", "template", {"H1": "data", "L1": "template"}, None],
 )
-def test_sample_calibration_parameters_correction_type_variants(
+def test_calibration_sampling_correction_type_variants(
     tmp_path, correction_type
 ):
     result = make_gw_result()
-    result.sample_calibration_parameters(
-        _calibration_kwargs(tmp_path, correction_type=correction_type)
+    result.sample_proposal_extensions(
+        calibration_sampling_kwargs=_calibration_kwargs(
+            tmp_path, correction_type=correction_type
+        )
     )
     assert any(c.startswith("recalib_") for c in result.samples.columns)
 
 
-def test_sample_calibration_parameters_nodes_span_event_range(tmp_path):
+def test_calibration_sampling_nodes_span_event_range(tmp_path):
     # The calibration nodes follow the event's per-detector analysis range (the
     # range the likelihood masks its ASDs to), as Bilby's do, not the domain bounds.
     from bilby.gw.prior import CalibrationPriorDict
@@ -453,7 +459,7 @@ def test_sample_calibration_parameters_nodes_span_event_range(tmp_path):
     result = make_gw_result(event_metadata=event_metadata)
     n_nodes = 5
     kwargs = _calibration_kwargs(tmp_path, num_nodes=n_nodes)
-    result.sample_calibration_parameters(kwargs)
+    result.sample_proposal_extensions(calibration_sampling_kwargs=kwargs)
     for ifo in DETECTORS:
         expected = CalibrationPriorDict.from_envelope_file(
             kwargs["calibration_envelope"][ifo],
