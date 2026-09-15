@@ -107,7 +107,7 @@ its own log density. Note that network standardization is applied internally, so
   earlier (e.g., a chain adding the synthetic phase to previously-drawn samples, or for a BNS chirp-mass scan).
 
 `PriorFactor`
-: An unconditioned factor that draws a block of parameters from a prior, which is then the proposal for that block. It is used to add detector calibration parameters to previously-drawn samples, before the synthetic phase, in `Result.sample_proposal_extensions`.
+: An unconditioned factor that draws a block of parameters from a prior, which is then the proposal for that block.
 
 `SyntheticPhaseFactor`, `GNPEKernelFactor`, `GNPEFlowFactor`
 : The gravitational-wave factors, defined in `dingo.gw.inference.steps`.

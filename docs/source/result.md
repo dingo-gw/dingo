@@ -22,13 +22,13 @@ Density recovery can also be achieved using an unconditional density estimator f
 
 It is often challenging for Dingo to learn to model the `phase` parameter $\phi_c$. For this reason, we usually marginalize over it in training by excluding it from the list of `inference_parameters`. The phase is, however, required for importance sampling unless using also a phase-marginalized likelihood (which is approximate except under special circumstances).
 
-The Dingo `gw.Result` class includes a method `sample_synthetic_phase()` which produces a $\phi_c$ sample from a $\phi_c$-marginalized sample. It does so by evaluating the likelihood on a $\phi_c$-grid and then sampling from the associated 1D distribution. The `log_prob` value for the sample is also corrected to reflect the sampled $\phi_c$. Speed is ensured by caching waveform modes and evaluating the polarizations for different $\phi_c$. For further details, see the Supplemental Material of {cite:p}`Dax:2022pxd`.
+The Dingo `gw.Result` class includes a method `sample_proposal_extensions()` which, given `synthetic_phase_kwargs`, produces a $\phi_c$ sample from a $\phi_c$-marginalized sample. It does so by evaluating the likelihood on a $\phi_c$-grid and then sampling from the associated 1D distribution. The `log_prob` value for the sample is also corrected to reflect the sampled $\phi_c$. Speed is ensured by caching waveform modes and evaluating the polarizations for different $\phi_c$. For further details, see the Supplemental Material of {cite:p}`Dax:2022pxd`.
 
 This method should be run *after* recovering the density, since in particular it applies a correction to the density.
 
 ### Configuration
 
-The method `sample_synthetic_phase()` takes a kwargs argument. An example configuration is
+The `synthetic_phase_kwargs` argument of `sample_proposal_extensions()` is a dict. An example configuration is
 ```yaml
 approximation_22_mode: false
 n_grid: 5001
