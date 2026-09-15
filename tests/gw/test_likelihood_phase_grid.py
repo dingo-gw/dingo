@@ -123,3 +123,32 @@ def test_terms_reproduce_direct_likelihood_at_off_grid_phase(likelihood):
             likelihood.phase_grid_terms(THETA), phases
         ),
     )
+
+
+def test_stacked_terms_match_per_sample_evaluation(likelihood):
+    """Terms of several samples, stacked along a batch dimension, evaluate to the
+    per-sample results, on a shared grid and at one phase per sample."""
+    terms_per_sample = [
+        likelihood.phase_grid_terms({**THETA, "mass_1": m1}) for m1 in (45.0, 50.0)
+    ]
+    terms = {
+        "m_vals": terms_per_sample[0]["m_vals"],
+        "deltas": terms_per_sample[0]["deltas"],
+        **{
+            k: np.array([t[k] for t in terms_per_sample])
+            for k in ("kappa2_modes", "rho2opt_crossterms", "rho2opt_const")
+        },
+    }
+    grid = np.linspace(0, 2 * np.pi, 7)
+    drawn = np.array([0.3, 4.2])
+    on_grid = likelihood.log_likelihood_from_phase_grid_terms(terms, grid)
+    at_drawn = likelihood.log_likelihood_from_phase_grid_terms(terms, drawn[:, None])
+    assert on_grid.shape == (2, 7) and at_drawn.shape == (2, 1)
+    for i, t in enumerate(terms_per_sample):
+        np.testing.assert_allclose(
+            on_grid[i], likelihood.log_likelihood_from_phase_grid_terms(t, grid)
+        )
+        np.testing.assert_allclose(
+            at_drawn[i],
+            likelihood.log_likelihood_from_phase_grid_terms(t, drawn[i : i + 1]),
+        )

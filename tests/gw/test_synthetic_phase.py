@@ -9,10 +9,11 @@ from bilby.core.utils import random as bilby_random
 
 from dingo.gw.inference.context import GWSamplerContext
 from dingo.gw.inference.steps import SyntheticPhaseFactor
+from dingo.gw.likelihood import StationaryGaussianGWLikelihood
 
 
 class _MockLikelihood:
-    """Exposes the two methods the factor uses, deterministic in `chirp_mass`."""
+    """Exposes the methods the factor uses, deterministic in `chirp_mass`."""
 
     def __init__(self):
         self.phase_grid = None
@@ -21,16 +22,21 @@ class _MockLikelihood:
         # (2, 2)-approx path: one complex overlap (d | h) per row.
         return np.array([complex(cm, 0.5) for cm in theta["chirp_mass"].to_numpy()])
 
-    def log_likelihood_phase_grid(self, theta):
-        # exact path: a (n_grid,) log-likelihood per row (theta is a row dict).
-        return np.cos(self.phase_grid) * float(theta["chirp_mass"])
-
     def phase_grid_terms(self, theta):
-        # cached exact path: the "terms" are just chirp_mass.
-        return float(theta["chirp_mass"])
+        # exact path: a single m = 1 mode with (d | mu_1) = chirp_mass, so that
+        # log L(phase) = chirp_mass * cos(phase).
+        return {
+            "m_vals": np.array([1]),
+            "kappa2_modes": np.array([complex(theta["chirp_mass"])]),
+            "rho2opt_const": 0.0,
+            "deltas": np.array([], dtype=int),
+            "rho2opt_crossterms": np.array([], dtype=complex),
+        }
 
-    def log_likelihood_from_phase_grid_terms(self, terms, phases):
-        return np.cos(np.asarray(phases)) * terms
+    log_Zn = 0.0
+    log_likelihood_from_phase_grid_terms = (
+        StationaryGaussianGWLikelihood.log_likelihood_from_phase_grid_terms
+    )
 
 
 class _MockContext:
