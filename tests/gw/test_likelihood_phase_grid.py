@@ -96,3 +96,30 @@ def test_phase_grid_is_2pi_periodic(likelihood):
         likelihood.log_likelihood_phase_grid(THETA, phases=phases),
         rtol=1e-9,
     )
+
+
+def test_terms_reproduce_direct_likelihood_at_off_grid_phase(likelihood):
+    """The likelihood from phase_grid_terms() at arbitrary phases equals the direct
+    likelihood there, including a calibration curve. This is what lets importance
+    sampling reuse the value cached by the synthetic phase."""
+    rng = np.random.default_rng(0)
+    calibration = {
+        f"recalib_{ifo}_{q}_{i}": rng.normal(scale=0.05)
+        for ifo in ["H1", "L1"]
+        for q in ["amplitude", "phase"]
+        for i in range(5)
+    }
+    phases = np.array([0.37, 2.9, 5.81])
+    for extra in ({}, calibration):
+        theta = {**THETA, **extra}
+        terms = likelihood.phase_grid_terms(theta)
+        from_terms = likelihood.log_likelihood_from_phase_grid_terms(terms, phases)
+        direct = [likelihood.log_likelihood({**theta, "phase": p}) for p in phases]
+        np.testing.assert_allclose(from_terms, direct, rtol=1e-9)
+    # The calibration curve changes the likelihood.
+    assert not np.allclose(
+        from_terms,
+        likelihood.log_likelihood_from_phase_grid_terms(
+            likelihood.phase_grid_terms(THETA), phases
+        ),
+    )

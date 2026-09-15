@@ -372,6 +372,31 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         return log_likelihoods
 
     def _log_likelihood_phase_grid_mode_decomposed(self, theta, phases=None):
+        if phases is None:
+            phases = self.phase_grid
+        terms = self.phase_grid_terms(theta)
+        return self.log_likelihood_from_phase_grid_terms(terms, phases)
+
+    def phase_grid_terms(self, theta: dict) -> dict:
+        """
+        Compute, from a single waveform evaluation at phase = 0, the inner products
+        from which the log likelihood follows at any phase, see
+        `log_likelihood_from_phase_grid_terms`.
+
+        Parameters
+        ----------
+        theta: dict
+            BBH parameters. A phase entry is ignored.
+
+        Returns
+        -------
+        dict
+            m_vals: (M,) the m-components of the signal;
+            kappa2_modes: (M,) complex, (d, mu_m) per component;
+            rho2opt_const: float, sum_m (mu_m, mu_m);
+            deltas: (P,) the distinct mode differences n - m, for m < n;
+            rho2opt_crossterms: (P,) complex, sum of 2 (mu_m, mu_n) per difference.
+        """
         # TODO: Implement for time marginalization
         if self.return_aux_snr:
             raise NotImplementedError
@@ -393,8 +418,6 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
             )
 
         d = self.whitened_strains
-        if phases is None:
-            phases = self.phase_grid
 
         # Step 1: Compute signal for phase = 0, separated into the m-contributions from
         # the individual modes.
@@ -457,53 +480,58 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
                 ]
             )
 
-        # Vectorised evaluation over the phase grid. Per phase ph:
-        #   rho2opt(ph) = rho2opt_const
-        #       + sum_{(m,n)} (crossterm_{m,n} * exp(-i*(n-m)*ph)).real
-        #   kappa2(ph)  = sum_m (kappa2_modes[m] * exp(-i*m*ph)).real
-        #
         # The cross terms only depend on the mode difference delta = n - m, so we
-        # accumulate them by delta before touching the grid. For m in -4..4 this
-        # collapses 36 pairs onto 8 distinct deltas, i.e. a 4.5x smaller
-        # exponential matrix for identical arithmetic.
-        phases_arr = np.asarray(phases)
-
+        # accumulate them by delta. For m in -4..4 this collapses 36 pairs onto 8
+        # distinct deltas, i.e. a 4.5x smaller exponential matrix in the evaluation.
         crossterms_by_delta = defaultdict(complex)
         for (m, n), c in rho2opt_crossterms.items():
             crossterms_by_delta[n - m] += c
-        deltas = np.array(sorted(crossterms_by_delta))
-        cs = np.array([crossterms_by_delta[delta] for delta in deltas])
-        rho2opt = rho2opt_const + (
-            cs[:, None] * np.exp(-1j * deltas[:, None] * phases_arr[None, :])
-        ).real.sum(axis=0)
+        deltas = sorted(crossterms_by_delta)
 
-        m_arr = np.array(m_vals)
-        k_arr = np.array([kappa2_modes[m] for m in m_vals])
+        return {
+            "m_vals": np.array(m_vals),
+            "kappa2_modes": np.array([kappa2_modes[m] for m in m_vals]),
+            "rho2opt_const": rho2opt_const,
+            "deltas": np.array(deltas),
+            "rho2opt_crossterms": np.array(
+                [crossterms_by_delta[delta] for delta in deltas]
+            ),
+        }
+
+    def log_likelihood_from_phase_grid_terms(
+        self, terms: dict, phases: np.ndarray
+    ) -> np.ndarray:
+        """
+        Evaluate the log likelihood at the given phases from the terms computed by
+        `phase_grid_terms`, without a waveform evaluation. Per phase ph:
+
+            rho2opt(ph) = rho2opt_const
+                + sum_delta (crossterm_delta * exp(-i * delta * ph)).real
+            kappa2(ph)  = sum_m (kappa2_modes[m] * exp(-i * m * ph)).real
+            log L(ph)   = log_Zn + kappa2(ph) - rho2opt(ph) / 2
+
+        Parameters
+        ----------
+        terms: dict
+            As returned by `phase_grid_terms`.
+        phases: np.ndarray
+            (G,) phases.
+
+        Returns
+        -------
+        np.ndarray
+            (G,) log likelihoods.
+        """
+        phases = np.asarray(phases)
+        rho2opt = terms["rho2opt_const"] + (
+            terms["rho2opt_crossterms"][:, None]
+            * np.exp(-1j * terms["deltas"][:, None] * phases[None, :])
+        ).real.sum(axis=0)
         kappa2 = (
-            k_arr[:, None] * np.exp(-1j * m_arr[:, None] * phases_arr[None, :])
+            terms["kappa2_modes"][:, None]
+            * np.exp(-1j * terms["m_vals"][:, None] * phases[None, :])
         ).real.sum(axis=0)
-
-        log_likelihoods = self.log_Zn + kappa2 - 0.5 * rho2opt
-
-            # # comment out for cross check:
-            # mu = sum_contributions_m(pol_m, phase_shift=phase)
-            # rho2opt_ref = sum([inner_product(mu_ifo, mu_ifo) for mu_ifo in mu.values()])
-            # kappa2_ref = sum(
-            #     [
-            #         inner_product(d_ifo, mu_ifo)
-            #         for d_ifo, mu_ifo in zip(d.values(), mu.values())
-            #     ]
-            # )
-            # assert rho2opt - rho2opt_ref < 1e-10
-            # assert kappa2 - kappa2_ref < 1e-10
-
-        # # Test that this works:
-        # idx = len(phases) // 3
-        # phase = phases[idx]
-        # log_likelihood_ref = self.log_likelihood({**theta, "phase": phase})
-        # print(log_likelihoods[idx] - log_likelihood_ref)
-
-        return log_likelihoods
+        return self.log_Zn + kappa2 - 0.5 * rho2opt
 
     def _log_likelihood_phase_marginalized(self, theta):
         """

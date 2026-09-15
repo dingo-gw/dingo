@@ -239,14 +239,41 @@ class ImportanceSamplingInput(Input):
             )
             self.result.update_prior(self.prior_dict_updates)
 
+        likelihood_kwargs = dict(
+            time_marginalization_kwargs=self.importance_sampling_settings.get(
+                "time_marginalization"
+            ),
+            phase_marginalization_kwargs=self.importance_sampling_settings.get(
+                "phase_marginalization"
+            ),
+            calibration_marginalization_kwargs=self.calibration_marginalization_kwargs,
+        )
+
         # Calibration parameters and synthetic phase are drawn in one chain, the
         # calibration first, so that the phase is conditioned on it.
         synthetic_phase_kwargs = None
+        use_cached_log_likelihood = False
         if "synthetic_phase" in self.importance_sampling_settings:
             synthetic_phase_kwargs = {
                 **self.importance_sampling_settings["synthetic_phase"],
                 "num_processes": self.request_cpus,
             }
+            # The synthetic phase can cache the log likelihood at the drawn phase for
+            # importance sampling, unless it uses the (2, 2)-mode approximation or
+            # importance sampling uses a marginalized likelihood.
+            use_cached_log_likelihood = synthetic_phase_kwargs.get(
+                "cache_log_likelihood", True
+            )
+            if use_cached_log_likelihood and (
+                synthetic_phase_kwargs.get("approximation_22_mode", True)
+                or any(likelihood_kwargs.values())
+            ):
+                logger.info(
+                    "Not caching the synthetic phase log likelihood (incompatible "
+                    "with approximation_22_mode or a marginalized likelihood)."
+                )
+                use_cached_log_likelihood = False
+            synthetic_phase_kwargs["cache_log_likelihood"] = use_cached_log_likelihood
         calibration_sampling_kwargs = self.importance_sampling_settings.get(
             "calibration_sampling_settings"
         )
@@ -262,13 +289,8 @@ class ImportanceSamplingInput(Input):
 
         self.result.importance_sample(
             num_processes=self.request_cpus,
-            time_marginalization_kwargs=self.importance_sampling_settings.get(
-                "time_marginalization"
-            ),
-            phase_marginalization_kwargs=self.importance_sampling_settings.get(
-                "phase_marginalization"
-            ),
-            calibration_marginalization_kwargs=self.calibration_marginalization_kwargs,
+            use_cached_log_likelihood=use_cached_log_likelihood,
+            **likelihood_kwargs,
         )
 
         self.result.print_summary()

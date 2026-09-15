@@ -254,7 +254,12 @@ class Result(DingoDataset):
         else:
             return None
 
-    def importance_sample(self, num_processes: int = 1, **likelihood_kwargs):
+    def importance_sample(
+        self,
+        num_processes: int = 1,
+        use_cached_log_likelihood: bool = False,
+        **likelihood_kwargs,
+    ):
         """
         Calculate importance weights for samples.
 
@@ -285,6 +290,12 @@ class Result(DingoDataset):
         num_processes : int
             Number of parallel processes to use when calculating likelihoods. (This is
             the most expensive task.)
+        use_cached_log_likelihood : bool, default False
+            Use the log likelihoods already in `self.samples["log_likelihood"]`
+            (e.g., cached by the synthetic phase) instead of evaluating the
+            likelihood. Every sample within the prior must have a finite cached
+            value. Not compatible with marginalization, since the cached values are
+            not marginalized.
         likelihood_kwargs : dict
             kwargs that are forwarded to the likelihood constructor. E.g., options for
             marginalization.
@@ -299,6 +310,17 @@ class Result(DingoDataset):
                 "it is necessary to train an unconditional flow based on the existing "
                 "samples. This can then be sampled with log probability."
             )
+        if use_cached_log_likelihood:
+            if "log_likelihood" not in self.samples:
+                raise KeyError(
+                    "use_cached_log_likelihood=True requires log likelihoods stored "
+                    "in the samples."
+                )
+            if any(likelihood_kwargs.values()):
+                raise ValueError(
+                    f"use_cached_log_likelihood=True cannot be combined with the "
+                    f"likelihood options {likelihood_kwargs}."
+                )
 
         self._build_likelihood(**likelihood_kwargs)
 
@@ -330,14 +352,25 @@ class Result(DingoDataset):
         # it may not even be possible to generate signals outside the prior (e.g.,
         # for BH spins > 1).
         valid_samples = np.isfinite(log_prior + delta_log_prob_target)
-        theta = theta.iloc[valid_samples]
-
-        print(f"Calculating {len(theta)} likelihoods.")
-        t0 = time.time()
-        log_likelihood = self.likelihood.log_likelihood_multi(
-            theta, num_processes=num_processes
-        )
-        print(f"Done. This took {time.time() - t0:.2f} seconds.")
+        if use_cached_log_likelihood:
+            log_likelihood = self.samples["log_likelihood"].to_numpy()[valid_samples]
+            if not np.all(np.isfinite(log_likelihood)):
+                raise ValueError(
+                    f"{np.sum(~np.isfinite(log_likelihood))} samples within the prior "
+                    f"have no cached log likelihood. Were the samples or the prior "
+                    f"changed after the log likelihoods were cached?"
+                )
+            print(f"Using {len(log_likelihood)} cached log likelihoods.")
+            # Samples outside the prior carry no log likelihood, as without the cache.
+            self.samples["log_likelihood"] = np.nan
+        else:
+            theta = theta.iloc[valid_samples]
+            print(f"Calculating {len(theta)} likelihoods.")
+            t0 = time.time()
+            log_likelihood = self.likelihood.log_likelihood_multi(
+                theta, num_processes=num_processes
+            )
+            print(f"Done. This took {time.time() - t0:.2f} seconds.")
 
         self.log_noise_evidence = self.likelihood.log_Zn
         self.samples["log_prior"] = log_prior
