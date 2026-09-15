@@ -510,27 +510,33 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
             kappa2(ph)  = sum_m (kappa2_modes[m] * exp(-i * m * ph)).real
             log L(ph)   = log_Zn + kappa2(ph) - rho2opt(ph) / 2
 
+        The terms of several samples can be evaluated at once by stacking
+        `kappa2_modes`, `rho2opt_crossterms` and `rho2opt_const` along a leading
+        batch dimension N (the mode orders `m_vals` and `deltas` are shared).
+
         Parameters
         ----------
         terms: dict
-            As returned by `phase_grid_terms`.
+            As returned by `phase_grid_terms`, optionally stacked.
         phases: np.ndarray
-            (G,) phases.
+            (G,) phases, shared by all samples, or (N, G) phases per sample.
 
         Returns
         -------
         np.ndarray
-            (G,) log likelihoods.
+            (G,) log likelihoods for unstacked terms, else (N, G).
         """
         phases = np.asarray(phases)
-        rho2opt = terms["rho2opt_const"] + (
-            terms["rho2opt_crossterms"][:, None]
-            * np.exp(-1j * terms["deltas"][:, None] * phases[None, :])
-        ).real.sum(axis=0)
+        # Phasors exp(-i * order * ph) of shape (..., orders, G), contracted with the
+        # coefficients of shape (..., 1, orders).
         kappa2 = (
-            terms["kappa2_modes"][:, None]
-            * np.exp(-1j * terms["m_vals"][:, None] * phases[None, :])
-        ).real.sum(axis=0)
+            terms["kappa2_modes"][..., None, :]
+            @ np.exp(-1j * terms["m_vals"][:, None] * phases[..., None, :])
+        )[..., 0, :].real
+        rho2opt = np.asarray(terms["rho2opt_const"])[..., None] + (
+            terms["rho2opt_crossterms"][..., None, :]
+            @ np.exp(-1j * terms["deltas"][:, None] * phases[..., None, :])
+        )[..., 0, :].real
         return self.log_Zn + kappa2 - 0.5 * rho2opt
 
     def _log_likelihood_phase_marginalized(self, theta):

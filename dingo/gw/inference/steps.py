@@ -163,13 +163,10 @@ class SyntheticPhaseFactor(Factor):
             likelihood = context.likelihood(
                 use_base_domain=self.use_base_domain, wfg_updates=self.wfg_updates
             )
-            log_likelihood = [
-                likelihood.log_likelihood_from_phase_grid_terms(t, [p])[0]
-                for t, p in zip(terms, new_phase)
-            ]
-            samples["log_likelihood"] = torch.as_tensor(
-                np.array(log_likelihood), device=device
-            )
+            log_likelihood = likelihood.log_likelihood_from_phase_grid_terms(
+                terms, new_phase[:, None]
+            )[:, 0]
+            samples["log_likelihood"] = torch.as_tensor(log_likelihood, device=device)
         logger.info(f"Done. This took {time.time() - t0:.2f} s.")
         return samples, torch.as_tensor(log_prob, device=device)
 
@@ -199,8 +196,8 @@ class SyntheticPhaseFactor(Factor):
     def _phase_profile(self, given, context):
         """The phase grid and the mass-covered (un-normalized) phase distribution, one row
         per sample: evaluate `log L` on the grid, exponentiate (shifted by the per-row
-        max), and add the uniform floor. Also returns the per-sample mode terms of the
-        likelihood if `cache_log_likelihood` (else `None`)."""
+        max), and add the uniform floor. Also returns the stacked mode terms of the
+        likelihood in exact mode (else `None`)."""
         theta = pd.DataFrame({k: _to_numpy(v) for k, v in given.items()})
         likelihood = context.likelihood(
             use_base_domain=self.use_base_domain, wfg_updates=self.wfg_updates
@@ -216,24 +213,23 @@ class SyntheticPhaseFactor(Factor):
             phase_log_posterior = np.outer(d_inner_h, np.exp(2j * phases)).real
         else:
             # Exact: each mode m contributes exp(-i m phase); needs spin_conversion_phase=0.
-            likelihood.phase_grid = phases
-            if self.cache_log_likelihood:
-                # Keep the mode terms, to evaluate log L at the drawn phase later.
-                terms = apply_func_with_multiprocessing(
-                    likelihood.phase_grid_terms, theta, self.num_processes
-                )
-                phase_log_posterior = np.array(
-                    [
-                        likelihood.log_likelihood_from_phase_grid_terms(t, phases)
-                        for t in terms
-                    ]
-                )
-            else:
-                phase_log_posterior = apply_func_with_multiprocessing(
-                    likelihood.log_likelihood_phase_grid,
-                    theta,
-                    num_processes=self.num_processes,
-                )
+            # One waveform evaluation per sample gives the mode terms, which are
+            # stacked and evaluated on the grid for all samples at once.
+            terms_per_sample = apply_func_with_multiprocessing(
+                likelihood.phase_grid_terms, theta, self.num_processes
+            )
+            terms = {
+                # The mode orders are the same for every sample.
+                "m_vals": terms_per_sample[0]["m_vals"],
+                "deltas": terms_per_sample[0]["deltas"],
+                **{
+                    k: np.array([t[k] for t in terms_per_sample])
+                    for k in ("kappa2_modes", "rho2opt_crossterms", "rho2opt_const")
+                },
+            }
+            phase_log_posterior = likelihood.log_likelihood_from_phase_grid_terms(
+                terms, phases
+            )
         phase_posterior = np.exp(
             phase_log_posterior - np.amax(phase_log_posterior, axis=1, keepdims=True)
         )
