@@ -900,21 +900,16 @@ class WaveformGenerator:
 
         elif isinstance(self.domain, MultibandedFrequencyDomain):
             if LS.SimInspiralImplementedFDApproximants(self.approximant) and use_dft:
-                # DFT approach, as in the UniformFrequencyDomain branch above:
-                # temporarily switch to the base domain, evaluate the polarizations
-                # on the phase grid there, and decimate the recovered m-components
-                # to the MFD.
-                self._use_base_domain = True
-                self._domain_transform = DecimateAll(self._domain)
+                # DFT approach, as in the UniformFrequencyDomain branch above. The
+                # polarizations are evaluated at the MFD frequencies, as in
+                # generate_hplus_hcross, so the m-components sum to exactly that
+                # waveform. Generating on the base domain and decimating instead would
+                # differ from it by the decimation error.
                 ell_max = self._get_ell_max()
                 hpc_fd_list, phi_c_offsets = (
                     self._multi_phase_fd_pols_by_repeated_calls(parameters, ell_max)
                 )
-                pol_m = self._pol_m_from_multi_phase(
-                    hpc_fd_list, phi_c_offsets, ell_max
-                )
-                self.domain = self.full_domain
-                return pol_m
+                return self._pol_m_from_multi_phase(hpc_fd_list, phi_c_offsets, ell_max)
 
             elif LS.SimInspiralImplementedFDApproximants(self.approximant):
                 # SimInspiralChooseFDModes does not work with multi-banding. Hence,
