@@ -1,24 +1,15 @@
 # adapted from the Asimov Bilby Pipeline interface
-import configparser
-import glob
-import importlib
 import os
+import glob
 import re
 import subprocess
-import time
-
-import torch
-
-from asimov import config, logger
+import importlib.resources
 
 from asimov.pipeline import (
     Pipeline,
     PipelineException,
     PipelineLogger,
-    PESummaryPipeline,
 )
-
-from dingo.gw.result import Result
 
 
 class Dingo(Pipeline):
@@ -41,6 +32,8 @@ class Dingo(Pipeline):
     STATUS = {"wait", "stuck", "stopped", "running", "finished"}
 
     def __init__(self, production, category=None):
+        from asimov import logger
+
         super(Dingo, self).__init__(production, category)
         self.logger = logger
         if not production.pipeline.lower() == self.name:
@@ -99,6 +92,9 @@ class Dingo(Pipeline):
         PipelineException
            Raised if the construction of the DAG fails.
         """
+        import time
+
+        from asimov import config
 
         cwd = os.getcwd()
         self.logger.info(f"Working in {cwd}")
@@ -141,6 +137,7 @@ class Dingo(Pipeline):
         """
         Collect the combined samples files for PESummary.
         """
+        from dingo.gw.result import Result
 
         if absolute:
             rundir = os.path.abspath(self.production.rundir)
@@ -150,9 +147,9 @@ class Dingo(Pipeline):
         result_files = glob.glob(
             os.path.join(rundir, "result", f"*importance_sampling.hdf5")
         )
-        if len(result_files) == 0: 
+        if len(result_files) == 0:
             raise ValueError("Importance sampling result file not found")
-        elif len(result_files) > 1: 
+        elif len(result_files) > 1:
             raise ValueError("Multiple importance sampling result files found")
 
         # pesummary can't presently read a result file containing MultibandedFrequencyDomain
@@ -176,7 +173,6 @@ class Dingo(Pipeline):
         """
         Upload the samples from this job.
         """
-
         asset = self.collect_assets()["samples"]
         self.production.event.repository.add_file(
             asset,
@@ -279,6 +275,8 @@ class Dingo(Pipeline):
 
         Returns a list of (network_config, net_meta) tuples.
         """
+        import torch
+
         compatible_networks = []
         for networks in prod_meta["available networks"]:
             try:
@@ -379,7 +377,6 @@ class Dingo(Pipeline):
         PipelineException
            This will be raised if the pipeline fails to submit the job.
         """
-
         cwd = os.getcwd()
         self.logger.info(f"Working in {cwd}")
 
@@ -436,7 +433,13 @@ class Dingo(Pipeline):
             ) from error
 
     def after_completion(self):
-        post_pipeline = PESummaryPipeline(production=self.production)
+        try:
+            from asimov_pesummary import PESummary
+        except ImportError:
+            self.logger.warning("asimov-pesummary not available, skipping post-processing")
+            return
+
+        post_pipeline = PESummary(production=self.production)
         self.logger.info("Job has completed. Running PE Summary.")
         cluster = post_pipeline.submit_dag()
         self.production.meta["job id"] = int(cluster)
@@ -472,6 +475,7 @@ class Dingo(Pipeline):
         filepath: str
            The path to the ini file.
         """
+        import configparser
 
         with open(filepath, "r") as f:
             file_content = f.read()
