@@ -75,22 +75,38 @@ def _context():
     return {"waveform": waveform, "asds": asds}
 
 
-def make_gw_result(n=5, drop_phase=False, event_metadata=None):
+def make_gw_result(
+    n=5, drop_phase=False, drop_psi=False, event_metadata=None, exact_phase=False
+):
     """Build a gw Result with `n` rows drawn from its own prior (so columns/ranges are
-    consistent with the waveform generator), plus a synthetic context."""
+    consistent with the waveform generator), plus a synthetic context. The dropped
+    columns are also left out of the recorded inference parameters, as for a
+    network trained without them. `exact_phase` switches to a waveform generator
+    the exact phase grid supports (modes, spin_conversion_phase = 0)."""
     full_prior = build_prior_with_defaults(
         {**INTRINSIC_PRIOR, **get_extrinsic_prior_dict(EXTRINSIC_PRIOR)}
     )
     samples = pd.DataFrame(full_prior.sample(n))
     samples["log_prob"] = 0.0
-    if drop_phase:
-        samples = samples.drop(columns="phase")
+    dropped = ["phase"] * drop_phase + ["psi"] * drop_psi
+    samples = samples.drop(columns=dropped)
+    settings = _metadata()
+    if exact_phase:
+        # The exact phase grid needs the mode decomposition, which IMRPhenomD lacks.
+        settings["dataset_settings"]["waveform_generator"] = {
+            "approximant": "IMRPhenomXPHM",
+            "f_ref": 20.0,
+            "spin_conversion_phase": 0.0,
+        }
+    settings["train_settings"]["data"]["inference_parameters"] = [
+        k for k in full_prior if k not in dropped
+    ]
     return Result(
         dictionary={
             "samples": samples,
             "context": _context(),
             "event_metadata": {} if event_metadata is None else event_metadata,
-            "settings": _metadata(),
+            "settings": settings,
         }
     )
 
@@ -221,6 +237,25 @@ def test_synthetic_phase_requires_uniform_phase_prior():
     result = make_gw_result(drop_phase=False)
     with pytest.raises(ValueError, match="[Pp]hase prior"):
         result.sample_proposal_extensions(synthetic_phase_kwargs={"n_grid": 16})
+
+
+def test_psi_prior_split_off_when_samples_lack_psi():
+    # As for the phase, the psi prior is split off for a network that does not
+    # infer psi, and rejoins the prior once psi is in the samples.
+    result = make_gw_result(drop_phase=True, drop_psi=True)
+    assert "psi" not in result.prior and "phase" not in result.prior
+    assert isinstance(result.psi_prior, Uniform)
+    assert result.psi_prior.maximum == pytest.approx(np.pi)
+    assert make_gw_result(drop_phase=True).psi_prior is None
+
+
+def test_update_prior_routes_psi_to_split_off_prior():
+    result = make_gw_result(drop_phase=True, drop_psi=True)
+    result.update_prior(
+        {"psi": "bilby.core.prior.Uniform(minimum=0.0, maximum=1.0, name='psi')"}
+    )
+    assert "psi" not in result.prior
+    assert result.psi_prior.maximum == 1.0
 
 
 # ---------------------------------------------------------------------------
@@ -435,9 +470,7 @@ def test_calibration_sampling_invalid_correction_type():
     "correction_type",
     ["data", "template", {"H1": "data", "L1": "template"}, None],
 )
-def test_calibration_sampling_correction_type_variants(
-    tmp_path, correction_type
-):
+def test_calibration_sampling_correction_type_variants(tmp_path, correction_type):
     result = make_gw_result()
     result.sample_proposal_extensions(
         calibration_sampling_kwargs=_calibration_kwargs(

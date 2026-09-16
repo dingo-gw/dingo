@@ -199,13 +199,14 @@ class Result(CoreResult):
     def _build_prior(self):
         """Take the static prior from the sampler context (its single owner), then
         apply the evolving analysis state: any importance-sampling prior update,
-        and the split-off of time / phase priors for marginalized networks. Called
+        and the split-off of time / phase / psi priors for marginalized networks. Called
         by __init__(). Without a reconstructable context (a payload without full
         model metadata) the result is transport-only and the prior is `None`."""
         if self.sampler_context is None:
             self.prior = None
             self.geocent_time_prior = None
             self.phase_prior = None
+            self.psi_prior = None
             return
         # Deepcopy because the marginalization split-off below mutates it.
         self.prior = copy.deepcopy(self.sampler_context.prior)
@@ -226,6 +227,11 @@ class Result(CoreResult):
             self.phase_prior = self.prior.pop("phase")
         else:
             self.phase_prior = None
+        # Likewise for psi, which a network may leave out together with the phase.
+        if "psi" in self.prior.keys() and "psi" not in self.samples:
+            self.psi_prior = self.prior.pop("psi")
+        else:
+            self.psi_prior = None
 
     def update_prior(self, prior_update):
         """
@@ -256,12 +262,14 @@ class Result(CoreResult):
             # Save old prior evaluations.
             log_prior_old = self.prior.ln_prob(theta, axis=0)
 
-        # Update the prior itself, careful to split off geocent_time and phase priors
-        # if necessary.
+        # Update the prior itself, careful to split off geocent_time, phase and psi
+        # priors if necessary.
         if self.geocent_time_prior is not None and "geocent_time" in prior_update:
             self.geocent_time_prior = prior_update.pop("geocent_time")
         if self.phase_prior is not None and "phase" in prior_update:
             self.phase_prior = prior_update.pop("phase")
+        if self.psi_prior is not None and "psi" in prior_update:
+            self.psi_prior = prior_update.pop("psi")
         self.prior.update(
             prior_update
         )  # TODO: Does this update cached constraint ratio?
@@ -508,7 +516,9 @@ class Result(CoreResult):
                 for ifo in self.interferometers
             }
         elif correction_type == "data" or correction_type == "template":
-            correction_type_dict = {ifo: correction_type for ifo in self.interferometers}
+            correction_type_dict = {
+                ifo: correction_type for ifo in self.interferometers
+            }
         elif isinstance(correction_type, dict):
             correction_type_dict = correction_type
         else:
