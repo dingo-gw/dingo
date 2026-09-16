@@ -415,10 +415,15 @@ class Result(CoreResult):
 
             n_grid : int
                 Number of phase grid points on [0, 2pi).
+            n_grid_psi : int
+                Number of psi grid points on [0, pi). Required if the samples lack
+                psi as well as the phase: then both are drawn from the likelihood
+                on a (phase, psi) grid (exact mode sum only), see
+                `SyntheticPhasePsiFactor`. Ignored otherwise.
             approximation_22_mode : bool, default True
                 Assume a (2, 2)-dominated waveform. Otherwise the exact mode sum is
                 used, which requires the waveform generator's
-                spin_conversion_phase = 0.
+                spin_conversion_phase = 0. Not available together with psi.
             uniform_weight : float, default 0.01
                 Weight of the uniform floor added to the phase distribution for
                 mass coverage.
@@ -579,7 +584,9 @@ class Result(CoreResult):
         from the likelihood on a phase grid (with a uniform floor for mass coverage,
         so importance sampling remains exact even where the conditional is
         approximate). It applies to samples in the full parameter space except the
-        phase, and only to samples within the prior.
+        phase, and only to samples within the prior. If the samples lack psi as
+        well, the step is a `SyntheticPhasePsiFactor`, which draws both angles from
+        the likelihood on a (phase, psi) grid; `n_grid_psi` is then required.
 
         Parameters
         ----------
@@ -591,11 +598,14 @@ class Result(CoreResult):
 
         Returns
         -------
-        step : SyntheticPhaseFactor
+        step : SyntheticPhaseFactor or SyntheticPhasePsiFactor
         within_prior : np.ndarray
             Boolean mask of the samples within the prior, on which the chain runs.
         """
-        from dingo.gw.inference.steps import SyntheticPhaseFactor
+        from dingo.gw.inference.steps import (
+            SyntheticPhaseFactor,
+            SyntheticPhasePsiFactor,
+        )
 
         if self.sampler_context is None:
             raise ValueError(
@@ -611,6 +621,21 @@ class Result(CoreResult):
                 f"Phase prior should be uniform [0, 2pi) to work with synthetic phase."
                 f" However, the prior is {self.phase_prior}."
             )
+        if self.psi_prior is not None:
+            if "n_grid_psi" not in synthetic_phase_kwargs:
+                raise ValueError(
+                    "The samples lack psi, so the synthetic phase step also draws "
+                    "psi and requires n_grid_psi in synthetic_phase_kwargs."
+                )
+            if not (
+                isinstance(self.psi_prior, Uniform)
+                and np.isclose(self.psi_prior._minimum, 0)
+                and np.isclose(self.psi_prior._maximum, np.pi)
+            ):
+                raise ValueError(
+                    f"psi prior should be uniform [0, pi) to work with synthetic psi."
+                    f" However, the prior is {self.psi_prior}."
+                )
 
         # Restrict to samples that are within the prior.
         param_keys = [k for k, v in self.prior.items() if not isinstance(v, Constraint)]
@@ -644,12 +669,9 @@ class Result(CoreResult):
                     "use_dft_phase_decomposition"
                 ]
             }
-        step = SyntheticPhaseFactor(
+        common = dict(
             conditioning=conditioning,
             n_grid=synthetic_phase_kwargs["n_grid"],
-            approximation_22_mode=synthetic_phase_kwargs.get(
-                "approximation_22_mode", True
-            ),
             uniform_weight=synthetic_phase_kwargs.get("uniform_weight", 0.01),
             # Put a cap on the number of processes to avoid overhead.
             num_processes=min(
@@ -662,6 +684,17 @@ class Result(CoreResult):
                 "cache_log_likelihood", False
             ),
         )
+        if self.psi_prior is not None:
+            step = SyntheticPhasePsiFactor(
+                n_grid_psi=synthetic_phase_kwargs["n_grid_psi"], **common
+            )
+        else:
+            step = SyntheticPhaseFactor(
+                approximation_22_mode=synthetic_phase_kwargs.get(
+                    "approximation_22_mode", True
+                ),
+                **common,
+            )
         return step, within_prior
 
     def get_samples_bilby_phase(self, num_processes=1):

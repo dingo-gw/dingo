@@ -231,6 +231,59 @@ def test_synthetic_phase_adds_phase_column():
     assert not np.array_equal(result.samples["log_prob"].to_numpy(), log_prob_before)
 
 
+def test_synthetic_phase_psi_adds_both_columns():
+    from dingo.gw.inference.steps import SyntheticPhaseFactor, SyntheticPhasePsiFactor
+
+    result = make_gw_result(drop_phase=True, drop_psi=True, exact_phase=True)
+    kwargs = {
+        "n_grid": 16,
+        "n_grid_psi": 8,
+        "approximation_22_mode": False,
+        "cache_log_likelihood": True,
+    }
+    step, _ = result._synthetic_phase_step(kwargs, conditioning=list(result.prior))
+    assert isinstance(step, SyntheticPhasePsiFactor)
+    # With psi in the samples, the phase-only factor is used and n_grid_psi ignored.
+    step, _ = make_gw_result(drop_phase=True)._synthetic_phase_step(
+        kwargs, conditioning=[]
+    )
+    assert isinstance(step, SyntheticPhaseFactor)
+
+    log_prob_before = result.samples["log_prob"].to_numpy().copy()
+    bilby_random.seed(0)
+    np.random.seed(0)
+    result.sample_proposal_extensions(synthetic_phase_kwargs=kwargs)
+    assert "phase" in result.prior and "psi" in result.prior
+    assert result.phase_prior is None and result.psi_prior is None
+    psi = result.samples["psi"].to_numpy()
+    assert np.all((psi >= 0) & (psi <= np.pi))
+    assert not np.array_equal(result.samples["log_prob"].to_numpy(), log_prob_before)
+    # The cached log likelihood is the exact one at the drawn (phase, psi), so
+    # importance sampling can reuse it.
+    cached = result.samples["log_likelihood"].to_numpy().copy()
+    result.importance_sample(use_cached_log_likelihood=True)
+    assert np.allclose(result.samples["log_likelihood"].to_numpy(), cached)
+    # It is exact for the parameters the chain used, which are float32: round the
+    # conditioning the same way before the direct evaluation.
+    result._build_likelihood()
+    theta = result.samples[
+        [k for k, v in result.prior.items() if not isinstance(v, Constraint)]
+    ]
+    theta = (
+        theta.astype(np.float32)
+        .astype(np.float64)
+        .assign(phase=theta["phase"], psi=theta["psi"])
+    )
+    direct = result.likelihood.log_likelihood_multi(theta)
+    assert np.allclose(cached, direct, rtol=1e-10)
+
+
+def test_synthetic_phase_psi_requires_n_grid_psi():
+    result = make_gw_result(drop_phase=True, drop_psi=True)
+    with pytest.raises(ValueError, match="n_grid_psi"):
+        result.sample_proposal_extensions(synthetic_phase_kwargs={"n_grid": 16})
+
+
 def test_synthetic_phase_requires_uniform_phase_prior():
     # When `phase` is in the samples, the phase prior is not split off (it is None),
     # so synthetic phase sampling is not applicable and must raise.
