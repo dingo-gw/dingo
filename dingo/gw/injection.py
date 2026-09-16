@@ -242,7 +242,7 @@ class GWSignal(object):
     # namely storing ASDs from numpy arrays, from ASDDatasets, loading from files,
     # etc. For now this functionality is partially implemented here.
 
-    def signal_m(self, theta):
+    def signal_m(self, theta, psis=None):
         """
         Compute the GW signal for parameters theta. Same as self.signal(theta) method,
         but it does not sum the contributions of the individual modes, and instead
@@ -258,10 +258,15 @@ class GWSignal(object):
         theta: dict
             Signal parameters. Includes intrinsic parameters to be passed to waveform
             generator, and extrinsic parameters for detector projection.
+        psis: sequence of float, optional
+            Polarization angles at which to project the modes, overriding
+            theta["psi"]. The waveform is generated once and projected once per
+            angle. psi only enters the antenna patterns, so this is how the phase
+            grid obtains its psi-dependent terms.
 
         Returns
         -------
-        dict
+        dict, or list of dict if psis is given (one per angle, in order)
             keys:
                 waveform:
                     GW strain signal for each detector, with individual contributions
@@ -285,18 +290,24 @@ class GWSignal(object):
         }
 
         # Step 2: project m-contributions to h_plus and h_cross onto detectors
-        sample_out = {}
-        for m, pol in pol_m.items():
-            sample = {
-                "parameters": theta_intrinsic,
-                "extrinsic_parameters": theta_extrinsic,
-                "waveform": pol,
-            }
-            if self.asd is not None:
-                sample["asds"] = self.asd
-            sample_out[m] = self.projection_transforms(sample)
+        out = []
+        for psi in [None] if psis is None else psis:
+            extrinsic = (
+                theta_extrinsic if psi is None else {**theta_extrinsic, "psi": psi}
+            )
+            sample_out = {}
+            for m, pol in pol_m.items():
+                sample = {
+                    "parameters": theta_intrinsic,
+                    "extrinsic_parameters": extrinsic,
+                    "waveform": pol,
+                }
+                if self.asd is not None:
+                    sample["asds"] = self.asd
+                sample_out[m] = self.projection_transforms(sample)
+            out.append(sample_out)
 
-        return sample_out
+        return out[0] if psis is None else out
 
     @property
     def asd(self):
