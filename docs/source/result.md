@@ -36,7 +36,10 @@ uniform_weight: 0.01
 num_processes: 100
 ```
 approximation_22_mode
-: Whether to make the approximation that only the $(l, m) = (2, 2)$ mode is present, i.e., waveforms transform as $\exp(2 i \phi_c)$. This simplifies computations since it does not require caching of waveform modes.
+: Whether to make the approximation that only the $(l, m) = (2, 2)$ mode is present, i.e., waveforms transform as $\exp(2 i \phi_c)$. This simplifies computations since it does not require caching of waveform modes. It is faster than the exact mode sum and accurate for weakly precessing signals.
+
+co_rotate_spins
+: Draw the phase in the physical spin convention, where a phase shift co-rotates the in-plane spins, and fold the implied rotation into the `theta_jn` / `phi_jl` columns (their values change along with the added `phase`). For approximants whose co-precessing-frame content is a single $(2, |m| = 2)$ pair (e.g. IMRPhenomPv2, IMRPhenomXP, IMRPhenomXP_NRTidalv3) this is *exact* at the cost of `approximation_22_mode`. Overrides `approximation_22_mode`.
 
 n_grid
 : Specifies the phase grid on which the likelihoods are evaluated.
