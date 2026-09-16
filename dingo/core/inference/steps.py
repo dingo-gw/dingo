@@ -161,11 +161,16 @@ class Factor(ABC):
         Whether the factor draws new samples (the default) or is a point mass or
         fixed table that is run once. The chain's sample counts go to the steps
         that draw, one each; an int `num_samples` is the count for the first.
+    annotations : list[str]
+        Columns the factor emits beyond its `parameters` that are kept in the chain
+        output for importance sampling, such as a cached log likelihood. Other side
+        channels are dropped. Target corrections declare their columns the same way.
     """
 
     parameters: list[str]
     conditioning: list[str]
     draws = True
+    annotations: list[str] = []
 
     @property
     def produces(self) -> list[str]:
@@ -782,6 +787,11 @@ class TargetCorrection(ABC):
     produces: list[str]
     conditioning: list[str]
     draws = False
+
+    @property
+    def annotations(self) -> list[str]:
+        """The emitted annotation columns, which the chain keeps in its output."""
+        return self.produces
 
     @abstractmethod
     def correction(
