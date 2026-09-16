@@ -26,6 +26,10 @@ The Dingo `gw.Result` class includes a method `sample_proposal_extensions()` whi
 
 This method should be run *after* recovering the density, since in particular it applies a correction to the density.
 
+### Synthetic phase and polarization angle
+
+A network may leave out the polarization angle $\psi$ as well as $\phi_c$. Both can then be recovered together: $\psi$ enters the detector strain only through the antenna patterns, which rotate with $2\psi$, and every later projection step (time shift, calibration, whitening) is linear. The strain at any $\psi$ is therefore $\cos 2\psi \, h(\psi{=}0) + \sin 2\psi \, h(\psi{=}\pi/4)$, and the same single waveform evaluation per sample, projected at these two reference angles, gives the likelihood on a full $(\phi_c, \psi)$ grid. `sample_proposal_extensions()` uses this automatically when the samples lack `psi`: it draws $\phi_c$ from the $\psi$-marginal of the grid and then $\psi$ from the conditional at the drawn $\phi_c$ (the `SyntheticPhasePsiFactor`), adding the joint proposal density to `log_prob`. This requires the exact mode sum (`approximation_22_mode: false`) and the additional setting `n_grid_psi`.
+
 ### Configuration
 
 The `synthetic_phase_kwargs` argument of `sample_proposal_extensions()` is a dict. An example configuration is
@@ -40,6 +44,9 @@ approximation_22_mode
 
 n_grid
 : Specifies the phase grid on which the likelihoods are evaluated.
+
+n_grid_psi
+: Number of $\psi$ grid points on $[0, \pi)$. Required (and only used) if the samples lack `psi` as well, see above. `dingo_pipe`'s `PhaseRecoveryDefault` sets 128.
 
 uniform_weight
 : Base probability level to add to ensure mass coverage.
