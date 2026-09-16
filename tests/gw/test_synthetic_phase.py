@@ -22,15 +22,19 @@ class _MockLikelihood:
         # (2, 2)-approx path: one complex overlap (d | h) per row.
         return np.array([complex(cm, 0.5) for cm in theta["chirp_mass"].to_numpy()])
 
-    def phase_grid_terms(self, theta):
+    def phase_grid_terms(self, theta, psi_dependent=False):
         # exact path: a single m = 1 mode with (d | mu_1) = chirp_mass, so that
-        # log L(phase) = chirp_mass * cos(phase).
+        # log L(phase) = chirp_mass * cos(phase). With the psi basis, the second
+        # projection has (d | mu_1) = chirp_mass / 2, so that
+        # log L(phase, psi) = chirp_mass * cos(phase) * (cos 2psi + sin 2psi / 2).
+        K = 2 if psi_dependent else 1
+        kappa = complex(theta["chirp_mass"]) * np.array([1.0, 0.5])[:K]
         return {
             "m_vals": np.array([1]),
-            "kappa2_modes": np.array([complex(theta["chirp_mass"])]),
-            "rho2opt_const": 0.0,
+            "kappa2_modes": kappa[:, None],
+            "rho2opt_const": np.zeros((K, K)),
             "deltas": np.array([], dtype=int),
-            "rho2opt_crossterms": np.array([], dtype=complex),
+            "rho2opt_crossterms": np.zeros((K, K, 0), dtype=complex),
         }
 
     log_Zn = 0.0

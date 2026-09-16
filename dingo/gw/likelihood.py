@@ -377,25 +377,37 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         terms = self.phase_grid_terms(theta)
         return self.log_likelihood_from_phase_grid_terms(terms, phases)
 
-    def phase_grid_terms(self, theta: dict) -> dict:
+    def phase_grid_terms(self, theta: dict, psi_dependent: bool = False) -> dict:
         """
         Compute, from a single waveform evaluation at phase = 0, the inner products
         from which the log likelihood follows at any phase, see
         `log_likelihood_from_phase_grid_terms`.
 
+        The modes are projected onto the detectors at K polarization angles, the
+        basis. With `psi_dependent=False` the basis is the single projection at
+        theta["psi"] (K = 1). With `psi_dependent=True` it is the projections at
+        psi = 0 and psi = pi / 4 (K = 2), from which the signal at any psi follows
+        as cos(2 psi) mu(0) + sin(2 psi) mu(pi / 4), since psi enters only the
+        antenna patterns and every later projection step is linear.
+
         Parameters
         ----------
         theta: dict
-            BBH parameters. A phase entry is ignored.
+            BBH parameters. A phase entry is ignored, and so is psi if
+            `psi_dependent`.
+        psi_dependent: bool, default False
+            Project at the psi basis (0, pi / 4) instead of at theta["psi"].
 
         Returns
         -------
         dict
             m_vals: (M,) the m-components of the signal;
-            kappa2_modes: (M,) complex, (d, mu_m) per component;
-            rho2opt_const: float, sum_m (mu_m, mu_m);
+            kappa2_modes: (K, M) complex, (d, mu^b_m) per basis projection b and
+                component m;
+            rho2opt_const: (K, K) real, sum_m Re (mu^b_m, mu^c_m);
             deltas: (P,) the distinct mode differences n - m, for m < n;
-            rho2opt_crossterms: (P,) complex, sum of 2 (mu_m, mu_n) per difference.
+            rho2opt_crossterms: (K, K, P) complex, the sum over pairs with
+                n - m = delta of (mu^b_m, mu^c_n) + (mu^c_m, mu^b_n).
         """
         # TODO: Implement for time marginalization
         if self.return_aux_snr:
@@ -420,14 +432,26 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         d = self.whitened_strains
 
         # Step 1: Compute signal for phase = 0, separated into the m-contributions from
-        # the individual modes.
-        pol_m = self.signal_m({**theta, "phase": 0})
-        pol_m = {k: pol["waveform"] for k, pol in pol_m.items()}
+        # the individual modes, projected at each basis polarization angle.
+        # mu[b][m][ifo] is the whitened strain of mode m at the b-th angle.
+        if psi_dependent:
+            signals = self.signal_m({**theta, "phase": 0}, psis=(0.0, np.pi / 4))
+        else:
+            signals = [self.signal_m({**theta, "phase": 0})]
+        mu = [{m: pol["waveform"] for m, pol in signal.items()} for signal in signals]
+        K = len(mu)
 
         # Step 2: Precompute complex inner products (mu, mu) and (d, mu) for the
-        # individual modes m.
+        # individual modes m (and basis pairs b, c).
         min_idx = self.data_domain.min_idx
-        m_vals = sorted(pol_m.keys())
+        m_vals = sorted(mu[0].keys())
+
+        def overlap(x, y):
+            # Complex inner product summed over detectors; x, y are {ifo: strain}.
+            return sum(
+                inner_product_complex(x_ifo, y_ifo, min_idx)
+                for x_ifo, y_ifo in zip(x.values(), y.values())
+            )
 
         # rho2opt is defined as the inner product of the waveform mu with itself.
         # Since we work with whitened data, the inner product simply reads
@@ -440,26 +464,30 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         #
         #   (mu^_m, mu^_n) = [(mu_m.conj() * mu_n) * exp(-i * (n - m) * phi)].real.
         #
-        # Below we precompute the cross terms sum(mu_m.conj() * mu_n) and the constant
+        # With mu = sum_b w_b mu^b (real weights w, e.g. cos 2 psi and sin 2 psi), the
+        # same expansion holds per basis pair (b, c), weighted by w_b w_c. Below we
+        # precompute the cross terms sum(mu^b_m.conj() * mu^c_n) and the constant
         # contribution for m = n.
-        rho2opt_const = 0
-        rho2opt_crossterms = {}
+        rho2opt_const = np.array(
+            [
+                [sum(overlap(mu_b[m], mu_c[m]).real for m in m_vals) for mu_c in mu]
+                for mu_b in mu
+            ]
+        )
+        # The cross terms only depend on the mode difference delta = n - m, so we
+        # accumulate them by delta. For m in -4..4 this collapses 36 pairs onto 8
+        # distinct deltas, i.e. a 4.5x smaller exponential matrix in the evaluation.
+        crossterms_by_delta = defaultdict(lambda: np.zeros((K, K), dtype=complex))
         for idx, m in enumerate(m_vals):
-            mu_m = pol_m[m]
-            # contribution to rho2opt_const
-            rho2opt_const += sum(
-                [inner_product(mu_ifo, mu_ifo, min_idx) for mu_ifo in mu_m.values()]
-            )
-            # cross terms
             for n in m_vals[idx + 1 :]:
-                mu_n = pol_m[n]
-                # factor 2, since (m, n) and (n, m) cross terms contribute symmetrically
-                rho2opt_crossterms[(m, n)] = 2 * sum(
-                    [
-                        inner_product_complex(mu_m_ifo, mu_n_ifo, min_idx)
-                        for mu_m_ifo, mu_n_ifo in zip(mu_m.values(), mu_n.values())
-                    ]
+                pair = np.array(
+                    [[overlap(mu_b[m], mu_c[n]) for mu_c in mu] for mu_b in mu]
                 )
+                # (m, n) and (n, m) contribute symmetrically: entry [b, c] collects
+                # (mu^b_m, mu^c_n) + (mu^c_m, mu^b_n), i.e. 2 (mu_m, mu_n) for K = 1.
+                crossterms_by_delta[n - m] += pair + pair.T
+        deltas = sorted(crossterms_by_delta)
+
         # kappa2 is given by
         #
         #   (d, mu) = sum(d.conj() * mu).real.
@@ -469,45 +497,32 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         #
         #   (d, mu^_m) = [(d.conj() * mu_m) * exp(-i * m * phi)].real.
         #
-        # Below we precompute (d.conj() * mu_m) for the different modes m.
-        kappa2_modes = {}
-        for m in m_vals:
-            mu_m = pol_m[m]
-            kappa2_modes[m] = sum(
-                [
-                    inner_product_complex(d_ifo, mu_ifo, min_idx)
-                    for d_ifo, mu_ifo in zip(d.values(), mu_m.values())
-                ]
-            )
-
-        # The cross terms only depend on the mode difference delta = n - m, so we
-        # accumulate them by delta. For m in -4..4 this collapses 36 pairs onto 8
-        # distinct deltas, i.e. a 4.5x smaller exponential matrix in the evaluation.
-        crossterms_by_delta = defaultdict(complex)
-        for (m, n), c in rho2opt_crossterms.items():
-            crossterms_by_delta[n - m] += c
-        deltas = sorted(crossterms_by_delta)
+        # Below we precompute (d.conj() * mu^b_m) for the different modes m.
+        kappa2_modes = np.array([[overlap(d, mu_b[m]) for m in m_vals] for mu_b in mu])
 
         return {
             "m_vals": np.array(m_vals),
-            "kappa2_modes": np.array([kappa2_modes[m] for m in m_vals]),
+            "kappa2_modes": kappa2_modes,
             "rho2opt_const": rho2opt_const,
             "deltas": np.array(deltas),
-            "rho2opt_crossterms": np.array(
-                [crossterms_by_delta[delta] for delta in deltas]
+            "rho2opt_crossterms": np.moveaxis(
+                np.array([crossterms_by_delta[delta] for delta in deltas]), 0, -1
             ),
         }
 
     def log_likelihood_from_phase_grid_terms(
-        self, terms: dict, phases: np.ndarray
+        self, terms: dict, phases: np.ndarray, psis: Optional[np.ndarray] = None
     ) -> np.ndarray:
         """
-        Evaluate the log likelihood at the given phases from the terms computed by
-        `phase_grid_terms`, without a waveform evaluation. Per phase ph:
+        Evaluate the log likelihood at the given phases (and polarization angles)
+        from the terms computed by `phase_grid_terms`, without a waveform
+        evaluation. With basis weights w (w = [1] for the single projection at the
+        sample's psi, w = [cos 2 psi, sin 2 psi] for the (0, pi / 4) basis), per
+        phase ph:
 
-            rho2opt(ph) = rho2opt_const
-                + sum_delta (crossterm_delta * exp(-i * delta * ph)).real
-            kappa2(ph)  = sum_m (kappa2_modes[m] * exp(-i * m * ph)).real
+            kappa2(ph)  = sum_b w_b sum_m (kappa2_modes[b, m] * exp(-i * m * ph)).real
+            rho2opt(ph) = sum_{b, c} w_b w_c [rho2opt_const[b, c]
+                + sum_delta (rho2opt_crossterms[b, c, delta] * exp(-i * delta * ph)).real]
             log L(ph)   = log_Zn + kappa2(ph) - rho2opt(ph) / 2
 
         The terms of several samples can be evaluated at once by stacking
@@ -520,24 +535,44 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
             As returned by `phase_grid_terms`, optionally stacked.
         phases: np.ndarray
             (G,) phases, shared by all samples, or (N, G) phases per sample.
+        psis: np.ndarray, optional
+            (H,) polarization angles, shared, or (N, H) per sample. Required for
+            psi-dependent terms (K = 2) and not allowed otherwise.
 
         Returns
         -------
         np.ndarray
-            (G,) log likelihoods for unstacked terms, else (N, G).
+            (G,) log likelihoods for unstacked terms, else (N, G). With psis, the
+            outer grid (G, H), else (N, G, H).
         """
         phases = np.asarray(phases)
+        K = terms["kappa2_modes"].shape[-2]
+        if (K == 2) != (psis is not None):
+            raise ValueError(
+                f"psis must be given exactly for psi-dependent terms (basis size "
+                f"{K}), got psis={psis}."
+            )
+        # Basis weights of shape (..., H, K).
+        if psis is None:
+            w = np.ones((1, 1))
+        else:
+            psis = np.asarray(psis)
+            w = np.stack([np.cos(2 * psis), np.sin(2 * psis)], axis=-1)
         # Phasors exp(-i * order * ph) of shape (..., orders, G), contracted with the
-        # coefficients of shape (..., 1, orders).
-        kappa2 = (
-            terms["kappa2_modes"][..., None, :]
-            @ np.exp(-1j * terms["m_vals"][:, None] * phases[..., None, :])
-        )[..., 0, :].real
-        rho2opt = np.asarray(terms["rho2opt_const"])[..., None] + (
-            terms["rho2opt_crossterms"][..., None, :]
-            @ np.exp(-1j * terms["deltas"][:, None] * phases[..., None, :])
-        )[..., 0, :].real
-        return self.log_Zn + kappa2 - 0.5 * rho2opt
+        # coefficients of shape (..., K, orders) over the orders, leaving the basis
+        # axes: (..., K, G) and (..., K, K, G).
+        phasor_m = np.exp(-1j * terms["m_vals"][:, None] * phases[..., None, :])
+        phasor_delta = np.exp(-1j * terms["deltas"][:, None] * phases[..., None, :])
+        kappa2_b = (terms["kappa2_modes"] @ phasor_m).real
+        crossterms = terms["rho2opt_crossterms"]
+        rho2opt_bc = np.asarray(terms["rho2opt_const"])[..., None] + (
+            crossterms.reshape(*crossterms.shape[:-3], K * K, -1) @ phasor_delta
+        ).real.reshape(*kappa2_b.shape[:-2], K, K, -1)
+        # Contract the basis axes with the weights.
+        kappa2 = np.einsum("...bg,...hb->...gh", kappa2_b, w)
+        rho2opt = np.einsum("...bcg,...hb,...hc->...gh", rho2opt_bc, w, w)
+        log_likelihood = self.log_Zn + kappa2 - 0.5 * rho2opt
+        return log_likelihood[..., 0] if psis is None else log_likelihood
 
     def _log_likelihood_phase_marginalized(self, theta):
         """
