@@ -77,7 +77,7 @@ density-free sampling block:
 
 | Step type           | Emits                                | Log-prob term $\Delta_i$                 | Examples                                                       |
 |---------------------|--------------------------------------|------------------------------------------|----------------------------------------------------------------|
-| `Factor`            | a sampled parameter block            | its conditional log density               | `FlowFactor`, `DeltaFactor`, `SampleTableFactor`               |
+| `Factor`            | a sampled parameter block            | its conditional log density               | `FlowFactor`, `DeltaFactor`, `PriorFactor`, `SampleTableFactor` |
 | `Reparametrization` | a deterministic transform of columns | $-\log \lvert \det J \rvert$ (usually 0)  | `RAToEventFrame`, `ProxyOffsetReparam`, `SpinConventionReparam` |
 | `TargetCorrection`  | a target-side annotation column      | 0                                         | `GNPEKernelCorrection`                                         |
 | `GibbsBlock`        | the blocks of an internal Gibbs loop | none (the chain becomes density-free)     | multi-iteration [GNPE](gnpe.md)                                |
@@ -105,6 +105,9 @@ its own log density. Note that network standardization is applied internally, so
 : A chain root that emits a fixed table of existing samples, together with their
   stored log probability. Use this factor to continue a chain from samples drawn
   earlier (e.g., a chain adding the synthetic phase to previously-drawn samples, or for a BNS chirp-mass scan).
+
+`PriorFactor`
+: An unconditioned factor that draws a block of parameters from a prior, which is then the proposal for that block.
 
 `SyntheticPhaseFactor`, `GNPEKernelFactor`, `GNPEFlowFactor`
 : The gravitational-wave factors, defined in `dingo.gw.inference.steps`.
@@ -360,7 +363,7 @@ DataFrame runner (`run_sampler`) and the `Result` export (`to_result` / `to_hdf5
 
 The classes on this page are documented in the API reference:
 
-* {py:class}`dingo.core.inference.steps.Factor`, with {py:class}`~dingo.core.inference.steps.FlowFactor`, {py:class}`~dingo.core.inference.steps.DeltaFactor`, and {py:class}`~dingo.core.inference.steps.SampleTableFactor`
+* {py:class}`dingo.core.inference.steps.Factor`, with {py:class}`~dingo.core.inference.steps.FlowFactor`, {py:class}`~dingo.core.inference.steps.DeltaFactor`, {py:class}`~dingo.core.inference.steps.PriorFactor`, and {py:class}`~dingo.core.inference.steps.SampleTableFactor`
 * {py:class}`dingo.core.inference.steps.Reparametrization`
 * {py:class}`dingo.core.inference.steps.TargetCorrection`
 * {py:class}`dingo.core.inference.composer.GibbsBlock`

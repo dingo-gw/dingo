@@ -1,6 +1,6 @@
 """CI unit tests for SyntheticPhaseFactor (and a GWSamplerContext helper), using a mock
 context / likelihood so no waveform models or LAL calls are needed. End-to-end parity
-against Result.sample_synthetic_phase is covered by the model-based harness."""
+against Result.sample_proposal_extensions is covered by the model-based harness."""
 
 import numpy as np
 import pytest
