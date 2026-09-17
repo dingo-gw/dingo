@@ -1,9 +1,10 @@
-"""Gravitational-wave chain steps: the GNPE factors, the synthetic-phase
-factor, and the coordinate reparametrizations."""
+"""Gravitational-wave chain steps: the GNPE factors, the synthetic-phase and
+synthetic-phase-psi factors, and the coordinate reparametrizations."""
 
 from __future__ import annotations
 import logging
 import time
+from functools import partial
 from typing import Optional
 import numpy as np
 import pandas as pd
@@ -23,6 +24,7 @@ from dingo.core.inference.steps import (
     _n_rows,
 )
 from dingo.core.multiprocessing import apply_func_with_multiprocessing
+from scipy.special import logsumexp
 from dingo.core.posterior_models import BasePosteriorModel
 from dingo.core.transforms import RenameKey
 from dingo.gw.conversion import change_spin_conversion_phase
@@ -45,6 +47,35 @@ def _to_numpy(v) -> np.ndarray:
     if torch.is_tensor(v):
         return v.detach().cpu().numpy()
     return np.asarray(v)
+
+
+def _stacked_phase_grid_terms(likelihood, theta, psi_dependent, num_processes):
+    """The phase grid terms of every row of `theta` (one waveform evaluation each,
+    in parallel), stacked along a leading batch axis for one vectorized grid
+    evaluation, see `StationaryGaussianGWLikelihood.log_likelihood_from_phase_grid_terms`.
+    """
+    terms_per_sample = apply_func_with_multiprocessing(
+        partial(likelihood.phase_grid_terms, psi_dependent=psi_dependent),
+        theta,
+        num_processes,
+    )
+    return {
+        # The mode orders are the same for every sample.
+        "m_vals": terms_per_sample[0]["m_vals"],
+        "deltas": terms_per_sample[0]["deltas"],
+        **{
+            k: np.array([t[k] for t in terms_per_sample])
+            for k in ("kappa2_modes", "rho2opt_const", "rho2opt_crossterms")
+        },
+    }
+
+
+def _floored_density(log_density, uniform_weight):
+    """Exponentiate a per-row grid of log densities (shifted by the row max) and add
+    a uniform floor of relative weight `uniform_weight`, so that the proposal is
+    positive everywhere and importance sampling stays finite."""
+    density = np.exp(log_density - np.amax(log_density, axis=-1, keepdims=True))
+    return density + density.mean(axis=-1, keepdims=True) * uniform_weight
 
 
 class SyntheticPhaseFactor(Factor):
@@ -86,7 +117,7 @@ class SyntheticPhaseFactor(Factor):
     def __init__(
         self,
         conditioning: list[str],
-        n_grid: int = 5001,
+        n_grid_phase: int = 5001,
         approximation_22_mode: bool = False,
         uniform_weight: float = 0.01,
         num_processes: int = 1,
@@ -100,7 +131,7 @@ class SyntheticPhaseFactor(Factor):
         conditioning : list[str]
             The physical parameters the likelihood needs to generate the waveform
             (everything the chain has produced except `phase`).
-        n_grid : int, default 5001
+        n_grid_phase : int, default 5001
             Number of phase grid points on `[0, 2 pi)`.
         approximation_22_mode : bool, default False
             Use the (2, 2)-mode approximation instead of the exact mode sum.
@@ -127,7 +158,7 @@ class SyntheticPhaseFactor(Factor):
             )
         self.parameters = ["phase"]
         self.conditioning = list(conditioning)
-        self.n_grid = n_grid
+        self.n_grid_phase = n_grid_phase
         self.approximation_22_mode = approximation_22_mode
         self.uniform_weight = uniform_weight
         self.num_processes = num_processes
@@ -186,7 +217,7 @@ class SyntheticPhaseFactor(Factor):
             "step": type(self).__name__,
             "parameters": list(self.parameters),
             "conditioning": list(self.conditioning),
-            "n_grid": self.n_grid,
+            "n_grid_phase": self.n_grid_phase,
             "approximation_22_mode": self.approximation_22_mode,
             "uniform_weight": self.uniform_weight,
             "use_base_domain": self.use_base_domain,
@@ -202,7 +233,7 @@ class SyntheticPhaseFactor(Factor):
         likelihood = context.likelihood(
             use_base_domain=self.use_base_domain, wfg_updates=self.wfg_updates
         )
-        phases = np.linspace(0, 2 * np.pi, self.n_grid)
+        phases = np.linspace(0, 2 * np.pi, self.n_grid_phase)
         terms = None
         if self.approximation_22_mode:
             # Assume the waveform is (2, 2)-dominated (transforms as exp(2i phase)), so the
@@ -215,29 +246,202 @@ class SyntheticPhaseFactor(Factor):
             # Exact: each mode m contributes exp(-i m phase); needs spin_conversion_phase=0.
             # One waveform evaluation per sample gives the mode terms, which are
             # stacked and evaluated on the grid for all samples at once.
-            terms_per_sample = apply_func_with_multiprocessing(
-                likelihood.phase_grid_terms, theta, self.num_processes
+            terms = _stacked_phase_grid_terms(
+                likelihood, theta, False, self.num_processes
             )
-            terms = {
-                # The mode orders are the same for every sample.
-                "m_vals": terms_per_sample[0]["m_vals"],
-                "deltas": terms_per_sample[0]["deltas"],
-                **{
-                    k: np.array([t[k] for t in terms_per_sample])
-                    for k in ("kappa2_modes", "rho2opt_crossterms", "rho2opt_const")
-                },
-            }
             phase_log_posterior = likelihood.log_likelihood_from_phase_grid_terms(
                 terms, phases
             )
-        phase_posterior = np.exp(
-            phase_log_posterior - np.amax(phase_log_posterior, axis=1, keepdims=True)
+        return phases, _floored_density(phase_log_posterior, self.uniform_weight), terms
+
+
+class SyntheticPhasePsiFactor(Factor):
+    """
+    Reconstruct the coalescence phase and the polarization angle for a network that
+    infers neither: the factor `q(phase, psi | theta_rest, d)`, built from the
+    likelihood on a (phase, psi) grid.
+
+    As for `SyntheticPhaseFactor` in exact mode, a single waveform evaluation per
+    sample suffices: the modes transform as `exp(-i m phase)`, and psi enters only
+    the antenna patterns, so the strain at any psi is `cos(2 psi) mu(0) + sin(2 psi)
+    mu(pi / 4)`. From the resulting mode terms, `log L` follows at any (phase, psi)
+    without further waveform calls. There is no (2, 2)-mode approximation here, and
+    the waveform generator's `spin_conversion_phase` must be 0.
+
+    The draw factorizes as `q(phase) q(psi | phase)`. `q(phase)` is the psi-marginal
+    of the grid (the samples are processed in chunks, so that the full
+    `N x n_grid_phase x n_grid_psi` grid is never held at once). `q(psi | phase)` is then
+    evaluated on the psi grid exactly at the drawn phase, not interpolated between
+    grid rows. Both factors get a uniform floor (weight `uniform_weight`) and are
+    sampled from the interpolated grid distribution; `log_prob` rebuilds them the
+    same way. As for the phase factor, `cache_log_likelihood=True` also emits the
+    exact log likelihood at the drawn (phase, psi) as the annotation column
+    `log_likelihood`.
+    """
+
+    # Upper bound on the (chunk, n_grid_phase, n_grid_psi) grid held at once, in elements.
+    max_grid_elements = 50_000_000
+
+    def __init__(
+        self,
+        conditioning: list[str],
+        n_grid_phase: int = 512,
+        n_grid_psi: int = 128,
+        uniform_weight: float = 0.01,
+        num_processes: int = 1,
+        use_base_domain: bool = False,
+        wfg_updates: Optional[dict] = None,
+        cache_log_likelihood: bool = False,
+    ):
+        """
+        Parameters
+        ----------
+        conditioning : list[str]
+            The physical parameters the likelihood needs to generate the waveform
+            (everything the chain has produced except `phase` and `psi`).
+        n_grid_phase : int, default 512
+            Number of phase grid points on `[0, 2 pi)`.
+        n_grid_psi : int, default 128
+            Number of psi grid points on `[0, pi)`. The grid only shapes the proposal
+            (importance sampling is unbiased for any grid), but it should resolve
+            the likelihood peak, whose width in either angle is about 1 / SNR.
+        uniform_weight : float, default 0.01
+            Weight of the uniform floor added to each of the two grid distributions.
+        num_processes : int, default 1
+            Parallel processes for the per-sample likelihood terms and the draws.
+        use_base_domain : bool, default False
+            For a multibanded model, evaluate the likelihood on the undecimated base
+            domain (passed on to `SamplerContext.likelihood`).
+        wfg_updates : dict, optional
+            Overrides for the waveform generator settings stored with the network,
+            e.g. `use_dft_phase_decomposition`.
+        cache_log_likelihood : bool, default False
+            Also emit the log likelihood at the drawn (phase, psi) as the column
+            `log_likelihood`, for reuse by importance sampling.
+        """
+        self.parameters = ["phase", "psi"]
+        self.conditioning = list(conditioning)
+        self.n_grid_phase = n_grid_phase
+        self.n_grid_psi = n_grid_psi
+        self.uniform_weight = uniform_weight
+        self.num_processes = num_processes
+        self.use_base_domain = use_base_domain
+        self.wfg_updates = wfg_updates
+        self.cache_log_likelihood = cache_log_likelihood
+        self.annotations = ["log_likelihood"] if cache_log_likelihood else []
+
+    @property
+    def produces(self) -> list[str]:
+        """`phase` and `psi`, plus `log_likelihood` if it is cached."""
+        return self.parameters + self.annotations
+
+    def sample_and_log_prob(self, num_samples, context, given=None):
+        """Draw one (phase, psi) per `theta_rest` row (`num_samples` must be 1); return
+        the draws and their proposal log-prob `log q(phase, psi | theta_rest, d)`."""
+        if num_samples != 1:
+            raise ValueError(
+                "Synthetic phase and psi are 1:1; draw one pair per sample "
+                "(num_samples=1)."
+            )
+        reference = next(iter(given.values()))
+        device = reference.device if torch.is_tensor(reference) else None
+        logger.info(f"Estimating synthetic phase and psi for {len(reference)} samples.")
+        t0 = time.time()
+        likelihood, terms, phases, phase_posterior = self._phase_profile(given, context)
+        new_phase, log_prob_phase = interpolated_sample_and_log_prob_multi(
+            phases, phase_posterior, self.num_processes
         )
-        # Uniform floor: keep q(phase) > 0 everywhere so importance sampling stays finite.
-        phase_posterior += (
-            phase_posterior.mean(axis=-1, keepdims=True) * self.uniform_weight
+        psis, psi_posterior = self._psi_profile(likelihood, terms, new_phase)
+        new_psi, log_prob_psi = interpolated_sample_and_log_prob_multi(
+            psis, psi_posterior, self.num_processes
         )
-        return phases, phase_posterior, terms
+        samples = {
+            "phase": torch.as_tensor(new_phase, device=device),
+            "psi": torch.as_tensor(new_psi, device=device),
+        }
+        if self.cache_log_likelihood:
+            # Exact log likelihood at the drawn (off-grid) point, from the same terms.
+            log_likelihood = likelihood.log_likelihood_from_phase_grid_terms(
+                terms, new_phase[:, None], new_psi[:, None]
+            )[:, 0, 0]
+            samples["log_likelihood"] = torch.as_tensor(log_likelihood, device=device)
+        logger.info(f"Done. This took {time.time() - t0:.2f} s.")
+        return samples, torch.as_tensor(log_prob_phase + log_prob_psi, device=device)
+
+    def log_prob(self, theta_i, context, given=None):
+        """Evaluate `log q(phase, psi | theta_rest, d)` at the given angles (re-plug /
+        IS), with the same factorization as the draw."""
+        reference = next(iter(given.values()))
+        device = reference.device if torch.is_tensor(reference) else None
+        phase, psi = _to_numpy(theta_i["phase"]), _to_numpy(theta_i["psi"])
+        likelihood, terms, phases, phase_posterior = self._phase_profile(given, context)
+        log_prob_phase = interpolated_log_prob_multi(
+            phases, phase_posterior, phase, self.num_processes
+        )
+        psis, psi_posterior = self._psi_profile(likelihood, terms, phase)
+        log_prob_psi = interpolated_log_prob_multi(
+            psis, psi_posterior, psi, self.num_processes
+        )
+        return torch.as_tensor(log_prob_phase + log_prob_psi, device=device)
+
+    def describe(self) -> dict:
+        """The default descriptor plus the grid settings."""
+        return {
+            "step": type(self).__name__,
+            "parameters": list(self.parameters),
+            "conditioning": list(self.conditioning),
+            "n_grid_phase": self.n_grid_phase,
+            "n_grid_psi": self.n_grid_psi,
+            "uniform_weight": self.uniform_weight,
+            "use_base_domain": self.use_base_domain,
+            "cache_log_likelihood": self.cache_log_likelihood,
+        }
+
+    def _phase_profile(self, given, context):
+        """The likelihood, the stacked psi-dependent mode terms of all samples, the
+        phase grid, and the floored psi-marginal phase distribution `q(phase)`, one
+        row per sample. The (phase, psi) grid is reduced over psi chunk by chunk."""
+        theta = pd.DataFrame({k: _to_numpy(v) for k, v in given.items()})
+        likelihood = context.likelihood(
+            use_base_domain=self.use_base_domain, wfg_updates=self.wfg_updates
+        )
+        terms = _stacked_phase_grid_terms(likelihood, theta, True, self.num_processes)
+        phases = np.linspace(0, 2 * np.pi, self.n_grid_phase)
+        psis = np.linspace(0, np.pi, self.n_grid_psi)
+        n = len(theta)
+        chunk = max(1, self.max_grid_elements // (self.n_grid_phase * self.n_grid_psi))
+        log_marginal = np.empty((n, self.n_grid_phase))
+        for start in range(0, n, chunk):
+            sl = slice(start, start + chunk)
+            grid = likelihood.log_likelihood_from_phase_grid_terms(
+                {
+                    **terms,
+                    **{
+                        k: terms[k][sl]
+                        for k in ("kappa2_modes", "rho2opt_const", "rho2opt_crossterms")
+                    },
+                },
+                phases,
+                psis,
+            )
+            # Drop the endpoint psi = pi: psi has period pi, so it repeats the
+            # phase-dependent psi = 0 column and would double-count it.
+            log_marginal[sl] = logsumexp(grid[..., :-1], axis=-1)
+        return (
+            likelihood,
+            terms,
+            phases,
+            _floored_density(log_marginal, self.uniform_weight),
+        )
+
+    def _psi_profile(self, likelihood, terms, phase):
+        """The psi grid and the floored conditional `q(psi | phase)`, evaluated from
+        the terms exactly at the given phase of each sample (one row each)."""
+        psis = np.linspace(0, np.pi, self.n_grid_psi)
+        log_conditional = likelihood.log_likelihood_from_phase_grid_terms(
+            terms, np.asarray(phase)[:, None], psis
+        )[:, 0, :]
+        return psis, _floored_density(log_conditional, self.uniform_weight)
 
 
 def _build_gnpe_transforms(model: BasePosteriorModel):

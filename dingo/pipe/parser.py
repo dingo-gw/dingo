@@ -1630,8 +1630,9 @@ def create_parser(top_level=True, usage=None):
         default="Default",
         help=(
             "Dictionary of importance-sampling-settings to pass in, e.g., "
-            "{synthetic_phase: {approximation_22_mode: False, (...)}} OR pass"
-            "pre-defined set of density-recovery-settings {PhaseRecoveryDefault}"
+            "{synthetic_parameters: {approximation_22_mode: False, (...)}} OR pass"
+            "pre-defined set of importance-sampling-settings {PhaseRecoveryDefault, "
+            "PhasePsiRecoveryDefault}"
         ),
     )
     sampler_parser.add(

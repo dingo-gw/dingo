@@ -109,10 +109,13 @@ its own log density. Note that network standardization is applied internally, so
 `PriorFactor`
 : An unconditioned factor that draws a block of parameters from a prior, which is then the proposal for that block.
 
-`SyntheticPhaseFactor`, `GNPEKernelFactor`, `GNPEFlowFactor`
+`SyntheticPhaseFactor`, `SyntheticPhasePsiFactor`, `GNPEKernelFactor`, `GNPEFlowFactor`
 : The gravitational-wave factors, defined in `dingo.gw.inference.steps`.
   `SyntheticPhaseFactor` reconstructs the phase for a phase-marginalized network
   from the likelihood (see [synthetic phase](result.md#synthetic-phase)).
+  `SyntheticPhasePsiFactor` reconstructs the phase and the polarization angle for
+  a network that infers neither, from the likelihood on a (phase, psi) grid, still
+  with one waveform evaluation per sample.
   `GNPEKernelFactor` is the GNPE blur kernel $p(\hat\theta | \theta)$.
   `GNPEFlowFactor` is the GNPE main network, which is conditioned on the proxies.
 
