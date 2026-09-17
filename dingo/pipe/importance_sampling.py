@@ -181,11 +181,18 @@ class ImportanceSamplingInput(Input):
 
     @importance_sampling_settings.setter
     def importance_sampling_settings(self, settings):
-        # Set up defaults.
+        # Set up defaults: recover the phase if the network does not infer it, and
+        # psi along with it if the network infers neither.
         if "phase" not in self.result.samples.columns:
-            self._importance_sampling_settings = IMPORTANCE_SAMPLING_SETTINGS[
+            default = (
                 "PhaseRecoveryDefault"
-            ]
+                if "psi" in self.result.samples.columns
+                else "PhasePsiRecoveryDefault"
+            )
+            # Copied, since the settings are updated below.
+            self._importance_sampling_settings = dict(
+                IMPORTANCE_SAMPLING_SETTINGS[default]
+            )
         else:
             self._importance_sampling_settings = dict()
 
@@ -201,12 +208,20 @@ class ImportanceSamplingInput(Input):
                 self._importance_sampling_settings.update(
                     IMPORTANCE_SAMPLING_SETTINGS["PhaseRecoveryDefault"]
                 )
-            else:
+            elif settings.lower() == "phasepsirecoverydefault":
                 self._importance_sampling_settings.update(
-                    convert_string_to_dict(settings)
+                    IMPORTANCE_SAMPLING_SETTINGS["PhasePsiRecoveryDefault"]
                 )
+            else:
+                user_settings = convert_string_to_dict(settings)
+                if "synthetic_phase" in user_settings:
+                    raise ValueError(
+                        "importance-sampling-settings: synthetic_phase has been renamed "
+                        "to synthetic_parameters."
+                    )
+                self._importance_sampling_settings.update(user_settings)
             if "phase_marginalization" in self._importance_sampling_settings:
-                self._importance_sampling_settings.pop("synthetic_phase", None)
+                self._importance_sampling_settings.pop("synthetic_parameters", None)
         else:
             self._importance_sampling_settings = dict()
 
@@ -255,24 +270,31 @@ class ImportanceSamplingInput(Input):
 
         # Calibration parameters and synthetic phase are drawn in one chain, the
         # calibration first, so that the phase is conditioned on it.
-        synthetic_phase_kwargs = None
+        synthetic_parameters_kwargs = None
         use_cached_log_likelihood = False
-        if "synthetic_phase" in self.importance_sampling_settings:
-            synthetic_phase_kwargs = {
-                **self.importance_sampling_settings["synthetic_phase"],
+        if "synthetic_parameters" in self.importance_sampling_settings:
+            synthetic_parameters_kwargs = {
+                **self.importance_sampling_settings["synthetic_parameters"],
                 "num_processes": self.request_cpus,
             }
             # The synthetic phase can cache the log likelihood at the drawn phase for
             # importance sampling, unless it uses the (2, 2)-mode approximation,
             # importance sampling uses a marginalized likelihood, or the cached value
             # would not be exact.
-            use_cached_log_likelihood = synthetic_phase_kwargs.get(
+            use_cached_log_likelihood = synthetic_parameters_kwargs.get(
                 "cache_log_likelihood", True
             )
+            # When psi is drawn, SyntheticPhasePsiFactor always uses the exact mode
+            # sum; approximation_22_mode (default True) only applies to phase only.
             if use_cached_log_likelihood and (
-                synthetic_phase_kwargs.get("approximation_22_mode", True)
+                (
+                    self.result.psi_prior is None
+                    and synthetic_parameters_kwargs.get("approximation_22_mode", True)
+                )
                 or any(likelihood_kwargs.values())
-                or not self._synthetic_phase_modes_exact(synthetic_phase_kwargs)
+                or not self._synthetic_parameters_modes_exact(
+                    synthetic_parameters_kwargs
+                )
             ):
                 logger.info(
                     "Not caching the synthetic phase log likelihood (incompatible "
@@ -280,18 +302,20 @@ class ImportanceSamplingInput(Input):
                     "waveform model's mode decomposition)."
                 )
                 use_cached_log_likelihood = False
-            synthetic_phase_kwargs["cache_log_likelihood"] = use_cached_log_likelihood
+            synthetic_parameters_kwargs["cache_log_likelihood"] = (
+                use_cached_log_likelihood
+            )
         calibration_sampling_kwargs = self.importance_sampling_settings.get(
             "calibration_sampling_settings"
         )
-        if synthetic_phase_kwargs or calibration_sampling_kwargs:
-            if synthetic_phase_kwargs:
+        if synthetic_parameters_kwargs or calibration_sampling_kwargs:
+            if synthetic_parameters_kwargs:
                 logger.info("Sampling synthetic phase")
             elif calibration_sampling_kwargs: 
                 logger.info("Sampling calibration parameters")
             self.result.sample_proposal_extensions(
                 calibration_sampling_kwargs=calibration_sampling_kwargs,
-                synthetic_phase_kwargs=synthetic_phase_kwargs,
+                synthetic_parameters_kwargs=synthetic_parameters_kwargs,
             )
 
         self.result.importance_sample(
@@ -303,7 +327,9 @@ class ImportanceSamplingInput(Input):
         self.result.print_summary()
         self.result.to_file(os.path.join(self.result_directory, self.label + ".hdf5"))
 
-    def _synthetic_phase_modes_exact(self, synthetic_phase_kwargs: dict) -> bool:
+    def _synthetic_parameters_modes_exact(
+        self, synthetic_parameters_kwargs: dict
+    ) -> bool:
         """
         Whether the cached synthetic phase log likelihood is exact: it is computed
         from the m-components of the waveform, which sum to exactly the waveform the
@@ -312,8 +338,8 @@ class ImportanceSamplingInput(Input):
         """
         dataset_settings = self.result.base_metadata["dataset_settings"]
         wfg_settings = dict(dataset_settings["waveform_generator"])
-        if "use_dft_phase_decomposition" in synthetic_phase_kwargs:
-            wfg_settings["use_dft_phase_decomposition"] = synthetic_phase_kwargs[
+        if "use_dft_phase_decomposition" in synthetic_parameters_kwargs:
+            wfg_settings["use_dft_phase_decomposition"] = synthetic_parameters_kwargs[
                 "use_dft_phase_decomposition"
             ]
         if wfg_settings.get("new_interface", False):

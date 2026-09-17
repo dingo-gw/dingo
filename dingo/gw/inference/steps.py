@@ -117,7 +117,7 @@ class SyntheticPhaseFactor(Factor):
     def __init__(
         self,
         conditioning: list[str],
-        n_grid: int = 5001,
+        n_grid_phase: int = 5001,
         approximation_22_mode: bool = False,
         uniform_weight: float = 0.01,
         num_processes: int = 1,
@@ -131,7 +131,7 @@ class SyntheticPhaseFactor(Factor):
         conditioning : list[str]
             The physical parameters the likelihood needs to generate the waveform
             (everything the chain has produced except `phase`).
-        n_grid : int, default 5001
+        n_grid_phase : int, default 5001
             Number of phase grid points on `[0, 2 pi)`.
         approximation_22_mode : bool, default False
             Use the (2, 2)-mode approximation instead of the exact mode sum.
@@ -158,7 +158,7 @@ class SyntheticPhaseFactor(Factor):
             )
         self.parameters = ["phase"]
         self.conditioning = list(conditioning)
-        self.n_grid = n_grid
+        self.n_grid_phase = n_grid_phase
         self.approximation_22_mode = approximation_22_mode
         self.uniform_weight = uniform_weight
         self.num_processes = num_processes
@@ -217,7 +217,7 @@ class SyntheticPhaseFactor(Factor):
             "step": type(self).__name__,
             "parameters": list(self.parameters),
             "conditioning": list(self.conditioning),
-            "n_grid": self.n_grid,
+            "n_grid_phase": self.n_grid_phase,
             "approximation_22_mode": self.approximation_22_mode,
             "uniform_weight": self.uniform_weight,
             "use_base_domain": self.use_base_domain,
@@ -233,7 +233,7 @@ class SyntheticPhaseFactor(Factor):
         likelihood = context.likelihood(
             use_base_domain=self.use_base_domain, wfg_updates=self.wfg_updates
         )
-        phases = np.linspace(0, 2 * np.pi, self.n_grid)
+        phases = np.linspace(0, 2 * np.pi, self.n_grid_phase)
         terms = None
         if self.approximation_22_mode:
             # Assume the waveform is (2, 2)-dominated (transforms as exp(2i phase)), so the
@@ -270,7 +270,7 @@ class SyntheticPhasePsiFactor(Factor):
 
     The draw factorizes as `q(phase) q(psi | phase)`. `q(phase)` is the psi-marginal
     of the grid (the samples are processed in chunks, so that the full
-    `N x n_grid x n_grid_psi` grid is never held at once). `q(psi | phase)` is then
+    `N x n_grid_phase x n_grid_psi` grid is never held at once). `q(psi | phase)` is then
     evaluated on the psi grid exactly at the drawn phase, not interpolated between
     grid rows. Both factors get a uniform floor (weight `uniform_weight`) and are
     sampled from the interpolated grid distribution; `log_prob` rebuilds them the
@@ -279,14 +279,14 @@ class SyntheticPhasePsiFactor(Factor):
     `log_likelihood`.
     """
 
-    # Upper bound on the (chunk, n_grid, n_grid_psi) grid held at once, in elements.
+    # Upper bound on the (chunk, n_grid_phase, n_grid_psi) grid held at once, in elements.
     max_grid_elements = 50_000_000
 
     def __init__(
         self,
         conditioning: list[str],
-        n_grid: int,
-        n_grid_psi: int,
+        n_grid_phase: int = 512,
+        n_grid_psi: int = 128,
         uniform_weight: float = 0.01,
         num_processes: int = 1,
         use_base_domain: bool = False,
@@ -299,10 +299,12 @@ class SyntheticPhasePsiFactor(Factor):
         conditioning : list[str]
             The physical parameters the likelihood needs to generate the waveform
             (everything the chain has produced except `phase` and `psi`).
-        n_grid : int
+        n_grid_phase : int, default 512
             Number of phase grid points on `[0, 2 pi)`.
-        n_grid_psi : int
-            Number of psi grid points on `[0, pi)`.
+        n_grid_psi : int, default 128
+            Number of psi grid points on `[0, pi)`. The grid only shapes the proposal
+            (importance sampling is unbiased for any grid), but it should resolve
+            the likelihood peak, whose width in either angle is about 1 / SNR.
         uniform_weight : float, default 0.01
             Weight of the uniform floor added to each of the two grid distributions.
         num_processes : int, default 1
@@ -319,7 +321,7 @@ class SyntheticPhasePsiFactor(Factor):
         """
         self.parameters = ["phase", "psi"]
         self.conditioning = list(conditioning)
-        self.n_grid = n_grid
+        self.n_grid_phase = n_grid_phase
         self.n_grid_psi = n_grid_psi
         self.uniform_weight = uniform_weight
         self.num_processes = num_processes
@@ -388,7 +390,7 @@ class SyntheticPhasePsiFactor(Factor):
             "step": type(self).__name__,
             "parameters": list(self.parameters),
             "conditioning": list(self.conditioning),
-            "n_grid": self.n_grid,
+            "n_grid_phase": self.n_grid_phase,
             "n_grid_psi": self.n_grid_psi,
             "uniform_weight": self.uniform_weight,
             "use_base_domain": self.use_base_domain,
@@ -404,11 +406,11 @@ class SyntheticPhasePsiFactor(Factor):
             use_base_domain=self.use_base_domain, wfg_updates=self.wfg_updates
         )
         terms = _stacked_phase_grid_terms(likelihood, theta, True, self.num_processes)
-        phases = np.linspace(0, 2 * np.pi, self.n_grid)
+        phases = np.linspace(0, 2 * np.pi, self.n_grid_phase)
         psis = np.linspace(0, np.pi, self.n_grid_psi)
         n = len(theta)
-        chunk = max(1, self.max_grid_elements // (self.n_grid * self.n_grid_psi))
-        log_marginal = np.empty((n, self.n_grid))
+        chunk = max(1, self.max_grid_elements // (self.n_grid_phase * self.n_grid_psi))
+        log_marginal = np.empty((n, self.n_grid_phase))
         for start in range(0, n, chunk):
             sl = slice(start, start + chunk)
             grid = likelihood.log_likelihood_from_phase_grid_terms(

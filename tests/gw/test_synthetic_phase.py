@@ -78,7 +78,7 @@ def test_profile_approx_matches_formula():
     n, n_grid, weight = 5, 257, 0.01
     factor = SyntheticPhaseFactor(
         conditioning=["chirp_mass"],
-        n_grid=n_grid,
+        n_grid_phase=n_grid,
         approximation_22_mode=True,
         uniform_weight=weight,
     )
@@ -99,7 +99,7 @@ def test_profile_approx_matches_formula():
 def test_profile_exact_mode_runs():
     n, n_grid = 4, 129
     factor = SyntheticPhaseFactor(
-        conditioning=["chirp_mass"], n_grid=n_grid, approximation_22_mode=False
+        conditioning=["chirp_mass"], n_grid_phase=n_grid, approximation_22_mode=False
     )
     phases, profile, _ = factor._phase_profile(_given(n), _MockContext())
     assert phases.shape == (n_grid,)
@@ -149,7 +149,7 @@ def test_factor_builds_likelihood_from_context():
     for use_base_domain in (False, True):
         factor = SyntheticPhaseFactor(
             conditioning=["chirp_mass"],
-            n_grid=11,
+            n_grid_phase=11,
             approximation_22_mode=True,
             use_base_domain=use_base_domain,
         )
@@ -162,7 +162,7 @@ def test_factor_builds_likelihood_from_context():
 
     factor = SyntheticPhaseFactor(
         conditioning=["chirp_mass"],
-        n_grid=11,
+        n_grid_phase=11,
         approximation_22_mode=True,
         wfg_updates={"use_dft_phase_decomposition": False},
     )
@@ -179,7 +179,9 @@ def test_cached_log_likelihood_at_drawn_phase():
     # phase, evaluated from the terms rather than read off the grid; the phase draw
     # and its log q are unchanged.
     n = 6
-    kwargs = dict(conditioning=["chirp_mass"], n_grid=33, approximation_22_mode=False)
+    kwargs = dict(
+        conditioning=["chirp_mass"], n_grid_phase=33, approximation_22_mode=False
+    )
     context, given = _MockContext(), _given(n)
     _seed(2)
     block, log_prob = SyntheticPhaseFactor(**kwargs).sample_and_log_prob(
@@ -205,7 +207,7 @@ def test_cached_log_likelihood_is_chain_output():
     table = SampleTableFactor({"chirp_mass": np.linspace(20.0, 40.0, 4)})
     factor = SyntheticPhaseFactor(
         conditioning=["chirp_mass"],
-        n_grid=33,
+        n_grid_phase=33,
         approximation_22_mode=False,
         cache_log_likelihood=True,
     )
@@ -230,9 +232,12 @@ def test_cached_log_likelihood_requires_exact_mode():
 # ---------------------------------------------------------------------------
 
 
-def _psi_factor(n_grid=65, n_grid_psi=33, **kwargs):
+def _psi_factor(n_grid_phase=65, n_grid_psi=33, **kwargs):
     return SyntheticPhasePsiFactor(
-        conditioning=["chirp_mass"], n_grid=n_grid, n_grid_psi=n_grid_psi, **kwargs
+        conditioning=["chirp_mass"],
+        n_grid_phase=n_grid_phase,
+        n_grid_psi=n_grid_psi,
+        **kwargs,
     )
 
 
@@ -258,7 +263,9 @@ def test_phase_psi_profile_marginal_matches_formula():
     # duplicated endpoint psi = pi (plus the floor), computed here in chunks of samples.
     n, weight = 5, 0.01
     factor = _psi_factor(uniform_weight=weight)
-    factor.max_grid_elements = 2 * factor.n_grid * factor.n_grid_psi  # 2 rows/chunk
+    factor.max_grid_elements = (
+        2 * factor.n_grid_phase * factor.n_grid_psi
+    )  # 2 rows/chunk
     given = _given(n)
     _, _, phases, profile = factor._phase_profile(given, _MockContext())
     psis = np.linspace(0, np.pi, factor.n_grid_psi)
@@ -269,7 +276,7 @@ def test_phase_psi_profile_marginal_matches_formula():
     expected = np.exp(log_l[..., :-1]).sum(axis=-1)
     expected /= expected.max(axis=1, keepdims=True)
     expected += expected.mean(axis=1, keepdims=True) * weight
-    assert profile.shape == (n, factor.n_grid)
+    assert profile.shape == (n, factor.n_grid_phase)
     assert np.allclose(profile, expected)
 
 
@@ -289,7 +296,7 @@ def test_phase_psi_log_prob_replug_matches_sample():
 
 def test_phase_psi_density_is_normalized():
     # exp(log q(phase, psi)) integrates to 1 over [0, 2pi) x [0, pi) for one sample.
-    factor = _psi_factor(n_grid=129, n_grid_psi=65)
+    factor = _psi_factor(n_grid_phase=129, n_grid_psi=65)
     phase_mesh, psi_mesh = np.meshgrid(
         np.linspace(0, 2 * np.pi, 121), np.linspace(0, np.pi, 61), indexing="ij"
     )

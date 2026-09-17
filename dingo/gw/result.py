@@ -58,19 +58,19 @@ class Result(CoreResult):
             Number of effective samples, (\\sum_i w_i)^2 / \\sum_i w_i^2
         sample_efficiency : float (property)
             Number of effective samples / Number of samples
-        synthetic_phase_kwargs : dict
-            kwargs describing the synthetic phase sampling.
+        synthetic_parameters_kwargs : dict
+            kwargs describing the synthetic phase (and psi) sampling.
     """
 
     dataset_type = "gw_result"
 
     @property
-    def synthetic_phase_kwargs(self):
-        return self.importance_sampling_metadata.get("synthetic_phase")
+    def synthetic_parameters_kwargs(self):
+        return self.importance_sampling_metadata.get("synthetic_parameters")
 
-    @synthetic_phase_kwargs.setter
-    def synthetic_phase_kwargs(self, value):
-        self.importance_sampling_metadata["synthetic_phase"] = value
+    @synthetic_parameters_kwargs.setter
+    def synthetic_parameters_kwargs(self, value):
+        self.importance_sampling_metadata["synthetic_parameters"] = value
 
     @property
     def time_marginalization_kwargs(self):
@@ -368,7 +368,7 @@ class Result(CoreResult):
     def sample_proposal_extensions(
         self,
         calibration_sampling_kwargs: Optional[dict] = None,
-        synthetic_phase_kwargs: Optional[dict] = None,
+        synthetic_parameters_kwargs: Optional[dict] = None,
     ):
         """
         Extend the proposal samples with calibration parameters and / or a synthetic
@@ -379,7 +379,7 @@ class Result(CoreResult):
             [SampleTableFactor, PriorFactor (per detector), SyntheticPhaseFactor],
 
         with each optional step present only if its settings are given (see
-        `_calibration_steps` and `_synthetic_phase_step`). The chain folds every
+        `_calibration_steps` and `_synthetic_parameters_step`). The chain folds every
         step's log probability into `log_prob`, the joint proposal density
         `log q(theta) + log q(calibration) + log q(phase | theta, calibration, d)`.
         The calibration parameters are drawn first, so the phase distribution is
@@ -410,20 +410,23 @@ class Result(CoreResult):
                 Whether envelopes are over eta ("data") or alpha ("template").
                 Can be a string (applied to all detectors), a dict mapping ifo names
                 to correction types, or None (uses defaults from CALIBRATION_CORRECTION_TYPE_LOOKUP).
-        synthetic_phase_kwargs : dict, optional
+        synthetic_parameters_kwargs : dict, optional
             Synthetic phase parameters. Keys:
 
-            n_grid : int
-                Number of phase grid points on [0, 2pi).
-            n_grid_psi : int
-                Number of psi grid points on [0, pi). Required if the samples lack
-                psi as well as the phase: then both are drawn from the likelihood
-                on a (phase, psi) grid (exact mode sum only), see
-                `SyntheticPhasePsiFactor`. Ignored otherwise.
+            n_grid_phase : int, optional
+                Number of phase grid points on [0, 2pi). Defaults to the factor's
+                default (5001 for the phase alone, 512 together with psi).
+            n_grid_psi : int, optional
+                Number of psi grid points on [0, pi), default 128. Only used if the
+                samples lack psi as well as the phase: then both are drawn from the
+                likelihood on a (phase, psi) grid (exact mode sum only), see
+                `SyntheticPhasePsiFactor`.
             approximation_22_mode : bool, default True
                 Assume a (2, 2)-dominated waveform. Otherwise the exact mode sum is
                 used, which requires the waveform generator's
-                spin_conversion_phase = 0. Not available together with psi.
+                spin_conversion_phase = 0. Not available together with psi: the
+                (phase, psi) grid always uses the exact mode sum, so omit it or
+                set it False there (True raises a ValueError).
             uniform_weight : float, default 0.01
                 Weight of the uniform floor added to the phase distribution for
                 mass coverage.
@@ -439,9 +442,9 @@ class Result(CoreResult):
                 use_cached_log_likelihood=True). Exact mode only. It includes the
                 calibration drawn in the same chain.
         """
-        if calibration_sampling_kwargs is None and synthetic_phase_kwargs is None:
+        if calibration_sampling_kwargs is None and synthetic_parameters_kwargs is None:
             raise ValueError(
-                "Pass calibration_sampling_kwargs and / or synthetic_phase_kwargs."
+                "Pass calibration_sampling_kwargs and / or synthetic_parameters_kwargs."
             )
 
         param_keys = [k for k, v in self.prior.items() if not isinstance(v, Constraint)]
@@ -451,9 +454,9 @@ class Result(CoreResult):
         steps = []
         if calibration_sampling_kwargs is not None:
             steps += self._calibration_steps(calibration_sampling_kwargs)
-        if synthetic_phase_kwargs is not None:
-            step, within_prior = self._synthetic_phase_step(
-                synthetic_phase_kwargs,
+        if synthetic_parameters_kwargs is not None:
+            step, within_prior = self._synthetic_parameters_step(
+                synthetic_parameters_kwargs,
                 conditioning=param_keys + [p for s in steps for p in s.parameters],
             )
             steps.append(step)
@@ -485,7 +488,7 @@ class Result(CoreResult):
         # Rebuild the prior: it now includes the calibration priors (from
         # prior_update), and the phase prior rejoins it once phase is in the samples.
         self._build_prior()
-        if synthetic_phase_kwargs is not None:
+        if synthetic_parameters_kwargs is not None:
             # Any previously built likelihood does not describe the now-phase-full
             # samples; importance sampling rebuilds with its own marginalization
             # settings.
@@ -575,8 +578,8 @@ class Result(CoreResult):
         self.importance_sampling_metadata["prior_update"] = prior_update
         return steps
 
-    def _synthetic_phase_step(
-        self, synthetic_phase_kwargs: dict, conditioning: list[str]
+    def _synthetic_parameters_step(
+        self, synthetic_parameters_kwargs: dict, conditioning: list[str]
     ) -> tuple:
         """
         Set up the synthetic phase step of `sample_proposal_extensions`: a
@@ -586,11 +589,11 @@ class Result(CoreResult):
         approximate). It applies to samples in the full parameter space except the
         phase, and only to samples within the prior. If the samples lack psi as
         well, the step is a `SyntheticPhasePsiFactor`, which draws both angles from
-        the likelihood on a (phase, psi) grid; `n_grid_psi` is then required.
+        the likelihood on a (phase, psi) grid.
 
         Parameters
         ----------
-        synthetic_phase_kwargs : dict
+        synthetic_parameters_kwargs : dict
             See `sample_proposal_extensions`.
         conditioning : list[str]
             The columns the phase distribution conditions on: the proposal
@@ -612,7 +615,7 @@ class Result(CoreResult):
                 "Synthetic phase requires a sampler context; this result does not "
                 "carry full model metadata."
             )
-        self.synthetic_phase_kwargs = synthetic_phase_kwargs
+        self.synthetic_parameters_kwargs = synthetic_parameters_kwargs
         if not (
             isinstance(self.phase_prior, Uniform)
             and (self.phase_prior._minimum, self.phase_prior._maximum) == (0, 2 * np.pi)
@@ -622,11 +625,6 @@ class Result(CoreResult):
                 f" However, the prior is {self.phase_prior}."
             )
         if self.psi_prior is not None:
-            if "n_grid_psi" not in synthetic_phase_kwargs:
-                raise ValueError(
-                    "The samples lack psi, so the synthetic phase step also draws "
-                    "psi and requires n_grid_psi in synthetic_phase_kwargs."
-                )
             if not (
                 isinstance(self.psi_prior, Uniform)
                 and np.isclose(self.psi_prior._minimum, 0)
@@ -663,34 +661,49 @@ class Result(CoreResult):
         within_prior = np.isfinite(log_prior)
 
         wfg_updates = None
-        if "use_dft_phase_decomposition" in synthetic_phase_kwargs:
+        if "use_dft_phase_decomposition" in synthetic_parameters_kwargs:
             wfg_updates = {
-                "use_dft_phase_decomposition": synthetic_phase_kwargs[
+                "use_dft_phase_decomposition": synthetic_parameters_kwargs[
                     "use_dft_phase_decomposition"
                 ]
             }
+        # Grid sizes that are not given fall back to the factor's defaults. Reject
+        # the former name n_grid rather than silently using the default grid.
+        if "n_grid" in synthetic_parameters_kwargs:
+            raise ValueError(
+                "synthetic_parameters_kwargs: n_grid has been renamed to n_grid_phase."
+            )
+        # The (phase, psi) grid is exact-mode only; don't silently ignore the setting.
+        if self.psi_prior is not None and synthetic_parameters_kwargs.get(
+            "approximation_22_mode"
+        ):
+            raise ValueError(
+                "synthetic_parameters_kwargs: the (phase, psi) grid requires the exact "
+                "mode sum, approximation_22_mode=False."
+            )
         common = dict(
             conditioning=conditioning,
-            n_grid=synthetic_phase_kwargs["n_grid"],
-            uniform_weight=synthetic_phase_kwargs.get("uniform_weight", 0.01),
+            uniform_weight=synthetic_parameters_kwargs.get("uniform_weight", 0.01),
             # Put a cap on the number of processes to avoid overhead.
             num_processes=min(
-                synthetic_phase_kwargs.get("num_processes", 1),
+                synthetic_parameters_kwargs.get("num_processes", 1),
                 np.sum(within_prior) // 10,
             ),
             use_base_domain=self.use_base_domain,
             wfg_updates=wfg_updates,
-            cache_log_likelihood=synthetic_phase_kwargs.get(
+            cache_log_likelihood=synthetic_parameters_kwargs.get(
                 "cache_log_likelihood", False
             ),
         )
+        if "n_grid_phase" in synthetic_parameters_kwargs:
+            common["n_grid_phase"] = synthetic_parameters_kwargs["n_grid_phase"]
         if self.psi_prior is not None:
-            step = SyntheticPhasePsiFactor(
-                n_grid_psi=synthetic_phase_kwargs["n_grid_psi"], **common
-            )
+            if "n_grid_psi" in synthetic_parameters_kwargs:
+                common["n_grid_psi"] = synthetic_parameters_kwargs["n_grid_psi"]
+            step = SyntheticPhasePsiFactor(**common)
         else:
             step = SyntheticPhaseFactor(
-                approximation_22_mode=synthetic_phase_kwargs.get(
+                approximation_22_mode=synthetic_parameters_kwargs.get(
                     "approximation_22_mode", True
                 ),
                 **common,
