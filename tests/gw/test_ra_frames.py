@@ -48,9 +48,7 @@ def test_ra_reparam_matches_sidereal_shift():
     ra_tref = torch.rand(1000, dtype=torch.float32) * (2 * np.pi)
 
     ra_correction = (
-        Time(t_event, format="gps", scale="utc").sidereal_time(
-            "apparent", "greenwich"
-        )
+        Time(t_event, format="gps", scale="utc").sidereal_time("apparent", "greenwich")
         - Time(t_ref, format="gps", scale="utc").sidereal_time("apparent", "greenwich")
     ).rad
 

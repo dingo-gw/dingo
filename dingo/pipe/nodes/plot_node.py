@@ -8,7 +8,7 @@ from dingo.pipe.utils import _strip_unwanted_submission_keys
 class PlotNode(BilbyPlotNode):
 
     run_node_on_osg = False
-    
+
     def __init__(self, inputs, merged_node, dag):
         # Call Node.__init__ directly, skipping BilbyPlotNode.__init__ to customize
         super(BilbyPlotNode, self).__init__(inputs)

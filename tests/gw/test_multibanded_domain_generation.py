@@ -16,13 +16,18 @@ import pytest
 from bilby.core.prior import DeltaFunction
 
 from dingo.gw.dataset._multibanded_domain_utils import build_extreme_prior
-from dingo.gw.dataset.evaluate_multibanded_domain import \
-    _evaluate_multibanding_main
+from dingo.gw.dataset.evaluate_multibanded_domain import _evaluate_multibanding_main
 from dingo.gw.dataset.generate_multibanded_domain import (
-    _build_mfd_for_threshold, _compute_mismatches, _load_asd,
-    _output_settings_path, _same_nodes, compute_max_decimation_factor,
-    compute_waveform_difference_per_decimation_factor, floor_to_power_of_2,
-    get_band_nodes_for_adaptive_decimation)
+    _build_mfd_for_threshold,
+    _compute_mismatches,
+    _load_asd,
+    _output_settings_path,
+    _same_nodes,
+    compute_max_decimation_factor,
+    compute_waveform_difference_per_decimation_factor,
+    floor_to_power_of_2,
+    get_band_nodes_for_adaptive_decimation,
+)
 from dingo.gw.domains import MultibandedFrequencyDomain, UniformFrequencyDomain
 from dingo.gw.prior import default_intrinsic_dict
 
@@ -532,7 +537,12 @@ class TestThresholdSearchBandCountChange:
                 gmd,
                 "_generate_whitened_waveforms",
                 return_value=(
-                    ufd, None, None, {"h_cross": None}, {"h_cross": None}, None
+                    ufd,
+                    None,
+                    None,
+                    {"h_cross": None},
+                    {"h_cross": None},
+                    None,
                 ),
             ),
             patch.object(

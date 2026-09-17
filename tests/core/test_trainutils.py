@@ -139,7 +139,10 @@ def test_local_limits_ignore_total_epoch_limit():
 
 def test_loss_info_weighted_average_across_batches():
     info = LossInfo(
-        epoch=1, len_dataset=100, batch_size_per_grad_update=10, device=torch.device("cpu")
+        epoch=1,
+        len_dataset=100,
+        batch_size_per_grad_update=10,
+        device=torch.device("cpu"),
     )
     # Two optimizer steps of one mini-batch each; the epoch average is weighted
     # by the number of samples in each step.

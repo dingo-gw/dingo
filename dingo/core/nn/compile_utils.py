@@ -16,11 +16,11 @@ import torch
 def eager_mode():
     """Run compiled networks eagerly inside the block, without (re)compiling.
 
-    The test epoch runs the network in eval mode. This is a different graph than 
+    The test epoch runs the network in eval mode. This is a different graph than
     what you would see at training. Therefore, it would trigger a
-    second full compilation. Instead, we do eager evaluation (not using the 
-    fused kernels) to avoid the test loop taking a long time. We could also 
-    compile a "test time" graph, but it does not amortize as well as training time. 
+    second full compilation. Instead, we do eager evaluation (not using the
+    fused kernels) to avoid the test loop taking a long time. We could also
+    compile a "test time" graph, but it does not amortize as well as training time.
     """
     with torch.compiler.set_stance("force_eager"):
         yield

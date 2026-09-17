@@ -13,6 +13,7 @@ class KDE:
     """
     Kernel Density Estimation (KDE) class for sampling ASDs.
     """
+
     def __init__(self, parameter_dict, sampling_settings):
         """
         Parameters
@@ -74,7 +75,7 @@ class KDE:
             split_indices = sorted(split_indices)
 
             for i in range(len(split_indices) - 1):
-                vals = y_values[:, split_indices[i]: split_indices[i + 1]].T
+                vals = y_values[:, split_indices[i] : split_indices[i + 1]].T
                 kde_vals = stats.gaussian_kde(
                     vals, bw_method=float(self.settings["bandwidth_spline"])
                 )
@@ -110,9 +111,7 @@ class KDE:
             # rescale base noise
             if rescaling_ys:
                 y_values_mean = np.mean(y_values, axis=0)
-                y_values = (
-                    y_values - y_values_mean[None, :] + rescaling_ys[det]
-                )
+                y_values = y_values - y_values_mean[None, :] + rescaling_ys[det]
             parameters_dicts[det]["y_values"] = y_values
 
         return parameters_dicts

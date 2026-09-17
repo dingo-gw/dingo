@@ -176,7 +176,7 @@ def download_event_data_in_FD(
                 time_segment,
                 window,
                 num_segments_psd,
-                det=det
+                det=det,
             )
             ** 0.5
         )

@@ -30,8 +30,8 @@ def test_time_delay_from_geocenter_errors(ifo_list_and_prior_and_tref):
         dec = params["dec"][:100]
         time_delay_from_geocenter(ifo_list[0], ra, dec, tref)
     with pytest.raises(ValueError):
-        ra = params["ra"][None,:]
-        dec = params["dec"][None,:]
+        ra = params["ra"][None, :]
+        dec = params["dec"][None, :]
         time_delay_from_geocenter(ifo_list[0], ra, dec, tref)
 
 
@@ -87,7 +87,7 @@ def test_time_delay_from_geocenter_tensor(ifo_list_and_prior_and_tref):
         ]
         dt0 = np.array(dt0)
         dt1 = time_delay_from_geocenter(ifo, ra, dec, tref)
-        assert np.allclose(dt0, dt1, atol=1e-6) # larger atol due to single precision
+        assert np.allclose(dt0, dt1, atol=1e-6)  # larger atol due to single precision
     # check that this also works for arrays of length 1, for which the bilby method is
     # called since it is faster
     ra = torch.Tensor(params["ra"])[:1]

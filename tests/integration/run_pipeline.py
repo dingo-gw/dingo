@@ -4,6 +4,7 @@ Stages: waveform dataset -> ASD dataset (fixed GPS) -> train -> dingo_pipe local
 injection with importance sampling. Reads the IS sample efficiency from the
 result file and prints it for the pytest wrapper to parse.
 """
+
 import argparse
 import glob
 import os
@@ -32,9 +33,7 @@ def find_is_efficiency(outdir):
     """Locate the importance-sampled result and return sample_efficiency (0-1)."""
     from dingo.gw.result import Result
 
-    candidates = sorted(
-        glob.glob(os.path.join(outdir, "**", "*.hdf5"), recursive=True)
-    )
+    candidates = sorted(glob.glob(os.path.join(outdir, "**", "*.hdf5"), recursive=True))
     last_exc_info = None  # (path, exception) from the most recent load failure
     for path in candidates:
         try:
@@ -84,12 +83,21 @@ def main():
     # 1. Waveform dataset
     def _stage_waveform():
         run(
-            ["dingo_generate_dataset", "--settings_file", "waveform_dataset_settings.yaml",
-             "--num_processes", "8", "--out_file", "waveform_dataset.hdf5"],
+            [
+                "dingo_generate_dataset",
+                "--settings_file",
+                "waveform_dataset_settings.yaml",
+                "--num_processes",
+                "8",
+                "--out_file",
+                "waveform_dataset.hdf5",
+            ],
             cwd=workdir,
         )
 
-    stage_times["waveform_dataset"], _ = timed_stage("waveform_dataset", _stage_waveform)
+    stage_times["waveform_dataset"], _ = timed_stage(
+        "waveform_dataset", _stage_waveform
+    )
 
     # 2. ASD dataset at a fixed GPS time (GWOSC, no auth)
     def _stage_asd():
@@ -101,9 +109,17 @@ def main():
         with open(ts_path, "wb") as f:
             pickle.dump(segments, f)
         run(
-            ["dingo_generate_asd_dataset", "--settings_file", "asd_dataset_settings.yaml",
-             "--data_dir", workdir, "--time_segments_file", ts_path,
-             "--out_name", "asds_O1.hdf5"],
+            [
+                "dingo_generate_asd_dataset",
+                "--settings_file",
+                "asd_dataset_settings.yaml",
+                "--data_dir",
+                workdir,
+                "--time_segments_file",
+                ts_path,
+                "--out_name",
+                "asds_O1.hdf5",
+            ],
             cwd=workdir,
         )
 
@@ -111,8 +127,16 @@ def main():
 
     # 3. Train
     def _stage_train():
-        run(["dingo_train", "--settings_file", "train_settings.yaml", "--train_dir", workdir],
-            cwd=workdir)
+        run(
+            [
+                "dingo_train",
+                "--settings_file",
+                "train_settings.yaml",
+                "--train_dir",
+                workdir,
+            ],
+            cwd=workdir,
+        )
 
     stage_times["train"], _ = timed_stage("train", _stage_train)
 
@@ -120,7 +144,9 @@ def main():
     # dingo_pipe generates submit/bash_<label>.sh; execute it to run all nodes locally.
     def _stage_inference():
         run(["dingo_pipe", "injection.ini"], cwd=workdir)
-        bash_script = os.path.join(workdir, "inference_out", "submit", "bash_heavy_ci.sh")
+        bash_script = os.path.join(
+            workdir, "inference_out", "submit", "bash_heavy_ci.sh"
+        )
         run(["bash", bash_script], cwd=workdir)
 
     stage_times["inference"], _ = timed_stage("inference", _stage_inference)

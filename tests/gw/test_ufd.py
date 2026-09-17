@@ -163,4 +163,3 @@ def test_FD_caching(uniform_FD_params):
     # after clearing the cache, the __call__ method should return the correct
     # result
     assert len(domain()) < len(domain_ref())
-

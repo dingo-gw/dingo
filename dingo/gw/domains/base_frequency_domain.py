@@ -199,13 +199,13 @@ class BaseFrequencyDomain(Domain, ABC):
         \sigma_{\mathrm{noise}} = \sqrt{\frac{1}{4 \delta f}}
         $$
 
-        Historical note: 
-        Note we no longer use the noise std of the form 
+        Historical note:
+        Note we no longer use the noise std of the form
         $$
         \sigma_{\mathrm{noise}} = \sqrt{\frac{w}{4 \delta f}}
         $$
-        where $w$ is the window factor. For the full discussion, see 
-        https://git.ligo.org/pe/pe-group-coordination/-/issues/1#note_1465275. 
+        where $w$ is the window factor. For the full discussion, see
+        https://git.ligo.org/pe/pe-group-coordination/-/issues/1#note_1465275.
 
         To scale noise such that it is consistent with a multivariate *unit* normal
         distribution in the, you must divide whitened data by the noise_std. For the

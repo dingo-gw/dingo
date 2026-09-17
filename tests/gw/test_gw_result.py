@@ -124,7 +124,7 @@ def gw_result():
 @pytest.mark.parametrize(
     "attr, key",
     [
-        ("synthetic_phase_kwargs", "synthetic_phase"),
+        ("synthetic_parameters_kwargs", "synthetic_parameters"),
         ("time_marginalization_kwargs", "time_marginalization"),
         ("phase_marginalization_kwargs", "phase_marginalization"),
         ("calibration_marginalization_kwargs", "calibration_marginalization"),
@@ -221,7 +221,7 @@ def test_synthetic_phase_adds_phase_column():
     log_prob_before = result.samples["log_prob"].to_numpy().copy()
 
     result.sample_proposal_extensions(
-        synthetic_phase_kwargs={"n_grid": 16, "approximation_22_mode": True}
+        synthetic_parameters_kwargs={"n_grid_phase": 16, "approximation_22_mode": True}
     )
 
     assert "phase" in result.samples.columns
@@ -237,7 +237,7 @@ def test_proposal_extensions_drop_stale_log_likelihood():
     result = make_gw_result(drop_phase=True)
     result.samples["log_likelihood"] = 0.0
     result.sample_proposal_extensions(
-        synthetic_phase_kwargs={"n_grid": 16, "approximation_22_mode": True}
+        synthetic_parameters_kwargs={"n_grid_phase": 16, "approximation_22_mode": True}
     )
     assert "log_likelihood" not in result.samples.columns
     with pytest.raises(KeyError, match="requires log likelihoods"):
@@ -249,17 +249,17 @@ def test_synthetic_phase_psi_adds_both_columns():
 
     result = make_gw_result(drop_phase=True, drop_psi=True, exact_phase=True)
     kwargs = {
-        "n_grid": 16,
+        "n_grid_phase": 16,
         "n_grid_psi": 8,
         "approximation_22_mode": False,
         "cache_log_likelihood": True,
     }
-    step = result._synthetic_phase_step(
+    step = result._synthetic_parameters_step(
         kwargs, conditioning=list(result.prior), num_samples=len(result.samples)
     )
     assert isinstance(step, SyntheticPhasePsiFactor)
     # With psi in the samples, the phase-only factor is used and n_grid_psi ignored.
-    step = make_gw_result(drop_phase=True)._synthetic_phase_step(
+    step = make_gw_result(drop_phase=True)._synthetic_parameters_step(
         kwargs, conditioning=[], num_samples=100
     )
     assert isinstance(step, SyntheticPhaseFactor)
@@ -267,7 +267,7 @@ def test_synthetic_phase_psi_adds_both_columns():
     log_prob_before = result.samples["log_prob"].to_numpy().copy()
     bilby_random.seed(0)
     np.random.seed(0)
-    result.sample_proposal_extensions(synthetic_phase_kwargs=kwargs)
+    result.sample_proposal_extensions(synthetic_parameters_kwargs=kwargs)
     assert "phase" in result.prior and "psi" in result.prior
     assert result.phase_prior is None and result.psi_prior is None
     psi = result.samples["psi"].to_numpy()
@@ -293,10 +293,57 @@ def test_synthetic_phase_psi_adds_both_columns():
     assert np.allclose(cached, direct, rtol=1e-10)
 
 
-def test_synthetic_phase_psi_requires_n_grid_psi():
+def test_phase_recovery_default_serves_both_factors():
+    # dingo_pipe's default synthetic-phase settings: 5001 phase points for the phase
+    # alone, 512 x 128 together with psi.
+    from dingo.pipe.default_settings import IMPORTANCE_SAMPLING_SETTINGS
+    from dingo.gw.inference.steps import SyntheticPhaseFactor, SyntheticPhasePsiFactor
+
+    for drop_psi, cls in (
+        (True, SyntheticPhasePsiFactor),
+        (False, SyntheticPhaseFactor),
+    ):
+        default = "PhasePsiRecoveryDefault" if drop_psi else "PhaseRecoveryDefault"
+        kwargs = IMPORTANCE_SAMPLING_SETTINGS[default]["synthetic_parameters"]
+        result = make_gw_result(drop_phase=True, drop_psi=drop_psi, exact_phase=True)
+        step = result._synthetic_parameters_step(
+            kwargs, conditioning=list(result.prior), num_samples=100
+        )
+        assert isinstance(step, cls) and step.cache_log_likelihood
+        grid = (step.n_grid_phase, getattr(step, "n_grid_psi", None))
+        assert grid == ((512, 128) if drop_psi else (5001, None))
+
+
+def test_synthetic_phase_grid_size_settings():
+    # n_grid_phase and n_grid_psi reach the factor; the former n_grid is rejected
+    # rather than silently replaced by the default grid.
     result = make_gw_result(drop_phase=True, drop_psi=True)
-    with pytest.raises(ValueError, match="n_grid_psi"):
-        result.sample_proposal_extensions(synthetic_phase_kwargs={"n_grid": 16})
+    step = result._synthetic_parameters_step(
+        {"n_grid_phase": 16, "n_grid_psi": 8}, [], num_samples=100
+    )
+    assert (step.n_grid_phase, step.n_grid_psi) == (16, 8)
+    with pytest.raises(ValueError, match="renamed to n_grid_phase"):
+        result._synthetic_parameters_step({"n_grid": 16}, [], num_samples=100)
+
+
+def test_synthetic_phase_psi_rejects_approximation_22_mode():
+    # The (phase, psi) grid is exact-mode only: an explicit approximation_22_mode
+    # raises instead of being ignored, omitting it is fine. The phase-only factor
+    # still honours it.
+    from dingo.gw.inference.steps import SyntheticPhaseFactor, SyntheticPhasePsiFactor
+
+    result = make_gw_result(drop_phase=True, drop_psi=True)
+    with pytest.raises(ValueError, match="requires the exact mode sum"):
+        result._synthetic_parameters_step(
+            {"approximation_22_mode": True}, [], num_samples=100
+        )
+    step = result._synthetic_parameters_step({}, [], num_samples=100)
+    assert isinstance(step, SyntheticPhasePsiFactor)
+
+    step = make_gw_result(drop_phase=True)._synthetic_parameters_step(
+        {"approximation_22_mode": True}, [], num_samples=100
+    )
+    assert isinstance(step, SyntheticPhaseFactor) and step.approximation_22_mode
 
 
 def test_synthetic_phase_requires_uniform_phase_prior():
@@ -304,7 +351,9 @@ def test_synthetic_phase_requires_uniform_phase_prior():
     # so synthetic phase sampling is not applicable and must raise.
     result = make_gw_result(drop_phase=False)
     with pytest.raises(ValueError, match="[Pp]hase prior"):
-        result.sample_proposal_extensions(synthetic_phase_kwargs={"n_grid": 16})
+        result.sample_proposal_extensions(
+            synthetic_parameters_kwargs={"n_grid_phase": 16}
+        )
 
 
 def test_psi_prior_split_off_when_samples_lack_psi():
@@ -700,10 +749,10 @@ def test_calibration_and_synthetic_phase_run_as_one_chain(tmp_path):
     log_prob_before = result.samples["log_prob"].to_numpy().copy()
     theta_keys = [k for k, v in result.prior.items() if not isinstance(v, Constraint)]
 
-    kwargs = {"n_grid": 64, "approximation_22_mode": True}
+    kwargs = {"n_grid_phase": 64, "approximation_22_mode": True}
     result.sample_proposal_extensions(
         calibration_sampling_kwargs=_calibration_kwargs(tmp_path),
-        synthetic_phase_kwargs=kwargs,
+        synthetic_parameters_kwargs=kwargs,
     )
 
     recalib = [c for c in result.samples.columns if c.startswith("recalib_")]
@@ -719,7 +768,7 @@ def test_calibration_and_synthetic_phase_run_as_one_chain(tmp_path):
     sampled = calibration_prior.non_fixed_keys
     log_q_calibration = calibration_prior.ln_prob(inside[sampled], axis=0)
     factor = SyntheticPhaseFactor(
-        conditioning=theta_keys + recalib, n_grid=64, approximation_22_mode=True
+        conditioning=theta_keys + recalib, n_grid_phase=64, approximation_22_mode=True
     )
     given = {k: torch.as_tensor(inside[k].to_numpy()) for k in theta_keys + recalib}
     log_q_phase = factor.log_prob(
@@ -737,7 +786,7 @@ def test_calibration_and_synthetic_phase_run_as_one_chain(tmp_path):
     given_uncalibrated = {k: given[k] for k in theta_keys}
     log_q_phase_uncalibrated = (
         SyntheticPhaseFactor(
-            conditioning=theta_keys, n_grid=64, approximation_22_mode=True
+            conditioning=theta_keys, n_grid_phase=64, approximation_22_mode=True
         )
         .log_prob(
             {"phase": torch.as_tensor(inside["phase"].to_numpy())},

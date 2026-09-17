@@ -232,7 +232,11 @@ def merge_datasets_cli():
             ]
         else:  # if no time_segments are specified, use the first 'num_parts' ASD datasets
             filenames = sorted(glob.glob(join(file_dir, f"asd_*.hdf5")))
-            num_parts = min(args.num_parts, len(filenames)) if args.num_parts > 0 else len(filenames)
+            num_parts = (
+                min(args.num_parts, len(filenames))
+                if args.num_parts > 0
+                else len(filenames)
+            )
             filenames = filenames[:num_parts]
 
         asd_dataset_list[det] = [ASDDataset(filename) for filename in filenames]

@@ -8,15 +8,17 @@ from dingo.pipe.utils import _strip_unwanted_submission_keys
 
 class GenerationNode(BilbyGenerationNode):
 
-    def __init__(self, inputs, trigger_time, idx, dag, parent=None, importance_sampling=False):
+    def __init__(
+        self, inputs, trigger_time, idx, dag, parent=None, importance_sampling=False
+    ):
         """
         Node for data generation jobs with DINGO-specific customizations
         """
         self.importance_sampling = importance_sampling
-        
+
         # Call Node.__init__ directly, skipping BilbyGenerationNode.__init__
         super(BilbyGenerationNode, self).__init__(inputs, retry=3)
-        
+
         # Copy all the BilbyGenerationNode logic but add DINGO customizations
         if not inputs.osg and inputs.generation_pool == "igwn-pool":
             raise BilbyPipeError(
@@ -102,6 +104,7 @@ class GenerationNode(BilbyGenerationNode):
             if fname.startswith(self.inputs.data_find_urltype)
         ]:
             from bilby_pipe.utils import logger
+
             logger.warning(
                 "The following frame files were identified by gwdatafind for this analysis. "
                 "These frames may not be found by the data generation stage as file "
@@ -114,7 +117,7 @@ class GenerationNode(BilbyGenerationNode):
 
         # DINGO-specific customization: Add site selection
         if self.inputs.generation_pool == "igwn-pool":
-            sites = getattr(self.inputs, 'generation_desired_sites', None)
+            sites = getattr(self.inputs, "generation_desired_sites", None)
             if sites is not None:
                 self.extra_lines.append(f'MY.DESIRED_Sites = "{sites}"')
 

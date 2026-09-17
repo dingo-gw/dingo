@@ -150,9 +150,9 @@ class Dingo(Pipeline):
         result_files = glob.glob(
             os.path.join(rundir, "result", f"*importance_sampling.hdf5")
         )
-        if len(result_files) == 0: 
+        if len(result_files) == 0:
             raise ValueError("Importance sampling result file not found")
-        elif len(result_files) > 1: 
+        elif len(result_files) > 1:
             raise ValueError("Multiple importance sampling result files found")
 
         # pesummary can't presently read a result file containing MultibandedFrequencyDomain
@@ -218,8 +218,8 @@ class Dingo(Pipeline):
 
         Take possible domain updates and random frequency masking into account.
         """
-        f_min = prod_meta["quality"]['minimum frequency'].values()
-        f_max = prod_meta["quality"]['maximum frequency'].values()
+        f_min = prod_meta["quality"]["minimum frequency"].values()
+        f_max = prod_meta["quality"]["maximum frequency"].values()
 
         # Get network values
         domain = net_meta["dataset_settings"]["domain"]["base_domain"]
@@ -230,22 +230,30 @@ class Dingo(Pipeline):
         net_f_max = domain_update.get("f_max", domain["f_max"])
 
         # Random strain cropping bounds (if they exist)
-        net_f_min_upper = net_meta["train_settings"]["data"]["random_strain_cropping"].get(
-            "f_min_upper", None
-        ) if "random_strain_cropping" in net_meta["train_settings"]["data"] else None
-        net_f_max_lower = net_meta["train_settings"]["data"]["random_strain_cropping"].get(
-            "f_max_lower", None
-        ) if "random_strain_cropping" in net_meta["train_settings"]["data"] else None
+        net_f_min_upper = (
+            net_meta["train_settings"]["data"]["random_strain_cropping"].get(
+                "f_min_upper", None
+            )
+            if "random_strain_cropping" in net_meta["train_settings"]["data"]
+            else None
+        )
+        net_f_max_lower = (
+            net_meta["train_settings"]["data"]["random_strain_cropping"].get(
+                "f_max_lower", None
+            )
+            if "random_strain_cropping" in net_meta["train_settings"]["data"]
+            else None
+        )
 
         # Check f_min
         if net_f_min_upper is None:
-            f_min_match = (min(f_min) == max(f_min) == net_f_min)
+            f_min_match = min(f_min) == max(f_min) == net_f_min
         else:
             f_min_match = (min(f_min) >= net_f_min) and (max(f_min) <= net_f_min_upper)
 
         # Check f_max
         if net_f_max_lower is None:
-            f_max_match = (min(f_max) == max(f_max) == net_f_max)
+            f_max_match = min(f_max) == max(f_max) == net_f_max
         else:
             f_max_match = (min(f_max) >= net_f_max_lower) and (max(f_max) <= net_f_max)
 
@@ -253,7 +261,9 @@ class Dingo(Pipeline):
 
     @staticmethod
     def _net_max_luminosity_distance(metadata):
-        prior = metadata["train_settings"]["data"]["extrinsic_prior"]["luminosity_distance"]
+        prior = metadata["train_settings"]["data"]["extrinsic_prior"][
+            "luminosity_distance"
+        ]
         match = re.findall(r"maximum=[\d]+", prior)
         assert match
         return int(match[0].split("=")[-1])
@@ -263,7 +273,9 @@ class Dingo(Pipeline):
         duration = prod_meta["data"]["segment length"]
         ifos = prod_meta["interferometers"]
 
-        net_duration = round(1 / net_meta["dataset_settings"]["domain"]["base_domain"]["delta_f"])
+        net_duration = round(
+            1 / net_meta["dataset_settings"]["domain"]["base_domain"]["delta_f"]
+        )
         net_ifos = net_meta["train_settings"]["data"]["detectors"]
 
         if (
@@ -282,7 +294,9 @@ class Dingo(Pipeline):
         compatible_networks = []
         for networks in prod_meta["available networks"]:
             try:
-                f = torch.load(networks["model"], map_location="meta", weights_only=False)
+                f = torch.load(
+                    networks["model"], map_location="meta", weights_only=False
+                )
                 net_meta = f["metadata"]
             except FileNotFoundError:
                 raise PipelineException(
@@ -317,17 +331,20 @@ class Dingo(Pipeline):
         if len(compatible_networks) == 1:
             return compatible_networks[0][0]
 
-        distances = [self._net_max_luminosity_distance(x[1]) for x in compatible_networks]
+        distances = [
+            self._net_max_luminosity_distance(x[1]) for x in compatible_networks
+        ]
         if len(distances) > len(set(distances)):
             raise PipelineException(
                 "Multiple DINGO networks match this production..",
                 production=self.production.name,
             )
 
-        prod_max_luminosity_distance = prod_meta["priors"]["luminosity distance"]["maximum"]
+        prod_max_luminosity_distance = prod_meta["priors"]["luminosity distance"][
+            "maximum"
+        ]
         compatible_networks = sorted(
-            compatible_networks,
-            key=lambda x: self._net_max_luminosity_distance(x[1])
+            compatible_networks, key=lambda x: self._net_max_luminosity_distance(x[1])
         )
         for networks, net_meta in compatible_networks:
             net_max_luminosity_distance = self._net_max_luminosity_distance(net_meta)

@@ -299,11 +299,14 @@ def initialize_stage(
 
     # Freeze/unfreeze RB layer if necessary
     if "freeze_rb_layer" in stage:
-        if reset_graphs_if_requires_grad_changes(
-            pm.network,
-            name_contains="layers_rb",
-            requires_grad=not stage["freeze_rb_layer"],
-        ) and print_output:
+        if (
+            reset_graphs_if_requires_grad_changes(
+                pm.network,
+                name_contains="layers_rb",
+                requires_grad=not stage["freeze_rb_layer"],
+            )
+            and print_output
+        ):
             print(
                 "freeze_rb_layer changes the trainable parameters: compiled graphs "
                 "(if any) discarded, the next training step (re)compiles."

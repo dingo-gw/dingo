@@ -167,7 +167,9 @@ class TestResetGraphsOnRequiresGradChange:
 
     @staticmethod
     def _set_rb(net, requires_grad):
-        for p in net[0].parameters():  # parameters "0.weight", "0.bias" play the RB layer
+        for p in net[
+            0
+        ].parameters():  # parameters "0.weight", "0.bias" play the RB layer
             p.requires_grad_(requires_grad)
 
     def test_unfreeze_without_reset_gives_no_gradient(self):

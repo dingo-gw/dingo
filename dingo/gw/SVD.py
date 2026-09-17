@@ -4,6 +4,7 @@ import scipy
 from sklearn.utils.extmath import randomized_svd
 from dingo.core.dataset import DingoDataset
 
+
 class SVDBasis(DingoDataset):
 
     dataset_type = "svd_basis"
@@ -57,8 +58,9 @@ class SVDBasis(DingoDataset):
             # for a m x n matrix and k is the target rank, here called n
             # For small k this is much faster than the standard SVD.
             try:
-                U, s, Vh = randomized_svd(training_data, n, random_state=0,
-                                        power_iteration_normalizer='QR')
+                U, s, Vh = randomized_svd(
+                    training_data, n, random_state=0, power_iteration_normalizer="QR"
+                )
             except ValueError as e:
                 raise ValueError(
                     "randomized_svd failed — possibly due to complex-valued input.\n"
@@ -242,6 +244,7 @@ class SVDBasis(DingoDataset):
     #         self.Vh = self.Vh[:n, :]
     #         self.s = self.s[:n]
     #         self.n = n
+
 
 class ApplySVD(object):
     """Transform operator for applying an SVD compression / decompression."""

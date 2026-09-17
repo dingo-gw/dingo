@@ -72,13 +72,20 @@ def recursive_hdf5_load(
                     d[k] = recursive_hdf5_load(v, idx=idx, dtype_map=dtype_spec)
                 else:
                     # dtype or None: use as inherited_dtype for children
-                    effective_dtype = dtype_spec if dtype_spec is not None else _inherited_dtype
+                    effective_dtype = (
+                        dtype_spec if dtype_spec is not None else _inherited_dtype
+                    )
                     d[k] = recursive_hdf5_load(
-                        v, idx=idx, dtype_map=dtype_map, _inherited_dtype=effective_dtype
+                        v,
+                        idx=idx,
+                        dtype_map=dtype_map,
+                        _inherited_dtype=effective_dtype,
                     )
             else:
                 # For datasets, dtype_spec should be a dtype (not a dict)
-                effective_dtype = dtype_spec if dtype_spec is not None else _inherited_dtype
+                effective_dtype = (
+                    dtype_spec if dtype_spec is not None else _inherited_dtype
+                )
                 if isinstance(effective_dtype, dict):
                     raise TypeError(
                         f"dtype_map specifies a dict for dataset '{k}', but dicts are "

@@ -182,4 +182,3 @@ def test_mfd_time_translation_torch(mfd):
     # TODO: Is there a way to improve on this?
     assert torch.allclose(result[..., 1, :], torch.tensor(0.0), atol=1e-2)
     assert torch.allclose(result[..., 2, :], torch.tensor(constant_value))
-
