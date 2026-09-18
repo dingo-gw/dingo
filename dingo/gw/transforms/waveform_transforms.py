@@ -671,14 +671,16 @@ def factor_fiducial_waveform(
     if inverse:
         fiducial_phase *= -1
 
-    if type(data) == dict:
-        result = {}
-        for k, v in data.items():
-            result[k] = domain.add_phase(v, -fiducial_phase)
-    else:
-        result = domain.add_phase(data, -fiducial_phase)
+    def apply(v):
+        # The phase is float64; keep the dtype of single-precision numpy data.
+        out = domain.add_phase(v, -fiducial_phase)
+        if isinstance(v, np.ndarray):
+            out = out.astype(v.dtype, copy=False)
+        return out
 
-    return result
+    if type(data) == dict:
+        return {k: apply(v) for k, v in data.items()}
+    return apply(data)
 
 
 class HeterodynePhase(object):

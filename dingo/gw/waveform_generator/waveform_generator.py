@@ -361,7 +361,11 @@ class WaveformGenerator:
             wf_dict = self._domain_transform(wf_dict)
 
         if self.transform is not None:
-            return self.transform(wf_dict)
+            # The transform takes a sample dict, so that parameter-dependent
+            # compression transforms (e.g. HeterodynePhase) can be composed with
+            # whitening and SVD.
+            sample = {"waveform": wf_dict, "parameters": parameters}
+            return self.transform(sample)["waveform"]
         else:
             return wf_dict
 
