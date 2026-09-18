@@ -329,7 +329,9 @@ class Result(DingoDataset):
         # For these, we do not want to evaluate the likelihood, in particular because
         # it may not even be possible to generate signals outside the prior (e.g.,
         # for BH spins > 1).
-        valid_samples = np.isfinite(log_prior + delta_log_prob_target)
+        valid_samples = np.isfinite(
+            log_prior + delta_log_prob_target + self.samples["log_prob"].to_numpy()
+        )
         theta = theta.iloc[valid_samples]
 
         print(f"Calculating {len(theta)} likelihoods.")
@@ -397,10 +399,11 @@ class Result(DingoDataset):
                 log_prior
                 + np.nan_to_num(log_likelihood)  # NaN = no log_likelihood evaluation
                 + delta_log_prob_target
-                - np.nan_to_num(
-                    log_prob_proposal
-                )  # NaN = outside prior so no synthetic
-                # phase
+                - np.where(
+                    np.isfinite(log_prob_proposal),
+                    log_prob_proposal,
+                    np.inf,
+                )
             )
             self.log_evidence = logsumexp(log_weights) - np.log(self.num_samples)
 
