@@ -429,22 +429,28 @@ class Dingo(Pipeline):
             ) from error
 
     def after_completion(self):
+        # Only run PESummary if it was requested
+        if not "pesummary" in self.production.meta.get("postprocessing", {}):
+            self.logger.info("No pesummary requested, skipping..")
+            return
+
         try:
             from asimov_pesummary import PESummary
         except ImportError:
             self.logger.warning("asimov-pesummary not available, skipping post-processing")
             return
-
-        post_pipeline = PESummary(production=self.production)
-        self.logger.info("Job has completed. Running PE Summary.")
-        cluster = post_pipeline.submit_dag()
-        self.production.meta["job id"] = int(cluster)
-        self.production.status = "processing"
-        self.production.event.update_data()
+        super().after_completion()
+        # TODO: could add legacy option
+        #post_pipeline = PESummary(production=self.production)
+        #self.logger.info("Job has completed. Running PE Summary.")
+        #cluster = post_pipeline.submit_dag()
+        #self.production.meta["job id"] = int(cluster)
+        #self.production.status = "processing"
+        #self.production.event.update_data()
 
     def detect_completion_processing(self):
-        # no post processing currently performed
-        return True
+        # no dingo post processing currently performed
+        return super().detect_completion_processing()
 
     def resurrect(self):
         """
