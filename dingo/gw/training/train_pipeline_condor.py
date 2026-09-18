@@ -30,7 +30,7 @@ def create_submission_file(
     """
     lines = []
     # getenv required for GPU training because wandb needs $HOME to be defined
-    lines.append(f"getenv = True\n")
+    lines.append(f"getenv = HOME\n")
     lines.append(f'executable = {condor_settings["executable"]}\n')
 
     if "request_disk" in condor_settings:
