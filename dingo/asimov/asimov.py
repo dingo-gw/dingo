@@ -1,18 +1,14 @@
 # adapted from the Asimov Bilby Pipeline interface
-import os
+import configparser
 import glob
+import importlib.resources
+import os
 import re
 import subprocess
-import importlib.resources
-from importlib.metadata import version
-import configparser
 import warnings
+from importlib.metadata import version
 
-from asimov.pipeline import (
-    Pipeline,
-    PipelineException,
-    PipelineLogger,
-)
+from asimov.pipeline import Pipeline, PipelineException, PipelineLogger
 
 # Check if using asimov < 0.7.0 (legacy version with PESummaryPipeline)
 ASIMOV_LEGACY = version("asimov") < "0.7.0"
@@ -223,8 +219,8 @@ class DingoPipeline(Pipeline):
 
         Take possible domain updates and random frequency masking into account.
         """
-        f_min = prod_meta["quality"]['minimum frequency'].values()
-        f_max = prod_meta["quality"]['maximum frequency'].values()
+        f_min = prod_meta["quality"]["minimum frequency"].values()
+        f_max = prod_meta["quality"]["maximum frequency"].values()
 
         # Get network values
         domain = net_meta["dataset_settings"]["domain"]["base_domain"]
@@ -235,12 +231,20 @@ class DingoPipeline(Pipeline):
         net_f_max = domain_update.get("f_max", domain["f_max"])
 
         # Random strain cropping bounds (if they exist)
-        net_f_min_upper = net_meta["train_settings"]["data"]["random_strain_cropping"].get(
-            "f_min_upper", None
-        ) if "random_strain_cropping" in net_meta["train_settings"]["data"] else None
-        net_f_max_lower = net_meta["train_settings"]["data"]["random_strain_cropping"].get(
-            "f_max_lower", None
-        ) if "random_strain_cropping" in net_meta["train_settings"]["data"] else None
+        net_f_min_upper = (
+            net_meta["train_settings"]["data"]["random_strain_cropping"].get(
+                "f_min_upper", None
+            )
+            if "random_strain_cropping" in net_meta["train_settings"]["data"]
+            else None
+        )
+        net_f_max_lower = (
+            net_meta["train_settings"]["data"]["random_strain_cropping"].get(
+                "f_max_lower", None
+            )
+            if "random_strain_cropping" in net_meta["train_settings"]["data"]
+            else None
+        )
 
         # Check f_min
         if net_f_min_upper is None:
@@ -258,7 +262,9 @@ class DingoPipeline(Pipeline):
 
     @staticmethod
     def _net_max_luminosity_distance(metadata):
-        prior = metadata["train_settings"]["data"]["extrinsic_prior"]["luminosity_distance"]
+        prior = metadata["train_settings"]["data"]["extrinsic_prior"][
+            "luminosity_distance"
+        ]
         match = re.findall(r"maximum=[\d]+", prior)
         assert match
         return int(match[0].split("=")[-1])
@@ -268,7 +274,9 @@ class DingoPipeline(Pipeline):
         duration = prod_meta["data"]["segment length"]
         ifos = prod_meta["interferometers"]
 
-        net_duration = round(1 / net_meta["dataset_settings"]["domain"]["base_domain"]["delta_f"])
+        net_duration = round(
+            1 / net_meta["dataset_settings"]["domain"]["base_domain"]["delta_f"]
+        )
         net_ifos = net_meta["train_settings"]["data"]["detectors"]
 
         if (
@@ -289,7 +297,9 @@ class DingoPipeline(Pipeline):
         compatible_networks = []
         for networks in prod_meta["available networks"]:
             try:
-                f = torch.load(networks["model"], map_location="meta", weights_only=False)
+                f = torch.load(
+                    networks["model"], map_location="meta", weights_only=False
+                )
                 net_meta = f["metadata"]
             except FileNotFoundError as err:
                 msg = f"Could not find network: '{networks['model']}'.."
@@ -320,17 +330,20 @@ class DingoPipeline(Pipeline):
         if len(compatible_networks) == 1:
             return compatible_networks[0][0]
 
-        distances = [self._net_max_luminosity_distance(x[1]) for x in compatible_networks]
+        distances = [
+            self._net_max_luminosity_distance(x[1]) for x in compatible_networks
+        ]
         if len(distances) > len(set(distances)):
             raise PipelineException(
                 "Multiple DINGO networks match this production..",
                 production=self.production.name,
             )
 
-        prod_max_luminosity_distance = prod_meta["priors"]["luminosity distance"]["maximum"]
+        prod_max_luminosity_distance = prod_meta["priors"]["luminosity distance"][
+            "maximum"
+        ]
         compatible_networks = sorted(
-            compatible_networks,
-            key=lambda x: self._net_max_luminosity_distance(x[1])
+            compatible_networks, key=lambda x: self._net_max_luminosity_distance(x[1])
         )
         for networks, net_meta in compatible_networks:
             net_max_luminosity_distance = self._net_max_luminosity_distance(net_meta)
@@ -446,7 +459,9 @@ class DingoPipeline(Pipeline):
         try:
             from asimov_pesummary import PESummary
         except ImportError:
-            self.logger.warning("asimov-pesummary not available, skipping post-processing")
+            self.logger.warning(
+                "asimov-pesummary not available, skipping post-processing"
+            )
             return
         super().after_completion()
 
@@ -494,6 +509,7 @@ class DingoLegacy(DingoPipeline):
         Legacy implementation using PESummaryPipeline for post-processing.
         """
         from asimov.pipeline import PESummaryPipeline
+
         post_pipeline = PESummaryPipeline(production=self.production)
         self.logger.info("Job has completed. Running PE Summary.")
         cluster = post_pipeline.submit_dag()
