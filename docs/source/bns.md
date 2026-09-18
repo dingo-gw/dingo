@@ -12,13 +12,11 @@ single-step GNPE: one pass through the network, with the density preserved and
 importance sampling available directly.
 
 ```{note}
-This page describes inference with a trained chirp-mass-conditioned network.
-Training such a network is not yet supported; the training configuration will be
-documented when it is, and no pre-trained BNS network is distributed yet. Also not
-yet available: the accelerated heterodyned and decimated likelihood of
-{footcite:p}`Dax:2024mcn` (importance sampling uses the exact likelihood), the
-synthetic-phase `compute_likelihood` fast path, and per-event time scans for
-pre-merger networks.
+Not yet available: a distributed pre-trained BNS network (the training configuration
+is in `examples/binary_neutron_stars`, see [Training](#training)), the accelerated
+heterodyned and decimated likelihood of {footcite:p}`Dax:2024mcn` (importance sampling
+uses the exact likelihood), the synthetic-phase `compute_likelihood` fast path, and
+per-event time scans for pre-merger networks.
 ```
 
 ## Phase heterodyning
@@ -140,6 +138,130 @@ inertial-frame $m$-components, placing a spurious phase peak at $\phi + \pi$.
 The exact mode sum (`approximation_22_mode: false`) costs $2\ell_{\max}+1 = 5$ 
 evaluations per sample and, since NRTidal models have no frequency-domain modes in LALSimulation, requires the DFT phase decomposition with an explicit 
 `mode_list: [[2, 2], [2, -2]]` in the waveform-generator settings.
+
+## Training
+
+A chirp-mass-conditioned network is trained with the standard tools, with three
+additions: the waveform dataset is heterodyned before compression, the multibanded
+domain is determined from heterodyned waveforms, and the training transforms apply
+chirp-mass GNPE. A complete configuration following the GW170817 network of
+{footcite:p}`Dax:2024mcn` is provided in `examples/binary_neutron_stars`: 128 s
+segments ($\delta f = 1/128$ Hz), an analysis band from 23 Hz to 1536 Hz, a low-spin
+prior ($a \leq 0.05$), 30 million waveforms, and a kernel of half-width
+$0.005\,M_\odot$ on the chirp mass.
+
+### Waveform dataset
+
+The dataset settings are first written for the uniform base domain
+(`waveform_dataset_settings_ufd.yaml`). Beyond the approximant, priors, and
+`spin_conversion_phase: 0.0` of [Tidal parameters](#tidal-parameters), the compression
+block requests phase heterodyning:
+
+```yaml
+compression:
+  whitening: aLIGO_ZERO_DET_high_P_asd.txt
+  phase_heterodyning:
+    order: 0
+  svd:
+    size: 200
+    num_training_samples: 50000
+    num_validation_samples: 10000
+```
+
+Each waveform is heterodyned at its own chirp mass, after whitening and before the
+SVD, so the basis is built from heterodyned waveforms and can compress the long
+inspirals. The heterodyne belongs to the internal storage only: the dataset inverts it
+on decompression, and the training transforms re-heterodyne at the proxy (below).
+`order: 0` removes the leading-order chirp phase of
+[Phase heterodyning](#phase-heterodyning), and `chirp_mass` must be an intrinsic
+parameter. Since heterodyning must precede decimation, the waveforms have to be
+generated directly on the dataset domain: on a multibanded domain this restricts
+`phase_heterodyning` to approximants with a frequency-domain implementation, and an
+error is raised otherwise.
+
+The multibanded domain is then determined from these settings:
+
+```bash
+dingo_generate_multibanded_domain --settings_file waveform_dataset_settings_ufd.yaml \
+    --target_median_mismatch 1e-5 --chirp_mass_proxy_offset 0.005 --num_processes N
+```
+
+This tunes the decimation to the target median mismatch, using waveforms at the
+minimum chirp mass of the prior (the longest signals), and writes
+`waveform_dataset_settings_mfd.yaml`: the same settings with a
+`MultibandedFrequencyDomain`. When the settings contain `phase_heterodyning`, the bands
+are determined from heterodyned waveforms, as the network sees them. The network sees
+data heterodyned at the proxy rather than at the true chirp mass, and the residual
+oscillation grows with the difference between the two, so `--chirp_mass_proxy_offset`
+heterodynes at the chirp mass plus this offset; set it to the half-width of the
+training kernel. `dingo_evaluate_multibanded_domain` accepts the same offset. With the
+settings above, the target of $10^{-5}$ reproduces the banding of the network of
+{footcite:p}`Dax:2024mcn` (eight bands, about 3700 bins from 20 Hz to 2048 Hz). The
+dataset is generated from the multibanded settings file with `dingo_generate_dataset`
+as usual.
+
+```{warning}
+The NRTidalv3 approximants of LALSimulation (`IMRPhenomXP_NRTidalv3`,
+`IMRPhenomXAS_NRTidalv3`) place the time origin of the waveform at the merger
+frequency or, if the requested frequencies end below it, at the last requested
+frequency. Training waveforms are evaluated at the multibanded frequencies, whereas
+injections and likelihood templates are generated on the uniform dataset domain (and
+then restricted to the analysis range), so the dataset domain must extend past the
+merger frequency of the whole prior, as the 2048 Hz of the example does; a dataset
+domain ending below the merger would shift the training waveforms in time relative to
+the data. A `domain_update` or a frequency update at inference does not change the
+domain templates are generated on. `IMRPhenomPv2_NRTidal` does not have this dependence.
+```
+
+### Noise
+
+The ASD datasets are generated as for any other network (see
+[noise dataset](noise_dataset.ipynb)), on the uniform base domain with 128 s segments
+(`T: 128.0` in `asd_dataset_settings.yaml`): a fiducial dataset for pre-training and a
+full dataset for fine-tuning. They are decimated to the multibanded domain
+automatically when training starts.
+
+### Train settings
+
+The `data` section of `train_settings.yaml` configures chirp-mass GNPE and the context
+parameters:
+
+```yaml
+data:
+  waveform_dataset_path: training_data/waveform_dataset.hdf5
+  domain_update:
+    f_min: 23.0
+    f_max: 1536.0
+  gnpe_chirp:
+    kernel:
+      chirp_mass: bilby.core.prior.Uniform(minimum=-0.005, maximum=0.005)
+    order: 0
+  context_parameters:
+    - ra
+    - dec
+  inference_parameters:
+    - delta_chirp_mass
+    - mass_ratio
+    # ... the remaining parameters, without chirp_mass, ra, dec, or phase
+```
+
+`gnpe_chirp` inserts the chirp-mass GNPE transform after the extrinsic parameters are
+sampled. The chirp mass is blurred by the kernel, a Bilby prior on the offset, to give
+`chirp_mass_proxy`; the polarizations are heterodyned at the proxy, and the network
+conditions on it (`chirp_mass_proxy` is appended to `context_parameters`
+automatically). The offset `delta_chirp_mass` is available as an inference parameter
+and takes the place of `chirp_mass` in `inference_parameters`; the chain restores
+`chirp_mass` at inference (see [Prior conditioning](#prior-conditioning)). The SVD that
+seeds the embedding network is built from heterodyned waveforms.
+
+Further context parameters are listed under `context_parameters` and omitted from
+`inference_parameters`; the reference configuration conditions on the sky position.
+At inference every context parameter is pinned per event (`fixed-context-parameters`
+below). The reference network is phase marginalized: `phase` is not an inference
+parameter, and the phase is reconstructed synthetically before importance sampling,
+which requires `spin_conversion_phase: 0.0` in the dataset. The remaining settings
+(model, training stages, local) follow the standard [training](training.md) layout,
+and training runs with `dingo_train` or `dingo_train_condor`.
 
 ## Running through dingo_pipe
 
