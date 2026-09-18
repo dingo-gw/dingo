@@ -235,13 +235,13 @@ class Dingo(Pipeline):
 
         # Check f_min
         if net_f_min_upper is None:
-            f_min_match = (min(f_min) == max(f_min) == net_f_min)
+            f_min_match = min(f_min) == max(f_min) == net_f_min
         else:
             f_min_match = (min(f_min) >= net_f_min) and (max(f_min) <= net_f_min_upper)
 
         # Check f_max
         if net_f_max_lower is None:
-            f_max_match = (min(f_max) == max(f_max) == net_f_max)
+            f_max_match = min(f_max) == max(f_max) == net_f_max
         else:
             f_max_match = (min(f_max) >= net_f_max_lower) and (max(f_max) <= net_f_max)
 
@@ -282,16 +282,12 @@ class Dingo(Pipeline):
             try:
                 f = torch.load(networks["model"], map_location="meta", weights_only=False)
                 net_meta = f["metadata"]
-            except FileNotFoundError:
-                raise PipelineException(
-                    f"Could not find network: '{networks['model']}'..",
-                    production=self.production.name,
-                )
-            except KeyError:
-                raise PipelineException(
-                    f"Could not load metadata from network: '{networks['model']}'..",
-                    production=self.production.name,
-                )
+            except FileNotFoundError as err:
+                msg = f"Could not find network: '{networks['model']}'.."
+                raise PipelineException(msg, production=self.production.name) from err
+            except KeyError as err:
+                msg = "Could not load metadata from network: '{networks['model']}'.."
+                raise PipelineException(msg, production=self.production.name) from err
 
             if self.network_is_compatible(prod_meta, net_meta):
                 compatible_networks.append((networks, net_meta))
