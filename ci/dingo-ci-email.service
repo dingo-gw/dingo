@@ -1,0 +1,12 @@
+[Unit]
+Description=Check for Dingo CI Email Triggers
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/dingo-ci-email-trigger
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
