@@ -16,13 +16,18 @@ import pytest
 from bilby.core.prior import DeltaFunction
 
 from dingo.gw.dataset._multibanded_domain_utils import build_extreme_prior
-from dingo.gw.dataset.evaluate_multibanded_domain import \
-    _evaluate_multibanding_main
+from dingo.gw.dataset.evaluate_multibanded_domain import _evaluate_multibanding_main
 from dingo.gw.dataset.generate_multibanded_domain import (
-    _build_mfd_for_threshold, _compute_mismatches, _load_asd,
-    _output_settings_path, _same_nodes, compute_max_decimation_factor,
-    compute_waveform_difference_per_decimation_factor, floor_to_power_of_2,
-    get_band_nodes_for_adaptive_decimation)
+    _build_mfd_for_threshold,
+    _compute_mismatches,
+    _load_asd,
+    _output_settings_path,
+    _same_nodes,
+    compute_max_decimation_factor,
+    compute_waveform_difference_per_decimation_factor,
+    floor_to_power_of_2,
+    get_band_nodes_for_adaptive_decimation,
+)
 from dingo.gw.domains import MultibandedFrequencyDomain, UniformFrequencyDomain
 from dingo.gw.prior import default_intrinsic_dict
 
@@ -532,7 +537,12 @@ class TestThresholdSearchBandCountChange:
                 gmd,
                 "_generate_whitened_waveforms",
                 return_value=(
-                    ufd, None, None, {"h_cross": None}, {"h_cross": None}, None
+                    ufd,
+                    None,
+                    None,
+                    {"h_cross": None},
+                    {"h_cross": None},
+                    None,
                 ),
             ),
             patch.object(
@@ -567,3 +577,120 @@ class TestSameNodes:
         assert not _same_nodes(
             np.array([20.0, 64.0, 128.0, 256.0]), np.array([20.0, 64.0, 256.0])
         )
+
+
+# ---------------------------------------------------------------------------
+# Phase heterodyning (DINGO-BNS)
+# ---------------------------------------------------------------------------
+
+
+class TestHeterodynePolarizations:
+    def test_identity_without_setting(self, ufd):
+        from dingo.gw.dataset._multibanded_domain_utils import heterodyne_polarizations
+
+        pols = {"h_plus": np.ones((3, len(ufd())), dtype=complex)}
+        params = pd.DataFrame({"chirp_mass": [1.2, 1.3, 1.4]})
+        assert heterodyne_polarizations(pols, ufd, params, {}) is pols
+
+    @pytest.mark.parametrize("order", [0, 2])
+    def test_heterodynes_each_row_at_offset_chirp_mass(self, ufd, order):
+        from dingo.gw.dataset._multibanded_domain_utils import heterodyne_polarizations
+        from dingo.gw.transforms import factor_fiducial_waveform
+
+        rng = np.random.default_rng(0)
+        pols = {
+            k: rng.standard_normal((3, len(ufd())))
+            + 1j * rng.standard_normal((3, len(ufd())))
+            for k in ("h_plus", "h_cross")
+        }
+        params = pd.DataFrame(
+            {"chirp_mass": [1.2, 1.3, 1.4], "mass_ratio": [0.7, 0.8, 0.9]}
+        )
+        settings = {"compression": {"phase_heterodyning": {"order": order}}}
+        out = heterodyne_polarizations(
+            pols, ufd, params, settings, chirp_mass_proxy_offset=0.005
+        )
+        for k in pols:
+            for i in range(3):
+                expected = factor_fiducial_waveform(
+                    pols[k][i],
+                    ufd,
+                    1.2 + 0.1 * i + 0.005,
+                    [0.7, 0.8, 0.9][i],
+                    order=order,
+                )
+                np.testing.assert_allclose(out[k][i], expected)
+
+
+BNS_UFD_SETTINGS = {
+    "domain": {
+        "type": "UniformFrequencyDomain",
+        "f_min": 20.0,
+        "f_max": 256.0,
+        "delta_f": 1 / 64,
+    },
+    "waveform_generator": {
+        "approximant": "IMRPhenomXP_NRTidalv3",
+        "f_ref": 20.0,
+        "spin_conversion_phase": 0.0,
+    },
+    "intrinsic_prior": {
+        "mass_1": "bilby.core.prior.Constraint(minimum=1.0, maximum=2.5)",
+        "mass_2": "bilby.core.prior.Constraint(minimum=1.0, maximum=2.5)",
+        "chirp_mass": "bilby.gw.prior.UniformInComponentsChirpMass(minimum=1.2, maximum=1.4)",
+        "mass_ratio": "bilby.gw.prior.UniformInComponentsMassRatio(minimum=0.5, maximum=1.0)",
+        "a_1": "bilby.core.prior.Uniform(minimum=0.0, maximum=0.05)",
+        "a_2": "bilby.core.prior.Uniform(minimum=0.0, maximum=0.05)",
+        "tilt_1": "default",
+        "tilt_2": "default",
+        "phi_12": "default",
+        "phi_jl": "default",
+        "theta_jn": "default",
+        "phase": "default",
+        "lambda_1": "default",
+        "lambda_2": "default",
+        "luminosity_distance": 100.0,
+        "geocent_time": 0.0,
+    },
+    "compression": {
+        "whitening": "aLIGO_ZERO_DET_high_P_asd.txt",
+        "phase_heterodyning": {"order": 0},
+    },
+}
+
+
+def test_heterodyned_waveforms_decimate_further(tmp_path):
+    """For a heterodyned (DINGO-BNS) dataset, the bands are determined from heterodyned
+    waveforms, which allows far coarser bands at the same mismatch; a larger proxy
+    offset leaves more residual oscillation and hence no coarser bands."""
+    import yaml
+
+    from dingo.gw.dataset.generate_multibanded_domain import (
+        generate_multibanded_domain_settings,
+    )
+    from dingo.gw.domains import build_domain
+
+    def num_bins(settings, offset):
+        path = (
+            tmp_path
+            / f"settings_ufd_{offset}_{'phase_heterodyning' in settings['compression']}.yaml"
+        )
+        with open(path, "w") as f:
+            yaml.dump(settings, f)
+        out = generate_multibanded_domain_settings(
+            str(path),
+            num_samples=4,
+            target_median_mismatch=1e-3,
+            chirp_mass_proxy_offset=offset,
+        )
+        with open(out) as f:
+            return len(build_domain(yaml.safe_load(f)["domain"]))
+
+    plain = dict(
+        BNS_UFD_SETTINGS, compression={"whitening": "aLIGO_ZERO_DET_high_P_asd.txt"}
+    )
+    bins_plain = num_bins(plain, 0.0)
+    bins_het = num_bins(BNS_UFD_SETTINGS, 0.0)
+    bins_het_offset = num_bins(BNS_UFD_SETTINGS, 0.02)
+    assert bins_het < bins_plain / 2
+    assert bins_het <= bins_het_offset < bins_plain

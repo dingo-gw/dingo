@@ -6,6 +6,7 @@ from typing import Dict
 import numpy as np
 
 from dingo.gw.prior import build_prior_with_defaults
+from dingo.gw.transforms import factor_fiducial_waveform
 
 
 def build_extreme_prior(settings: dict):
@@ -63,3 +64,53 @@ def print_mismatch_stats(mismatches: np.ndarray, num_samples: int) -> None:
     print(f"    99    -> {np.percentile(mismatches, 99)}")
     print(f"    99.9  -> {np.percentile(mismatches, 99.9)}")
     print(f"    99.99 -> {np.percentile(mismatches, 99.99)}")
+
+
+def heterodyne_polarizations(
+    polarizations: Dict[str, np.ndarray],
+    domain,
+    parameters,
+    settings: dict,
+    chirp_mass_proxy_offset: float = 0.0,
+) -> Dict[str, np.ndarray]:
+    """Heterodyne generated waveforms as the network input is, when the dataset
+    settings request `phase_heterodyning` under `compression` (DINGO-BNS).
+
+    A chirp-mass-conditioned network sees data heterodyned at the *proxy*, which
+    differs from the true chirp mass by up to the width of the GNPE kernel; the
+    residual oscillation, which sets the decimation, grows with that offset. The
+    waveforms are therefore heterodyned at ``chirp_mass + chirp_mass_proxy_offset``,
+    the worst case of the kernel. Without `phase_heterodyning` the waveforms are
+    returned unchanged.
+
+    Parameters
+    ----------
+    polarizations : Dict[str, np.ndarray]
+        Waveforms on ``domain``, shape ``(num_samples, len(domain()))`` per key.
+    domain
+        Frequency domain of the waveforms.
+    parameters : pd.DataFrame
+        Waveform parameters, one row per sample (``chirp_mass``, and ``mass_ratio``
+        for second-order heterodyning).
+    settings : dict
+        Dataset settings.
+    chirp_mass_proxy_offset : float
+        Offset of the heterodyne chirp mass from the true one, in solar masses.
+        Default: 0.
+
+    Returns
+    -------
+    Dict[str, np.ndarray]
+        Heterodyned (or unchanged) waveforms.
+    """
+    heterodyning = settings.get("compression", {}).get("phase_heterodyning")
+    if heterodyning is None:
+        return polarizations
+    chirp_mass = parameters["chirp_mass"].to_numpy() + chirp_mass_proxy_offset
+    mass_ratio = (
+        parameters["mass_ratio"].to_numpy() if "mass_ratio" in parameters else None
+    )
+    return {
+        k: factor_fiducial_waveform(v, domain, chirp_mass, mass_ratio, **heterodyning)
+        for k, v in polarizations.items()
+    }
