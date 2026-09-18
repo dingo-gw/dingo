@@ -4,6 +4,9 @@ import glob
 import re
 import subprocess
 import importlib.resources
+from importlib.metadata import version
+import configparser
+import warnings
 
 from asimov.pipeline import (
     Pipeline,
@@ -11,8 +14,18 @@ from asimov.pipeline import (
     PipelineLogger,
 )
 
+# Check if using asimov < 0.7.0 (legacy version with PESummaryPipeline)
+ASIMOV_LEGACY = version("asimov") < "0.7.0"
 
-class Dingo(Pipeline):
+if ASIMOV_LEGACY:
+    warnings.warn(
+        "Using asimov < 0.7.0 is deprecated and support will be removed soon. "
+        "Please upgrade to asimov >= 0.7.0.",
+        DeprecationWarning,
+    )
+
+
+class DingoPipeline(Pipeline):
     """
     The Dingo Pipeline.
 
@@ -34,7 +47,7 @@ class Dingo(Pipeline):
     def __init__(self, production, category=None):
         from asimov import logger
 
-        super(Dingo, self).__init__(production, category)
+        super(DingoPipeline, self).__init__(production, category)
         self.logger = logger
         if not production.pipeline.lower() == self.name:
             raise PipelineException
@@ -64,11 +77,6 @@ class Dingo(Pipeline):
             self.logger.info("No results directory found")
             return False
 
-    def before_submit(self):
-        """Pre-submit hook."""
-        self.logger.info("Running the before_submit hook")
-        pass
-
     def build_dag(self, psds=None, user=None, clobber_psd=False, dryrun=False):
         """
         Construct a DAG file in order to submit a production to the
@@ -85,7 +93,8 @@ class Dingo(Pipeline):
         user : str
            The user accounting tag which should be used to run the job.
         dryrun: bool
-           If set to true the commands will not be run, but will be printed to standard output. Defaults to False.
+           If set to true the commands will not be run, but will be printed to standard output.
+           Defaults to False.
 
         Raises
         ------
@@ -208,7 +217,7 @@ class Dingo(Pipeline):
                 )
         return messages
 
-    def fmin_max_are_compatible(self, prod_meta, net_meta):
+    def _fmin_max_are_compatible(self, prod_meta, net_meta):
         """
         Check if the network min/max frequencies are compatible with the data.
 
@@ -265,7 +274,7 @@ class Dingo(Pipeline):
         if (
             net_duration == duration
             and sorted(net_ifos) == sorted(ifos)
-            and self.fmin_max_are_compatible(prod_meta, net_meta)
+            and self._fmin_max_are_compatible(prod_meta, net_meta)
         ):
             return True
         return False
@@ -440,17 +449,6 @@ class Dingo(Pipeline):
             self.logger.warning("asimov-pesummary not available, skipping post-processing")
             return
         super().after_completion()
-        # TODO: could add legacy option
-        #post_pipeline = PESummary(production=self.production)
-        #self.logger.info("Job has completed. Running PE Summary.")
-        #cluster = post_pipeline.submit_dag()
-        #self.production.meta["job id"] = int(cluster)
-        #self.production.status = "processing"
-        #self.production.event.update_data()
-
-    def detect_completion_processing(self):
-        # no dingo post processing currently performed
-        return super().detect_completion_processing()
 
     def resurrect(self):
         """
@@ -477,8 +475,6 @@ class Dingo(Pipeline):
         filepath: str
            The path to the ini file.
         """
-        import configparser
-
         with open(filepath, "r") as f:
             file_content = f.read()
 
@@ -486,3 +482,60 @@ class Dingo(Pipeline):
         config_parser.read_string(file_content)
 
         return config_parser
+
+
+class DingoLegacy(DingoPipeline):
+    """
+    The Dingo Pipeline for asimov < 0.7.0 with legacy PESummaryPipeline support.
+    """
+
+    def after_completion(self):
+        """
+        Legacy implementation using PESummaryPipeline for post-processing.
+        """
+        from asimov.pipeline import PESummaryPipeline
+        post_pipeline = PESummaryPipeline(production=self.production)
+        self.logger.info("Job has completed. Running PE Summary.")
+        cluster = post_pipeline.submit_dag()
+        self.production.meta["job id"] = int(cluster)
+        self.production.status = "processing"
+        self.production.event.update_data()
+
+    def detect_completion_processing(self):
+        # no post processing currently performed
+        return True
+
+    def before_submit(self):
+        """Pre-submit hook."""
+        self.logger.info("Running the before_submit hook")
+        pass
+
+
+class Dingo:
+    """
+    Factory class that returns the appropriate Dingo pipeline implementation.
+
+    Uses __new__ to transparently return either DingoPipeline or DingoLegacy
+    instances based on the asimov version.
+
+    Parameters
+    ----------
+    production : :class:`asimov.Production`
+       The production object.
+    category : str, optional
+        The category of the job.
+        Defaults to "C01_offline".
+    """
+
+    def __new__(cls, *args, **kwargs):
+        """
+        Return an instance of the appropriate pipeline class.
+
+        If asimov < 0.7.0, returns a DingoLegacy instance.
+        Otherwise, returns a DingoPipeline instance.
+        """
+        if ASIMOV_LEGACY:
+            dingo_cls = DingoLegacy
+        else:
+            dingo_cls = DingoPipeline
+        return dingo_cls(*args, **kwargs)
