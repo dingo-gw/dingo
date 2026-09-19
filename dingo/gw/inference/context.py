@@ -162,6 +162,9 @@ class GWSamplerContext:
             truths = event_data.pop("parameters")
             event_metadata = {**(event_metadata or {})}
             event_metadata.setdefault("injection_parameters", truths)
+            # An injection dict also carries an empty "extrinsic_parameters" part,
+            # which is not per-detector data.
+            event_data.pop("extrinsic_parameters", None)
         self.domain = domain
         self._data_prep = data_prep
         self.model_metadata = model_metadata
