@@ -322,3 +322,21 @@ def test_heterodyning_bns_waveforms():
     n_roots = _max_zero_crossings(polarizations, ufd.min_idx)
     n_roots_het = _max_zero_crossings(polarizations_het, ufd.min_idx)
     assert n_roots > 10 * n_roots_het
+
+
+def test_factor_fiducial_waveform_phase_in_float64(domain):
+    """Single-precision inputs (a dataset loaded with precision="single") get the
+    float64 phase and keep their dtype."""
+    rng = np.random.default_rng(0)
+    n = len(domain)
+    data = (rng.standard_normal(n) + 1j * rng.standard_normal(n)).astype(np.complex64)
+    mc = float(np.float32(1.2))  # exactly representable in float32
+    reference = factor_fiducial_waveform(data.astype(np.complex128), domain, mc)
+    for chirp_mass in (np.float32(mc), np.array([mc], dtype=np.float32)):
+        out = factor_fiducial_waveform(data, domain, chirp_mass)
+        assert out.dtype == np.complex64
+        np.testing.assert_allclose(out.reshape(-1), reference, rtol=2e-6, atol=0)
+    out = factor_fiducial_waveform(
+        torch.tensor(data), domain, torch.tensor(mc, dtype=torch.float32)
+    )
+    np.testing.assert_allclose(out.numpy(), reference, rtol=2e-6, atol=0)
