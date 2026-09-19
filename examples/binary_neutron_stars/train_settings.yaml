@@ -1,0 +1,122 @@
+# DINGO-BNS training settings, following the GW170817 network of Dax et al., Nature 639,
+# 49 (2025): chirp-mass GNPE (phase heterodyning + prior conditioning) with a fixed
+# proxy at inference, and sky-position conditioning (ra, dec as context parameters).
+data:
+  waveform_dataset_path: training_data/waveform_dataset.hdf5  # Generated from waveform_dataset_settings_mfd.yaml
+  train_fraction: 0.98
+  domain_update:
+    f_min: 23.0
+    f_max: 1536.0
+  svd_size_update: 200
+  detectors:
+    - H1
+    - L1
+    - V1
+  extrinsic_prior:  # Sampled at train time
+    dec: default
+    ra: default
+    geocent_time: bilby.core.prior.Uniform(minimum=-0.03, maximum=0.03, name='geocent_time')
+    psi: default
+    luminosity_distance: bilby.core.prior.Uniform(minimum=10.0, maximum=100.0, name='luminosity_distance')
+  ref_time: 1187008882.42
+  # Chirp-mass GNPE: the chirp mass is blurred by the kernel to give the proxy
+  # chirp_mass_proxy; the polarizations are heterodyned at the proxy, the network
+  # conditions on it, and infers the offset delta_chirp_mass. At inference the proxy is
+  # fixed per event (single-step GNPE), see the BNS documentation page.
+  gnpe_chirp:
+    kernel:
+      chirp_mass: bilby.core.prior.Uniform(minimum=-0.005, maximum=0.005)
+    order: 0
+  # Additional conditioning (prior conditioning): the network is conditioned on the sky
+  # position, which is pinned per event at inference. chirp_mass_proxy is appended
+  # automatically.
+  context_parameters:
+    - ra
+    - dec
+  # No phase: the network is phase marginalized, and the phase is reconstructed
+  # synthetically during importance sampling.
+  inference_parameters:
+    - delta_chirp_mass
+    - mass_ratio
+    - a_1
+    - a_2
+    - tilt_1
+    - tilt_2
+    - phi_12
+    - phi_jl
+    - theta_jn
+    - luminosity_distance
+    - geocent_time
+    - psi
+    - lambda_1
+    - lambda_2
+
+# Model architecture
+model:
+  posterior_model_type: normalizing_flow
+  posterior_kwargs:
+    num_flow_steps: 30
+    base_transform_kwargs:
+      hidden_dim: 512
+      num_transform_blocks: 5
+      activation: elu
+      dropout_probability: 0.0
+      norm: BatchNorm
+      num_bins: 8
+      base_transform_type: rq-coupling
+  embedding_type: resnet
+  embedding_kwargs:
+    output_dim: 128
+    hidden_dims: [2048, 2048, 2048, 2048, 2048, 2048, 2048, 2048,
+                  1024, 1024, 1024, 1024, 1024, 1024, 1024, 1024,
+                  512, 512, 512, 512, 512, 512,
+                  256, 256, 256, 256, 256, 256,
+                  128, 128, 128, 128, 128, 128]
+    activation: elu
+    dropout: 0.0
+    norm: BatchNorm
+    svd:
+      num_training_samples: 50000
+      num_validation_samples: 10000
+      size: 200
+
+# Training is divided in stages. They each require all settings as indicated below.
+training:
+  stage_0:
+    epochs: 400
+    asd_dataset_path: training_data/asd_dataset_fiducial/asds_O2_fiducial.hdf5  # a single fiducial ASD per detector for pretraining
+    freeze_rb_layer: True
+    optimizer:
+      type: adam
+      lr: 2.0e-4
+    scheduler:
+      type: cosine
+      T_max: 400
+    batch_size: 4096
+  stage_1:
+    epochs: 100
+    asd_dataset_path: training_data/asd_dataset/asds_O2.hdf5  # many different ASDs per detector for fine-tuning
+    freeze_rb_layer: False
+    optimizer:
+      type: adam
+      lr: 2.0e-5
+    scheduler:
+      type: cosine
+      T_max: 100
+    batch_size: 4096
+
+# Local settings for training that have no impact on the final trained network.
+local:
+  device: cuda
+  num_workers: 32
+  runtime_limits:
+    max_time_per_run: 3600000
+    max_epochs_per_run: 500
+  checkpoint_epochs: 50
+  leave_waveforms_on_disk: True
+  # Settings for HTCondor job submission (remove if not running on a Condor cluster).
+  condor:
+    num_cpus: 32
+    memory_cpus: 256000
+    memory_gpus: 40000
+    request_disk: 200GB

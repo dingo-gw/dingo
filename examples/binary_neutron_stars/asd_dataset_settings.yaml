@@ -1,0 +1,19 @@
+# Noise ASDs for a DINGO-BNS network: 128 s segments matching the waveform dataset
+# (delta_f = 1/128). PSDs are estimated with Welch's method over time_psd seconds.
+# Generate a fiducial dataset (a single ASD per detector) for pretraining and a full
+# dataset for fine-tuning, as for the other examples; the ASDs are decimated to the
+# multibanded domain automatically at training time.
+dataset_settings:
+  f_s: 4096
+  time_psd: 4096
+  T: 128.0
+  window:
+    roll_off: 0.4
+    type: tukey
+  time_gap: 0
+  num_psds_max: 0
+  detectors:
+    - H1
+    - L1
+    - V1
+  observing_run: O2

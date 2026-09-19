@@ -1,0 +1,53 @@
+# Waveform dataset for a DINGO-BNS network (Dax et al., Nature 639, 49 (2025)), on the
+# uniform base domain. Convert to a multibanded domain with
+#
+#   dingo_generate_multibanded_domain --settings_file waveform_dataset_settings_ufd.yaml \
+#       --target_median_mismatch 1e-5 --chirp_mass_proxy_offset 0.005 --num_processes N
+#
+# which writes waveform_dataset_settings_mfd.yaml (the file provided here). The offset
+# is the half-width of the gnpe_chirp kernel in train_settings.yaml: the bands are
+# determined from waveforms heterodyned at the proxy chirp mass, as the network sees
+# them. Then generate the dataset from the multibanded settings file.
+domain:
+  type: UniformFrequencyDomain
+  f_min: 20.0
+  f_max: 2048.0
+  delta_f: 0.0078125  # 1/128 s segments
+
+waveform_generator:
+  approximant: IMRPhenomXP_NRTidalv3
+  f_ref: 100.0
+  spin_conversion_phase: 0.0  # Required for a phase-marginalized network.
+
+intrinsic_prior:
+  mass_1: bilby.core.prior.Constraint(minimum=1.0, maximum=3.2)
+  mass_2: bilby.core.prior.Constraint(minimum=1.0, maximum=2.0)
+  chirp_mass: bilby.gw.prior.UniformInComponentsChirpMass(minimum=1.0, maximum=2.2)
+  mass_ratio: bilby.gw.prior.UniformInComponentsMassRatio(minimum=0.05, maximum=1.0)
+  a_1: bilby.core.prior.Uniform(minimum=0.0, maximum=0.05)  # low-spin prior
+  a_2: bilby.core.prior.Uniform(minimum=0.0, maximum=0.05)
+  tilt_1: default
+  tilt_2: default
+  phi_12: default
+  phi_jl: default
+  theta_jn: default
+  phase: default
+  lambda_1: default  # Uniform(0, 5000)
+  lambda_2: bilby.core.prior.Uniform(minimum=0.0, maximum=10000.0)
+  # Reference values for fixed (extrinsic) parameters, needed to generate a waveform.
+  luminosity_distance: 100.0  # Mpc
+  geocent_time: 0.0  # s
+
+num_samples: 30_000_000
+
+compression:
+  whitening: aLIGO_ZERO_DET_high_P_asd.txt
+  # Heterodyne each waveform at its own chirp mass before the SVD. This removes the
+  # dominant chirp phase, so the SVD compresses the long BNS inspirals; the dataset
+  # undoes it on decompression, and training re-heterodynes at the proxy (gnpe_chirp).
+  phase_heterodyning:
+    order: 0
+  svd:
+    size: 200
+    num_training_samples: 50000
+    num_validation_samples: 10000
