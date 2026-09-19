@@ -5,8 +5,11 @@ import yaml
 from scipy.interpolate import interp1d
 
 from dingo.gw.dataset import generate_parameters_and_polarizations
-from dingo.gw.dataset._multibanded_domain_utils import (build_extreme_prior,
-                                                        print_mismatch_stats)
+from dingo.gw.dataset._multibanded_domain_utils import (
+    build_extreme_prior,
+    heterodyne_polarizations,
+    print_mismatch_stats,
+)
 from dingo.gw.domains import MultibandedFrequencyDomain, build_domain
 from dingo.gw.gwutils import get_mismatch
 from dingo.gw.waveform_generator import (NewInterfaceWaveformGenerator,
@@ -17,13 +20,17 @@ from dingo.gw.waveform_generator import (NewInterfaceWaveformGenerator,
 def _evaluate_multibanding_main(
     settings_file: str,
     num_samples: int,
+    chirp_mass_proxy_offset: float = 0.0,
 ):
     with open(settings_file, "r") as f:
         settings = yaml.safe_load(f)
 
-    # Ignore any compression settings
-    if "compression" in settings:
-        del settings["compression"]
+    # Ignore any compression settings, except heterodyning: the network sees
+    # heterodyned data, so that is what the decimation must preserve.
+    heterodyning = settings.get("compression", {}).get("phase_heterodyning")
+    settings.pop("compression", None)
+    if heterodyning is not None:
+        settings["compression"] = {"phase_heterodyning": heterodyning}
 
     prior = build_extreme_prior(settings)
     print("Prior")
@@ -64,6 +71,17 @@ def _evaluate_multibanding_main(
     # Generate UFD waveforms, re-using the parameter choices from before.
     polarizations_ufd = generate_waveforms_parallel(waveform_generator_ufd, parameters)
 
+    polarizations_mfd = heterodyne_polarizations(
+        polarizations_mfd, domain, parameters, settings, chirp_mass_proxy_offset
+    )
+    polarizations_ufd = heterodyne_polarizations(
+        polarizations_ufd,
+        domain.base_domain,
+        parameters,
+        settings,
+        chirp_mass_proxy_offset,
+    )
+
     # Compare UFD waveforms against MFD waveforms interpolated to MFD.
     mismatches = {}
     ufd = domain.base_domain
@@ -100,9 +118,19 @@ def parse_args():
         default=5000,
         help="Number of waveform evaluations for comparison.",
     )
+    parser.add_argument(
+        "--chirp-mass-proxy-offset",
+        type=float,
+        default=0.0,
+        help="For a dataset with phase_heterodyning (DINGO-BNS): heterodyne the "
+        "waveforms at their chirp mass plus this offset (solar masses), the largest "
+        "offset of the training kernel.",
+    )
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
-    _evaluate_multibanding_main(args.settings_file, args.num_samples)
+    _evaluate_multibanding_main(
+        args.settings_file, args.num_samples, args.chirp_mass_proxy_offset
+    )
