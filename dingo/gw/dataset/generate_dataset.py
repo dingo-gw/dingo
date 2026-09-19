@@ -188,7 +188,7 @@ def generate_dataset(settings: Dict, num_processes: int) -> WaveformDataset:
             # precede decimation: the generator decimates approximants without a
             # frequency-domain implementation onto a multibanded domain before
             # applying the compression transforms.
-            if waveform_generator.domain is not waveform_generator.full_domain:
+            if waveform_generator._domain_transform is not None:
                 raise NotImplementedError(
                     "phase_heterodyning requires the waveforms to be generated on "
                     "the dataset domain, but approximant "

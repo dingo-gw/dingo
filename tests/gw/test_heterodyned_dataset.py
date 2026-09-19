@@ -89,15 +89,19 @@ def test_generator_transform_receives_sample_dict():
         "geocent_time": 0.0,
     }
     raw = wfg.generate_hplus_hcross(parameters)
-    wfg.transform = lambda s: {
-        **s,
-        "waveform": {
-            k: v * s["parameters"]["chirp_mass"] for k, v in s["waveform"].items()
-        },
-    }
-    scaled = wfg.generate_hplus_hcross(parameters)
+    received = {}
+
+    def transform(sample):
+        received.update(sample)
+        return {**sample, "waveform": {k: 2 * v for k, v in sample["waveform"].items()}}
+
+    wfg.transform = transform
+    doubled = wfg.generate_hplus_hcross(parameters)
+    assert set(received) == {"waveform", "parameters"}
+    assert received["parameters"]["chirp_mass"] == parameters["chirp_mass"]
     for k in raw:
-        np.testing.assert_allclose(scaled[k], 1.3 * raw[k])
+        np.testing.assert_array_equal(received["waveform"][k], raw[k])
+        np.testing.assert_array_equal(doubled[k], 2 * raw[k])
 
 
 def test_heterodyned_compression_roundtrip(tmp_path):

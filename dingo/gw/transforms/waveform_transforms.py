@@ -625,23 +625,29 @@ def factor_fiducial_waveform(
     else:
         f = domain.get_sample_frequencies_astype(data)
 
-    # Expand across possible batch dimension.
-    if isinstance(chirp_mass, (int, float, np.floating)):
+    # The phase is computed in float64 whatever the input dtypes: it reaches 1e4 rad
+    # at 20 Hz for a BNS, where float32 resolves 1e-3 rad, and 1e5 rad at the 5 Hz
+    # of next-generation detectors, where the float32 rounding (1e-2 rad per bin)
+    # would exceed the mismatch tolerance of loud signals. The data keep their own
+    # dtype, so single-precision training data stay single precision.
+    if isinstance(chirp_mass, (int, float, np.floating, np.ndarray)):
         # np.outer promotes consistently whether chirp_mass is a scalar or an
-        # array, so the phase precision does not depend on the input form.
-        mc_f = np.outer(chirp_mass, f).squeeze()
-    elif isinstance(chirp_mass, np.ndarray):
-        mc_f = np.outer(chirp_mass, f)
+        # array, so the phase does not depend on the input form.
+        mc_f = np.outer(np.asarray(chirp_mass, np.float64), np.asarray(f, np.float64))
+        if np.ndim(chirp_mass) == 0:
+            mc_f = mc_f.squeeze(0)
         if mass_ratio is not None:
-            mass_ratio = mass_ratio[:, None]
+            mass_ratio = np.asarray(mass_ratio, np.float64)
+            if np.ndim(chirp_mass) > 0:
+                mass_ratio = mass_ratio[:, None]
     elif isinstance(chirp_mass, torch.Tensor):
-        # torch.outer promotes to the wider dtype (a 0-d tensor would not: the
-        # dimensioned float32 `f` would win), so the phase stays float64.
-        mc_f = torch.outer(chirp_mass.reshape(-1), f)
+        mc_f = torch.outer(chirp_mass.reshape(-1).double(), f.double())
         if chirp_mass.dim() == 0:
             mc_f = mc_f.squeeze(0)
-        elif mass_ratio is not None:
-            mass_ratio = mass_ratio[:, None]
+        if mass_ratio is not None:
+            mass_ratio = mass_ratio.double()
+            if chirp_mass.dim() > 0:
+                mass_ratio = mass_ratio[:, None]
     else:
         raise TypeError(
             f"Invalid type {type(chirp_mass)}. "
@@ -672,10 +678,12 @@ def factor_fiducial_waveform(
         fiducial_phase *= -1
 
     def apply(v):
-        # The phase is float64; keep the dtype of single-precision numpy data.
+        # Keep the dtype of single-precision data (the phase is float64).
         out = domain.add_phase(v, -fiducial_phase)
         if isinstance(v, np.ndarray):
             out = out.astype(v.dtype, copy=False)
+        elif torch.is_complex(v):
+            out = out.to(v.dtype)
         return out
 
     if type(data) == dict:
