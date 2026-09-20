@@ -284,3 +284,77 @@ def test_tokenization_with_cropping_is_refused(tmp_path):
             data_settings,
             _toy_asd_file(tmp_path / "asds.hdf5"),
         )
+
+
+def test_gnpe_chirp_training_transforms(tmp_path):
+    """`gnpe_chirp` heterodynes the polarizations at the proxy chirp mass, adds the
+    proxy as a context parameter with `delta_chirp_mass` standardized, and stays in
+    the chain that builds the embedding-network SVD."""
+    from dingo.gw.training.train_builders import build_svd_for_embedding_network
+    from dingo.gw.transforms import (
+        GNPEChirp,
+        RepackageStrainsAndASDS,
+        SelectStandardizeRepackageParameters,
+        UnpackDict,
+        factor_fiducial_waveform,
+    )
+
+    data_settings = {k: v for k, v in DATA_SETTINGS.items() if k != "tokenization"} | {
+        "inference_parameters": ["delta_chirp_mass", "mass_ratio"],
+        "gnpe_chirp": {
+            "kernel": {
+                "chirp_mass": "bilby.core.prior.Uniform(minimum=-0.01, maximum=0.01)"
+            },
+            "order": 0,
+        },
+        "zero_noise": True,
+    }
+    asd_file = _toy_asd_file(tmp_path / "asds.hdf5")
+    wfd = _toy_waveform_dataset()
+
+    set_train_transforms(wfd, data_settings, asd_file)
+    assert data_settings["context_parameters"] == ["chirp_mass_proxy"]
+    std = data_settings["standardization"]["std"]
+    assert set(std) == {"delta_chirp_mass", "mass_ratio", "chirp_mass_proxy"}
+    assert 0 < std["delta_chirp_mass"] < 0.01
+    # UnpackDict yields [inference_parameters, waveform, context_parameters].
+    theta, strain, context = wfd[0]
+    assert theta.shape == (2,)
+    assert strain.shape[:2] == (len(DETECTORS), 3)
+    assert context.shape == (1,)
+
+    # The strain equals the un-heterodyned chain's strain, heterodyned at the proxy
+    # (noise is off, and the extrinsic parameters are fixed).
+    keep = [RepackageStrainsAndASDS, SelectStandardizeRepackageParameters, UnpackDict]
+    set_train_transforms(wfd, data_settings, asd_file, omit_transforms=keep)
+    with_chirp = wfd[0]
+    set_train_transforms(
+        wfd, data_settings, asd_file, omit_transforms=keep + [GNPEChirp]
+    )
+    without_chirp = wfd[0]
+    proxy = with_chirp["extrinsic_parameters"]["chirp_mass_proxy"]
+    assert abs(proxy - with_chirp["parameters"]["chirp_mass"]) <= 0.01
+    np.testing.assert_allclose(
+        with_chirp["extrinsic_parameters"]["delta_chirp_mass"],
+        with_chirp["parameters"]["chirp_mass"] - proxy,
+    )
+    for ifo in DETECTORS:
+        expected = factor_fiducial_waveform(
+            without_chirp["waveform"][ifo], wfd.domain, proxy
+        )
+        np.testing.assert_allclose(with_chirp["waveform"][ifo], expected, rtol=1e-4)
+
+    # The embedding-network SVD is built on heterodyned waveforms.
+    V_rb_list = build_svd_for_embedding_network(
+        wfd,
+        data_settings,
+        asd_file,
+        size=2,
+        num_training_samples=4,
+        num_validation_samples=2,
+        batch_size=4,
+    )
+    assert any(isinstance(t, GNPEChirp) for t in wfd.transform.transforms)
+    assert [V.shape for V in V_rb_list] == [
+        (len(wfd.domain) - wfd.domain.min_idx, 2)
+    ] * len(DETECTORS)
