@@ -219,15 +219,9 @@ class Result(CoreResult):
         # density-recovery results reconstruct from the analysis metadata. The
         # event data and metadata determine the likelihood's grid and frequency
         # range; after reset_event they are those of the importance-sampling event.
-        context = GWSamplerContext.from_model_metadata(
+        return GWSamplerContext.from_model_metadata(
             self.base_metadata, self.context, self.event_metadata
         )
-        # The context normalizes the payload (an injection's truths move to the event
-        # record, parts that are not data are dropped); adopt its view, so that the
-        # result reports the truths and saves a clean payload.
-        self.context = context.event_data
-        self.event_metadata = context.event_metadata
-        return context
 
     def _build_prior(self):
         """Take the static prior from the sampler context (its single owner), then
