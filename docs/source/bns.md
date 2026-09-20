@@ -191,12 +191,14 @@ minimum chirp mass of the prior (the longest signals), and writes
 `waveform_dataset_settings_mfd.yaml`: the same settings with a
 `MultibandedFrequencyDomain`. When the settings contain `phase_heterodyning`, the bands
 are determined from heterodyned waveforms, as the network sees them. The network sees
-data heterodyned at the proxy rather than at the true chirp mass, and the residual
-oscillation grows with the difference between the two, so `--chirp_mass_proxy_offset`
-heterodynes at the chirp mass plus or minus this offset (alternating between the two
-sides of the kernel, which decimate differently); set it to the half-width of the
-training kernel. `dingo_evaluate_multibanded_domain` accepts the same offset. With the
-settings above, the target of $10^{-5}$ reproduces the banding of the network of
+data heterodyned at the chirp-mass proxy rather than at the true chirp mass, and the
+oscillation that remains after heterodyning grows with the difference between the two.
+With `--chirp_mass_proxy_offset`, the tool heterodynes each waveform at its chirp mass
+plus or minus the given offset, alternating the sign from one waveform to the next: the
+residual differs between the two sides of the kernel, and the bands must be adequate
+for both. Set the offset to the half-width of the training kernel.
+`dingo_evaluate_multibanded_domain` accepts the same option. With the settings above,
+the target of $10^{-5}$ reproduces the banding of the network of
 {footcite:p}`Dax:2024mcn` (eight bands, about 3700 bins from 20 Hz to 2048 Hz). The
 dataset is generated from the multibanded settings file with `dingo_generate_dataset`
 as usual.
@@ -252,10 +254,11 @@ and takes the place of `chirp_mass` in `inference_parameters`; the chain restore
 `chirp_mass` at inference (see [Prior conditioning](#prior-conditioning)). The SVD that
 seeds the embedding network is built from heterodyned waveforms.
 
-Further context parameters may be listed under `context_parameters` and omitted from
-`inference_parameters`; the GW170817 network of {footcite:p}`Dax:2024mcn` conditions
-on the sky position in this way, whereas the example infers it. At inference every
-context parameter is pinned per event (`fixed-context-parameters` below). The
+Additional context parameters can be listed under `context_parameters`, and a
+parameter listed there is left out of `inference_parameters`. The GW170817 network of
+{footcite:p}`Dax:2024mcn` conditioned on the sky position in this way. The example
+configuration does not; it infers the sky position. At inference, every context
+parameter is pinned to a value per event (see `fixed-context-parameters` below). The
 reference network is phase marginalized: `phase` is not an inference
 parameter, and the phase is reconstructed synthetically before importance sampling,
 which requires `spin_conversion_phase: 0.0` in the dataset. The remaining settings
