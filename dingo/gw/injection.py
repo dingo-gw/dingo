@@ -212,7 +212,6 @@ class GWSignal(object):
         dict
             keys:
                 waveform: GW strain signal for each detector.
-                extrinsic_parameters: {}
                 parameters: waveform parameters
                 asd (if set): amplitude spectral density for each detector
         """
@@ -236,7 +235,11 @@ class GWSignal(object):
         if asd is not None:
             sample["asds"] = asd
 
-        return self.projection_transforms(sample)
+        sample = self.projection_transforms(sample)
+        # The projection has moved the extrinsic parameters into "parameters"; the
+        # emptied part of the training sample layout is not data.
+        del sample["extrinsic_parameters"]
+        return sample
 
     # It would be good to have an ASD class to handle all of this functionality,
     # namely storing ASDs from numpy arrays, from ASDDatasets, loading from files,
@@ -266,7 +269,6 @@ class GWSignal(object):
                 waveform:
                     GW strain signal for each detector, with individual contributions
                     {m: pol_m for m in [-l_max,...,0,...,l_max]}
-                extrinsic_parameters: {}
                 parameters: waveform parameters
                 asd (if set): amplitude spectral density for each detector
         """
@@ -295,6 +297,7 @@ class GWSignal(object):
             if self.asd is not None:
                 sample["asds"] = self.asd
             sample_out[m] = self.projection_transforms(sample)
+            del sample_out[m]["extrinsic_parameters"]
 
         return sample_out
 
@@ -405,7 +408,6 @@ class Injection(GWSignal):
         dict
             keys:
                 waveform: data (signal + noise) in each detector
-                extrinsic_parameters: {}
                 parameters: waveform parameters
                 asd (if set): amplitude spectral density for each detector
         """
@@ -449,7 +451,6 @@ class Injection(GWSignal):
         dict
             keys:
                 waveform: data (signal + noise) in each detector
-                extrinsic_parameters: {}
                 parameters: waveform parameters
                 asd (if set): amplitude spectral density for each detector
         """

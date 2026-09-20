@@ -95,6 +95,29 @@ def make_gw_result(n=5, drop_phase=False, event_metadata=None):
     )
 
 
+def test_legacy_injection_context_loads():
+    # Results saved from an injection dict by older code carry the emptied
+    # "extrinsic_parameters" part, and (before the sampler revamp) the truths under
+    # "parameters"; the rebuilt sampler context handles both.
+    truths = {"chirp_mass": 30.0}
+    with pytest.warns(UserWarning, match="extrinsic_parameters"):
+        result = Result(
+            dictionary={
+                "samples": make_gw_result().samples,
+                "context": {
+                    **_context(),
+                    "extrinsic_parameters": {},
+                    "parameters": truths,
+                },
+                "event_metadata": {},
+                "settings": _metadata(),
+            }
+        )
+    assert set(result.sampler_context.event_data) == {"waveform", "asds"}
+    assert result.sampler_context.event_metadata["injection_parameters"] == truths
+    assert result.prior is not None
+
+
 # ---------------------------------------------------------------------------
 # Simple property accessors
 # ---------------------------------------------------------------------------
