@@ -11,14 +11,6 @@ the effective prior (prior conditioning). The proxy is fixed per event, so sampl
 single-step GNPE: one pass through the network, with the density preserved and
 importance sampling available directly.
 
-```{note}
-Not yet available: a distributed pre-trained BNS network (the training configuration
-is in `examples/binary_neutron_stars`, see the [example](example_bns.md)), the
-accelerated heterodyned and decimated likelihood of {footcite:p}`Dax:2024mcn`
-(importance sampling uses the exact likelihood), the synthetic-phase
-`compute_likelihood` fast path, and per-event time scans for pre-merger networks.
-```
-
 ## Phase heterodyning
 
 At BNS frequency resolutions the strain oscillates rapidly in frequency, which makes
@@ -106,20 +98,13 @@ provenance. For a GW170817-like event the scan costs about a minute of CPU time.
 
 ## Multibanding heterodyned data
 
-The bands of the multibanded frequency domain are chosen by the
-[band tool](waveform_dataset.ipynb#generating-a-multibanded-domain), which decimates
-test waveforms until their mismatch with the uniform-domain waveforms meets a target. Heterodyning changes what the tool has to look at. Decimation does not
-commute with heterodyning, so the bands must be chosen on heterodyned waveforms, as the
-network sees them; when the dataset settings contain `phase_heterodyning`, the tool
-heterodynes the waveforms first. Moreover, the network only ever sees data heterodyned
-at the proxy, which can sit anywhere in the kernel around the true chirp mass, and the
-oscillation left after heterodyning depends on which side it sits: the offset term of
-the phase flips sign with the offset and adds to or cancels against the
-post-Newtonian remainder, so the two sides of the kernel leave different residuals. The
-tool therefore heterodynes alternate waveforms at the two edges of the kernel, the
-chirp mass plus and minus `--chirp_mass_proxy_offset`, and the mismatch target holds on
-the worse side. The offset is set to the half-width of the training kernel; the
-[example](example_bns.md) shows the command.
+The Dingo-BNS method combines both heterodyning and multi-banding. Heterodyning factors out the dominant frequency evolution, leaving only slow residual oscillations in the waveform. Multi-banding can then be applied to aggressively coarsen sampling at higher frequencies. Note that since decimation does not commute with heterodyning, decimation nodes must be chosen after heterodyning.
+
+The multi-banding nodes can be specified manually in the waveform dataset config file, or this can be done automatically using the
+[band tool](waveform_dataset.ipynb#generating-a-multibanded-domain). The CLI tool `dingo_generate_multibanded_domain` starts from a uniform frequency domain and decimates
+test waveforms until their mismatch with the originals meets a target. When the dataset settings contain `phase_heterodyning`, the tool heterodynes the waveforms first.
+
+There is one more subtlety. The network never sees data heterodyned at the true chirp mass, only at the proxy, which can sit anywhere within the kernel width of the true value ($\pm 0.005\,M_\odot$ in the example). This matters because the residual oscillation depends not just on how far off the proxy is, but on which side it lies: the offset adds a term to the residual phase that flips sign with it, and this either adds to the post-Newtonian remainder or partially cancels it. One side of the kernel therefore leaves a faster-oscillating residual than the other, and which side is worse can vary with frequency. To make sure the bands work for both, pass `--chirp_mass_proxy_offset` set to the kernel half-width. The tool then heterodynes alternate test waveforms at the chirp mass plus and minus this offset, and enforces the mismatch target on whichever side is worse. The [example](example_bns.md) shows the full command.
 
 ## Tidal approximants
 
