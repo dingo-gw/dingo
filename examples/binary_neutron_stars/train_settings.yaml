@@ -1,6 +1,7 @@
 # DINGO-BNS training settings, following the GW170817 network of Dax et al., Nature 639,
 # 49 (2025): chirp-mass GNPE (phase heterodyning + prior conditioning) with a fixed
-# proxy at inference, and sky-position conditioning (ra, dec as context parameters).
+# proxy at inference. Unlike that network, this one infers the sky position rather
+# than conditioning on it.
 data:
   waveform_dataset_path: training_data/waveform_dataset.hdf5  # Generated from waveform_dataset_settings_mfd.yaml
   train_fraction: 0.98
@@ -27,12 +28,9 @@ data:
     kernel:
       chirp_mass: bilby.core.prior.Uniform(minimum=-0.005, maximum=0.005)
     order: 0
-  # Additional conditioning (prior conditioning): the network is conditioned on the sky
-  # position, which is pinned per event at inference. chirp_mass_proxy is appended
-  # automatically.
-  context_parameters:
-    - ra
-    - dec
+  # chirp_mass_proxy is appended to context_parameters automatically; further context
+  # parameters (e.g. ra, dec for a known host) would be listed here and pinned per
+  # event at inference.
   # No phase: the network is phase marginalized, and the phase is reconstructed
   # synthetically during importance sampling.
   inference_parameters:
@@ -47,6 +45,8 @@ data:
     - theta_jn
     - luminosity_distance
     - geocent_time
+    - ra
+    - dec
     - psi
     - lambda_1
     - lambda_2

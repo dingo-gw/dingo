@@ -237,13 +237,10 @@ data:
     kernel:
       chirp_mass: bilby.core.prior.Uniform(minimum=-0.005, maximum=0.005)
     order: 0
-  context_parameters:
-    - ra
-    - dec
   inference_parameters:
     - delta_chirp_mass
     - mass_ratio
-    # ... the remaining parameters, without chirp_mass, ra, dec, or phase
+    # ... the remaining parameters, without chirp_mass or phase
 ```
 
 `gnpe_chirp` inserts the chirp-mass GNPE transform after the extrinsic parameters are
@@ -255,10 +252,11 @@ and takes the place of `chirp_mass` in `inference_parameters`; the chain restore
 `chirp_mass` at inference (see [Prior conditioning](#prior-conditioning)). The SVD that
 seeds the embedding network is built from heterodyned waveforms.
 
-Further context parameters are listed under `context_parameters` and omitted from
-`inference_parameters`; the reference configuration conditions on the sky position.
-At inference every context parameter is pinned per event (`fixed-context-parameters`
-below). The reference network is phase marginalized: `phase` is not an inference
+Further context parameters may be listed under `context_parameters` and omitted from
+`inference_parameters`; the GW170817 network of {footcite:p}`Dax:2024mcn` conditions
+on the sky position in this way, whereas the example infers it. At inference every
+context parameter is pinned per event (`fixed-context-parameters` below). The
+reference network is phase marginalized: `phase` is not an inference
 parameter, and the phase is reconstructed synthetically before importance sampling,
 which requires `spin_conversion_phase: 0.0` in the dataset. The remaining settings
 (model, training stages, local) follow the standard [training](training.md) layout,
@@ -270,7 +268,7 @@ Two [dingo_pipe](dingo_pipe.md) sampler options control BNS inference:
 
 fixed-context-parameters
 : Dictionary pinning the model's context parameters, e.g.
-  `{chirp_mass_proxy: 1.19786, ra: 3.44616, dec: -0.408084}`. A single-network model
+  `{chirp_mass_proxy: 1.19786}`. A single-network model
   with context parameters requires all of them pinned, unless the chirp-mass proxy is
   supplied by the scan. Cannot be combined with `model-init` (iterative GNPE).
 
@@ -294,10 +292,9 @@ model = /path/to/bns_model.pt
 device = 'cuda'
 num-samples = 50000
 batch-size = 50000
-fixed-context-parameters = {chirp_mass_proxy: 1.19786, ra: 3.44616, dec: -0.408084}
+fixed-context-parameters = {chirp_mass_proxy: 1.19786}
 # Alternatively, determine the chirp mass from the data:
 # chirp-mass-scan = true
-# fixed-context-parameters = {ra: 3.44616, dec: -0.408084}
 
 importance-sample = true
 importance-sampling-settings = {synthetic_phase: {co_rotate_spins: true, n_grid: 5001, uniform_weight: 0.01}}
