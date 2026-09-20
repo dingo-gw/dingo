@@ -617,65 +617,55 @@ def factor_fiducial_waveform(
                 f"Shape of chirp_mass ({chirp_mass.shape}) and mass_ratio "
                 f"({mass_ratio.shape}) don't match"
             )
-    if not np.isfinite(chirp_mass).all():
-        raise ValueError("Got nan or inf elements in chirp_mass.")
-
     if type(data) == dict:
         f = domain.get_sample_frequencies_astype(list(data.values())[0])
     else:
         f = domain.get_sample_frequencies_astype(data)
 
-    # The phase is computed in float64 whatever the input dtypes: it reaches 1e4 rad
-    # at 20 Hz for a BNS, where float32 resolves 1e-3 rad, and 1e5 rad at the 5 Hz
-    # of next-generation detectors, where the float32 rounding (1e-2 rad per bin)
-    # would exceed the mismatch tolerance of loud signals. The data keep their own
-    # dtype, so single-precision training data stay single precision.
-    if isinstance(chirp_mass, (int, float, np.floating, np.ndarray)):
-        # np.outer promotes consistently whether chirp_mass is a scalar or an
-        # array, so the phase does not depend on the input form.
-        mc_f = np.outer(np.asarray(chirp_mass, np.float64), np.asarray(f, np.float64))
-        if np.ndim(chirp_mass) == 0:
-            mc_f = mc_f.squeeze(0)
-        if mass_ratio is not None:
-            mass_ratio = np.asarray(mass_ratio, np.float64)
-            if np.ndim(chirp_mass) > 0:
-                mass_ratio = mass_ratio[:, None]
-    elif isinstance(chirp_mass, torch.Tensor):
-        mc_f = torch.outer(chirp_mass.reshape(-1).double(), f.double())
-        if chirp_mass.dim() == 0:
-            mc_f = mc_f.squeeze(0)
-        if mass_ratio is not None:
-            mass_ratio = mass_ratio.double()
-            if chirp_mass.dim() > 0:
-                mass_ratio = mass_ratio[:, None]
+    # numpy or torch, following the chirp mass.
+    if isinstance(chirp_mass, torch.Tensor):
+        xp = torch
+    elif isinstance(chirp_mass, (int, float, np.floating, np.ndarray)):
+        xp = np
     else:
         raise TypeError(
             f"Invalid type {type(chirp_mass)}. "
             f"Only implemented for floats, arrays and tensors"
         )
 
-    # Avoid taking a negative power of 0 in the first index. This will get
-    # chopped off or multiplied by 0 later anyway.
-    if (f[..., 0] == 0.0).all():
-        mc_f[..., 0] = 1.0
+    # The phase is computed in float64 whatever the input dtypes: it reaches 1e4 rad
+    # at 20 Hz for a BNS, where float32 resolves only 1e-3 rad, and 1e5 rad at the
+    # 5 Hz of next-generation detectors, where the float32 rounding would exceed the
+    # mismatch tolerance of loud signals. The data keep their own dtype.
+    mc = xp.asarray(chirp_mass, dtype=xp.float64).reshape(-1)
+    if not xp.isfinite(mc).all():
+        raise ValueError("Got nan or inf elements in chirp_mass.")
+    f64 = xp.asarray(f, dtype=xp.float64)
+    # A uniform domain starts at f = 0; that bin is chopped off or multiplied by 0
+    # later anyway.
+    f_pow = xp.where(f64 == 0, 1.0, f64) ** (-5 / 3)
 
-    # Leading (0PN) phase
-    pi_mc_f_SI = np.pi * (lal.GMSUN_SI / lal.C_SI**3) * mc_f
-    fiducial_phase = (3 / 128) * (pi_mc_f_SI) ** (-5 / 3)
+    # Leading (0PN) phase, (3/128) (pi G Mc f / c^3)^(-5/3). The powers of Mc and f
+    # are taken separately and combined by an outer product, which is much cheaper
+    # than a power of the batch-by-frequency array.
+    G = np.pi * lal.GMSUN_SI / lal.C_SI**3  # pi G / c^3 per solar mass
+    fiducial_phase = (3 / 128) * xp.outer((G * mc) ** (-5 / 3), f_pow)
 
-    # 1PN correction
-    if order >= 2:
-        assert mass_ratio is not None
-        symmetric_mass_ratio = mass_ratio / (1 + mass_ratio) ** 2
-        pi_m_f_SI = pi_mc_f_SI / symmetric_mass_ratio ** (3 / 5)
-        correction = 1 + (55 * symmetric_mass_ratio / 9 + 3715 / 756) * (pi_m_f_SI) ** (
-            2 / 3
+    # 1PN correction, 1 + (55 eta / 9 + 3715 / 756) (pi G M f / c^3)^(2/3), with the
+    # total mass M = Mc eta^(-3/5).
+    if order == 2:
+        q = xp.asarray(mass_ratio, dtype=xp.float64).reshape(-1)
+        eta = q / (1 + q) ** 2
+        fiducial_phase = fiducial_phase * (
+            1
+            + (55 * eta / 9 + 3715 / 756)[:, None]
+            * xp.outer((G * mc) ** (2 / 3) * eta ** (-2 / 5), f64 ** (2 / 3))
         )
 
-        fiducial_phase *= correction
-
+    if np.ndim(chirp_mass) == 0:
+        fiducial_phase = fiducial_phase.squeeze(0)
     if inverse:
-        fiducial_phase *= -1
+        fiducial_phase = -fiducial_phase
 
     def apply(v):
         # Keep the dtype of single-precision data (the phase is float64).
