@@ -35,8 +35,11 @@ from bilby.gw.detector import PowerSpectralDensity
 from scipy.interpolate import interp1d
 from scipy.ndimage import grey_opening
 
-from dingo.gw.dataset._multibanded_domain_utils import (build_extreme_prior,
-                                                        print_mismatch_stats)
+from dingo.gw.dataset._multibanded_domain_utils import (
+    build_extreme_prior,
+    heterodyne_polarizations,
+    print_mismatch_stats,
+)
 from dingo.gw.dataset.generate_dataset import \
     generate_parameters_and_polarizations
 from dingo.gw.domains import (MultibandedFrequencyDomain,
@@ -377,6 +380,7 @@ def _generate_whitened_waveforms(
     asd_file: str,
     num_samples: int,
     num_processes: int = 1,
+    chirp_mass_proxy_offset: float = 0.0,
 ) -> Tuple[
     UniformFrequencyDomain,
     pd.DataFrame,
@@ -404,6 +408,10 @@ def _generate_whitened_waveforms(
         Number of waveforms to generate.
     num_processes : int
         Number of parallel processes for waveform generation. Default: 1.
+    chirp_mass_proxy_offset : float
+        For a dataset with `phase_heterodyning`, the waveforms are heterodyned at
+        their chirp mass plus or minus this offset, see
+        :func:`~dingo.gw.dataset._multibanded_domain_utils.heterodyne_polarizations`.
 
     Returns
     -------
@@ -412,7 +420,7 @@ def _generate_whitened_waveforms(
     parameters : pd.DataFrame
         Sampled waveform parameters.
     polarizations : Dict[str, np.ndarray]
-        Raw (non-whitened) waveforms at 1x resolution, shape
+        Raw (non-whitened, but heterodyned if requested) waveforms at 1x resolution, shape
         ``(num_samples, len(ufd()))``. Used for mismatch computation.
     data_whitened : Dict[str, np.ndarray]
         Whitened waveforms at 1x resolution. Used for band-node computation.
@@ -445,6 +453,10 @@ def _generate_whitened_waveforms(
         num_processes=num_processes,
     )
 
+    # Heterodyning is pointwise, so the 1x waveforms are a subsample of the 2x ones.
+    polarizations_2x = heterodyne_polarizations(
+        polarizations_2x, ufd_2x, parameters, settings, chirp_mass_proxy_offset
+    )
     polarizations = {k: v[..., ::2] for k, v in polarizations_2x.items()}
     assert polarizations["h_plus"][0].shape == ufd().shape
 
@@ -625,6 +637,7 @@ def generate_multibanded_domain_settings(
     max_iterations: int = 20,
     token_size: Optional[int] = None,
     difference_over_full_window: bool = False,
+    chirp_mass_proxy_offset: float = 0.0,
 ) -> str:
     """Generate a MultibandedFrequencyDomain settings file targeting a given median mismatch.
 
@@ -679,6 +692,12 @@ def generate_multibanded_domain_settings(
         bin is compared against all original bins in its decimation window (most
         conservative); if False (default), it is compared against the window center at
         2x resolution.
+    chirp_mass_proxy_offset : float
+        For a dataset with `phase_heterodyning` (DINGO-BNS), the bands are determined
+        from waveforms heterodyned at their chirp mass plus or minus this offset,
+        alternating by row: set it to the half-width of the training kernel
+        (`gnpe_chirp`), the worst case for the residual oscillation. The mismatch
+        target then applies to the worse of the two sides. Default: 0.
 
     Returns
     -------
@@ -722,7 +741,11 @@ def generate_multibanded_domain_settings(
         data_whitened_2x,
         asd,
     ) = _generate_whitened_waveforms(
-        settings, prior, asd_file, num_samples, num_processes
+        settings, prior, asd_file, num_samples, num_processes, chirp_mass_proxy_offset
+    )
+
+    two_sided = chirp_mass_proxy_offset != 0 and "phase_heterodyning" in settings.get(
+        "compression", {}
     )
 
     print("Computing waveform differences per decimation factor...")
@@ -757,7 +780,14 @@ def generate_multibanded_domain_settings(
             min_mfd_bins_per_band=min_mfd_bins_per_band,
         )
         mis = _compute_mismatches(polarizations, ufd, m, asd)
-        return m, mis, float(np.median(mis))
+        if two_sided:
+            # Rows alternate between the two sides of the kernel (even rows +, odd
+            # rows -), and the target must hold on the worse side, not on the mixture.
+            per_pol = mis.reshape(len(polarizations), -1)
+            med = max(np.median(per_pol[:, ::2]), np.median(per_pol[:, 1::2]))
+        else:
+            med = np.median(mis)
+        return m, mis, float(med)
 
     def _log(label: str, t: float, med: float, m: MultibandedFrequencyDomain) -> None:
         comp = len(ufd()[ufd.frequency_mask]) / len(m())
@@ -941,6 +971,14 @@ def parse_args():
         "window instead of against the window center at 2x resolution. More "
         "conservative, and typically leads to less aggressive decimation.",
     )
+    parser.add_argument(
+        "--chirp_mass_proxy_offset",
+        type=float,
+        default=0.0,
+        help="For a dataset with phase_heterodyning (DINGO-BNS): heterodyne the "
+        "waveforms at their chirp mass plus or minus this offset (solar masses), "
+        "the half-width of the training kernel.",
+    )
     return parser.parse_args()
 
 
@@ -954,6 +992,7 @@ def main() -> None:
         num_processes=args.num_processes,
         token_size=args.token_size,
         difference_over_full_window=args.difference_over_full_window,
+        chirp_mass_proxy_offset=args.chirp_mass_proxy_offset,
     )
 
 
