@@ -130,10 +130,11 @@ class GWSamplerContext:
             The one-time data-preprocessing transform chain (whiten / decimate /
             repackage).
         event_data : dict
-            The raw event data `d` (strain + ASDs per detector), i.e. `EventDataset.data`.
-            Consumed lazily by `prepared_data()` and reused for the likelihood. An
-            injection dict (`Injection.injection()`) may also carry its truths under
-            `"parameters"`; these are moved to `event_metadata["injection_parameters"]`.
+            The raw event data `d`: `"waveform"` and `"asds"`, each keyed by detector,
+            i.e. `EventDataset.data`; any other part is rejected. Consumed lazily by
+            `prepared_data()` and reused for the likelihood. An injection dict
+            (`Injection.injection()`) may also carry its truths under `"parameters"`;
+            these are moved to `event_metadata["injection_parameters"]`.
         event_metadata : dict, optional
             Per-event metadata: the grid the event data are on, the analyzed
             detectors, the per-detector frequency range and PSD notches, the RA
@@ -162,9 +163,16 @@ class GWSamplerContext:
             truths = event_data.pop("parameters")
             event_metadata = {**(event_metadata or {})}
             event_metadata.setdefault("injection_parameters", truths)
-            # An injection dict also carries an empty "extrinsic_parameters" part,
-            # which is not per-detector data.
-            event_data.pop("extrinsic_parameters", None)
+        # Every remaining part is indexed by detector downstream (broadcasting, the
+        # likelihood's restriction to the analyzed detectors), so the contract is
+        # enforced here.
+        if event_data is not None:
+            unknown = set(event_data) - {"waveform", "asds"}
+            if unknown:
+                raise ValueError(
+                    "Event data consist of 'waveform' and 'asds' (per-detector dicts); "
+                    f"got unexpected parts {sorted(unknown)}."
+                )
         self.domain = domain
         self._data_prep = data_prep
         self.model_metadata = model_metadata

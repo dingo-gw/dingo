@@ -363,6 +363,17 @@ def test_injection_truths_move_to_event_metadata():
     assert ctx.event_metadata == record
 
 
+def test_event_data_parts_are_validated():
+    # Every part of the event data is indexed by detector downstream, so anything
+    # other than the strain and ASDs is rejected at construction, by name.
+    with pytest.raises(ValueError, match="extrinsic_parameters"):
+        GWSamplerContext(
+            domain=None,
+            data_prep=None,
+            event_data={"waveform": {"H1": np.zeros(3)}, "extrinsic_parameters": {}},
+        )
+
+
 # Full conditional-model metadata, as serialized in Result.settings.
 _MODEL_METADATA = {
     "dataset_settings": {
