@@ -1,5 +1,6 @@
 import copy
 import time
+import warnings
 from typing import Optional
 
 import numpy as np
@@ -280,6 +281,53 @@ class Result(CoreResult):
         else:
             # Recalculate the importance-sampling weights and log evidence.
             self._calculate_evidence()
+
+    def _calculate_evidence(self):
+        """
+        Weights and evidence as in the core class, followed, for a chirp-mass
+        conditioned (DINGO-BNS) proposal, by a check of the fraction of samples and of
+        posterior mass lying outside the GNPE kernel, recorded under
+        `importance_sampling_metadata["outside_gnpe_chirp_kernel"]`.
+
+        The network was trained only where the kernel is nonzero, i.e. for
+        `chirp_mass_proxy - chirp_mass` within the kernel, whereas the target carries
+        the full prior. Samples beyond the kernel come from the flow's untrained tails.
+        They are kept, since zero-weighting them would bias the evidence low, but if
+        they carry appreciable posterior mass the evidence is unreliable, and a
+        warning is raised.
+        """
+        super()._calculate_evidence()
+        if "weights" not in self.samples:
+            return
+        gnpe_chirp = self.base_metadata["train_settings"]["data"].get("gnpe_chirp")
+        if gnpe_chirp is None:
+            return
+        # PriorDict instantiates in place, so work on a copy.
+        kernel = PriorDict(gnpe_chirp["kernel"].copy())
+        epsilon = {
+            k: (self.samples[f"{k}_proxy"] - self.samples[k]).to_numpy() for k in kernel
+        }
+        outside = ~np.isfinite(kernel.ln_prob(epsilon, axis=0))
+        weights = self.samples["weights"].to_numpy()
+        sample_fraction = float(outside.mean())
+        posterior_mass = float(weights[outside].sum() / weights.sum())
+        self.importance_sampling_metadata["outside_gnpe_chirp_kernel"] = {
+            "sample_fraction": sample_fraction,
+            "posterior_mass": posterior_mass,
+        }
+        print(
+            f"Outside the chirp-mass GNPE kernel: {100 * sample_fraction:.3f}% of "
+            f"samples, {100 * posterior_mass:.3f}% of posterior mass."
+        )
+        if posterior_mass > 1e-3 or sample_fraction > 1e-2:
+            warnings.warn(
+                f"{100 * posterior_mass:.2f}% of the posterior mass and "
+                f"{100 * sample_fraction:.2f}% of the samples lie outside the "
+                "chirp-mass GNPE kernel, where the network was not trained. The "
+                "evidence and the samples near the kernel edge are unreliable. Use a "
+                "chirp_mass_proxy closer to the true chirp mass, or a network trained "
+                "with a wider kernel."
+            )
 
     def _build_likelihood(
         self,
