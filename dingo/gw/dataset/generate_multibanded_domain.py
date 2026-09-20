@@ -410,7 +410,7 @@ def _generate_whitened_waveforms(
         Number of parallel processes for waveform generation. Default: 1.
     chirp_mass_proxy_offset : float
         For a dataset with `phase_heterodyning`, the waveforms are heterodyned at
-        their chirp mass plus this offset, see
+        their chirp mass plus or minus this offset, see
         :func:`~dingo.gw.dataset._multibanded_domain_utils.heterodyne_polarizations`.
 
     Returns
@@ -694,9 +694,9 @@ def generate_multibanded_domain_settings(
         2x resolution.
     chirp_mass_proxy_offset : float
         For a dataset with `phase_heterodyning` (DINGO-BNS), the bands are determined
-        from waveforms heterodyned at their chirp mass plus this offset: set it to the
-        largest offset of the training kernel (`gnpe_chirp`), the worst case for the
-        residual oscillation. Default: 0.
+        from waveforms heterodyned at their chirp mass plus or minus this offset,
+        alternating by row: set it to the half-width of the training kernel
+        (`gnpe_chirp`), the worst case for the residual oscillation. Default: 0.
 
     Returns
     -------
@@ -964,8 +964,8 @@ def parse_args():
         type=float,
         default=0.0,
         help="For a dataset with phase_heterodyning (DINGO-BNS): heterodyne the "
-        "waveforms at their chirp mass plus this offset (solar masses), the largest "
-        "offset of the training kernel.",
+        "waveforms at their chirp mass plus or minus this offset (solar masses), "
+        "the half-width of the training kernel.",
     )
     return parser.parse_args()
 
