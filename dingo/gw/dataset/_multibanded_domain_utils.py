@@ -79,9 +79,13 @@ def heterodyne_polarizations(
     A chirp-mass-conditioned network sees data heterodyned at the *proxy*, which
     differs from the true chirp mass by up to the width of the GNPE kernel; the
     residual oscillation, which sets the decimation, grows with that offset. The
-    waveforms are therefore heterodyned at ``chirp_mass + chirp_mass_proxy_offset``,
-    the worst case of the kernel. Without `phase_heterodyning` the waveforms are
-    returned unchanged.
+    waveforms are therefore heterodyned at ``chirp_mass +- chirp_mass_proxy_offset``,
+    the edges of the kernel, with the sign alternating by row (even rows +, odd rows
+    -): the offset term of the
+    residual phase flips sign with the offset and adds to or cancels against the
+    post-Newtonian remainder, so the two sides of the kernel are decimated
+    differently and both must be represented. Without `phase_heterodyning` the
+    waveforms are returned unchanged.
 
     Parameters
     ----------
@@ -95,8 +99,8 @@ def heterodyne_polarizations(
     settings : dict
         Dataset settings.
     chirp_mass_proxy_offset : float
-        Offset of the heterodyne chirp mass from the true one, in solar masses.
-        Default: 0.
+        Magnitude of the offset of the heterodyne chirp mass from the true one, in
+        solar masses. Default: 0.
 
     Returns
     -------
@@ -106,7 +110,8 @@ def heterodyne_polarizations(
     heterodyning = settings.get("compression", {}).get("phase_heterodyning")
     if heterodyning is None:
         return polarizations
-    chirp_mass = parameters["chirp_mass"].to_numpy() + chirp_mass_proxy_offset
+    sign = (-1.0) ** np.arange(len(parameters))
+    chirp_mass = parameters["chirp_mass"].to_numpy() + sign * chirp_mass_proxy_offset
     mass_ratio = (
         parameters["mass_ratio"].to_numpy() if "mass_ratio" in parameters else None
     )

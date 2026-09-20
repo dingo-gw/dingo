@@ -123,8 +123,8 @@ def parse_args():
         type=float,
         default=0.0,
         help="For a dataset with phase_heterodyning (DINGO-BNS): heterodyne the "
-        "waveforms at their chirp mass plus this offset (solar masses), the largest "
-        "offset of the training kernel.",
+        "waveforms at their chirp mass plus or minus this offset (solar masses), "
+        "the half-width of the training kernel.",
     )
     return parser.parse_args()
 

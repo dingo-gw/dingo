@@ -193,7 +193,8 @@ minimum chirp mass of the prior (the longest signals), and writes
 are determined from heterodyned waveforms, as the network sees them. The network sees
 data heterodyned at the proxy rather than at the true chirp mass, and the residual
 oscillation grows with the difference between the two, so `--chirp_mass_proxy_offset`
-heterodynes at the chirp mass plus this offset; set it to the half-width of the
+heterodynes at the chirp mass plus or minus this offset (alternating between the two
+sides of the kernel, which decimate differently); set it to the half-width of the
 training kernel. `dingo_evaluate_multibanded_domain` accepts the same offset. With the
 settings above, the target of $10^{-5}$ reproduces the banding of the network of
 {footcite:p}`Dax:2024mcn` (eight bands, about 3700 bins from 20 Hz to 2048 Hz). The
