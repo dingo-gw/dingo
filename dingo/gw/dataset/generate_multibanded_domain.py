@@ -696,7 +696,8 @@ def generate_multibanded_domain_settings(
         For a dataset with `phase_heterodyning` (DINGO-BNS), the bands are determined
         from waveforms heterodyned at their chirp mass plus or minus this offset,
         alternating by row: set it to the half-width of the training kernel
-        (`gnpe_chirp`), the worst case for the residual oscillation. Default: 0.
+        (`gnpe_chirp`), the worst case for the residual oscillation. The mismatch
+        target then applies to the worse of the two sides. Default: 0.
 
     Returns
     -------
@@ -743,6 +744,10 @@ def generate_multibanded_domain_settings(
         settings, prior, asd_file, num_samples, num_processes, chirp_mass_proxy_offset
     )
 
+    two_sided = chirp_mass_proxy_offset != 0 and "phase_heterodyning" in settings.get(
+        "compression", {}
+    )
+
     print("Computing waveform differences per decimation factor...")
     diffs, freqs = compute_waveform_difference_per_decimation_factor(
         decimation_factors=decimation_factors,
@@ -775,7 +780,14 @@ def generate_multibanded_domain_settings(
             min_mfd_bins_per_band=min_mfd_bins_per_band,
         )
         mis = _compute_mismatches(polarizations, ufd, m, asd)
-        return m, mis, float(np.median(mis))
+        if two_sided:
+            # Rows alternate between the two sides of the kernel (even rows +, odd
+            # rows -), and the target must hold on the worse side, not on the mixture.
+            per_pol = mis.reshape(len(polarizations), -1)
+            med = max(np.median(per_pol[:, ::2]), np.median(per_pol[:, 1::2]))
+        else:
+            med = np.median(mis)
+        return m, mis, float(med)
 
     def _log(label: str, t: float, med: float, m: MultibandedFrequencyDomain) -> None:
         comp = len(ufd()[ufd.frequency_mask]) / len(m())

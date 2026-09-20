@@ -80,7 +80,8 @@ def heterodyne_polarizations(
     differs from the true chirp mass by up to the width of the GNPE kernel; the
     residual oscillation, which sets the decimation, grows with that offset. The
     waveforms are therefore heterodyned at ``chirp_mass +- chirp_mass_proxy_offset``,
-    the edges of the kernel, with the sign alternating by row: the offset term of the
+    the edges of the kernel, with the sign alternating by row (even rows +, odd rows
+    -): the offset term of the
     residual phase flips sign with the offset and adds to or cancels against the
     post-Newtonian remainder, so the two sides of the kernel are decimated
     differently and both must be represented. Without `phase_heterodyning` the
