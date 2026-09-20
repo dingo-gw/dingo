@@ -1,3 +1,5 @@
+import warnings
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -521,3 +523,59 @@ def test_old_schema_settings_are_converted_on_load():
     assert tokenization == {"num_tokens_per_block": 8, "normalize_position": False}
     waveform, position, token_mask = result.sampler_context.prepared_data()
     assert position.shape == (2 * 8, 3)
+
+
+_CHIRP_KERNEL = {
+    "chirp_mass": "bilby.core.prior.Uniform(minimum=-0.005, maximum=0.005)"
+}
+
+
+def _chirp_conditioned_result(epsilon, weights):
+    """A chirp-mass conditioned result whose proxy differs from the chirp mass by
+    `epsilon` (the kernel draw), with importance-sampling columns set so that the
+    samples carry the relative `weights`."""
+    result = make_gw_result(n=len(epsilon))
+    result.metadata["train_settings"]["data"]["gnpe_chirp"] = {"kernel": _CHIRP_KERNEL}
+    result.samples["chirp_mass_proxy"] = result.samples["chirp_mass"] + np.asarray(
+        epsilon
+    )
+    result.samples["log_prior"] = 0.0
+    result.samples["log_likelihood"] = np.log(weights)
+    return result
+
+
+def test_outside_gnpe_chirp_kernel_is_recorded_and_warned():
+    # Two of five samples lie beyond the kernel half-width and carry half the mass.
+    result = _chirp_conditioned_result(
+        epsilon=[0.0, 0.004, -0.006, 0.01, -0.001], weights=[1.0, 1.0, 1.5, 1.5, 1.0]
+    )
+    with pytest.warns(UserWarning, match="outside the chirp-mass GNPE kernel"):
+        result._calculate_evidence()
+    assert result.importance_sampling_metadata[
+        "outside_gnpe_chirp_kernel"
+    ] == pytest.approx({"sample_fraction": 0.4, "posterior_mass": 0.5})
+
+
+def test_outside_gnpe_chirp_kernel_is_silent_when_covered():
+    result = _chirp_conditioned_result(
+        epsilon=[0.0, 0.004, -0.004], weights=[1.0, 2.0, 3.0]
+    )
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        result._calculate_evidence()
+    assert result.importance_sampling_metadata["outside_gnpe_chirp_kernel"] == {
+        "sample_fraction": 0.0,
+        "posterior_mass": 0.0,
+    }
+
+
+def test_outside_gnpe_chirp_kernel_runs_through_importance_sampling():
+    result = _chirp_conditioned_result(epsilon=[0.0, 0.001], weights=[1.0, 1.0])
+    result.importance_sample()
+    assert "outside_gnpe_chirp_kernel" in result.importance_sampling_metadata
+    assert result.log_evidence is not None
+
+
+def test_no_kernel_check_without_gnpe_chirp(gw_result):
+    gw_result.importance_sample()
+    assert "outside_gnpe_chirp_kernel" not in gw_result.importance_sampling_metadata
