@@ -7,7 +7,7 @@ from torchvision.transforms import Compose
 from dingo.core.dataset import DingoDataset, DTypeMap, recursive_hdf5_load
 from dingo.gw.SVD import SVDBasis, ApplySVD
 from dingo.gw.domains import build_domain
-from dingo.gw.transforms import WhitenFixedASD
+from dingo.gw.transforms import HeterodynePhase, WhitenFixedASD
 
 
 class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
@@ -151,7 +151,8 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
     def initialize_decompression(self, svd_size_update: Optional[int] = None):
         """
         Sets up decompression transforms. These are applied to the raw dataset before
-        self.transform. E.g., SVD decompression.
+        self.transform, in reverse order of the compression: SVD decompression, inverse
+        phase heterodyning, un-whitening.
 
         Parameters
         ----------
@@ -184,6 +185,15 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
 
             svd_basis = SVDBasis(dictionary=self.svd)
             decompression_transform_list.append(ApplySVD(svd_basis, inverse=True))
+
+        if "phase_heterodyning" in self.settings["compression"]:
+            decompression_transform_list.append(
+                HeterodynePhase(
+                    self.domain,
+                    inverse=True,
+                    **self.settings["compression"]["phase_heterodyning"],
+                )
+            )
 
         if "whitening" in self.settings["compression"]:
             decompression_transform_list.append(
@@ -302,13 +312,16 @@ class WaveformDataset(DingoDataset, torch.utils.data.Dataset):
                 for pol, waveforms in self.polarizations.items()
             }
 
-        # Decompression transforms are assumed to apply only to the waveform,
-        # and do not involve parameters.
+        # Decompression transforms act on the sample dict, since some of them (the
+        # inverse phase heterodyne) depend on the parameters. They must leave the
+        # parameters untouched.
+        data = {"parameters": parameters, "waveform": polarizations}
         if self.decompression_transform is not None:
-            polarizations = self.decompression_transform(polarizations)
+            data = self.decompression_transform(data)
+            if data["parameters"] is not parameters:
+                raise ValueError("Decompression transforms must not change parameters.")
 
         # Main transforms can depend also on parameters.
-        data = {"parameters": parameters, "waveform": polarizations}
         if self.transform is not None:
             data = self.transform(data)
 

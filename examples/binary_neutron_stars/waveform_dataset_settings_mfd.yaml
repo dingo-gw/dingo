@@ -1,0 +1,54 @@
+# Multibanded version of waveform_dataset_settings_ufd.yaml, written by
+# dingo_generate_multibanded_domain with --target_median_mismatch 1e-5 and
+# --chirp_mass_proxy_offset 0.005 (bands determined from heterodyned waveforms).
+# Generate the dataset from this file:
+#   dingo_generate_dataset --settings_file waveform_dataset_settings_mfd.yaml \
+#       --num_processes N --out_file waveform_dataset.hdf5
+domain:
+  base_domain:
+    type: UniformFrequencyDomain
+    f_min: 20.0
+    f_max: 2048.0
+    delta_f: 0.0078125
+  delta_f_initial: 0.0078125
+  nodes:
+  - 20.0
+  - 23.109375
+  - 33.609375
+  - 43.984375
+  - 55.984375
+  - 68.984375
+  - 83.484375
+  - 97.984375
+  - 2047.984375
+  type: MultibandedFrequencyDomain
+waveform_generator:
+  approximant: IMRPhenomXP_NRTidalv3
+  f_ref: 100.0
+  spin_conversion_phase: 0.0
+intrinsic_prior:
+  mass_1: bilby.core.prior.Constraint(minimum=1.0, maximum=3.2)
+  mass_2: bilby.core.prior.Constraint(minimum=1.0, maximum=2.0)
+  chirp_mass: bilby.gw.prior.UniformInComponentsChirpMass(minimum=1.0, maximum=2.2)
+  mass_ratio: bilby.gw.prior.UniformInComponentsMassRatio(minimum=0.05, maximum=1.0)
+  a_1: bilby.core.prior.Uniform(minimum=0.0, maximum=0.05)
+  a_2: bilby.core.prior.Uniform(minimum=0.0, maximum=0.05)
+  tilt_1: default
+  tilt_2: default
+  phi_12: default
+  phi_jl: default
+  theta_jn: default
+  phase: default
+  lambda_1: default
+  lambda_2: bilby.core.prior.Uniform(minimum=0.0, maximum=10000.0)
+  luminosity_distance: 100.0
+  geocent_time: 0.0
+num_samples: 30000000
+compression:
+  whitening: aLIGO_ZERO_DET_high_P_asd.txt
+  phase_heterodyning:
+    order: 0
+  svd:
+    size: 200
+    num_training_samples: 50000
+    num_validation_samples: 10000

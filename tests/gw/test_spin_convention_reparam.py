@@ -198,3 +198,43 @@ def test_forward_matches_to_physical():
     assert set(out) == {"theta_jn", "phi_jl"}
     for k in out:
         assert np.allclose(out[k].numpy(), expected[k].to_numpy())
+
+
+def test_direction_to_network():
+    # The reversed step relabels physical-convention columns into the model's:
+    # forward = to_network, inverse = to_physical, so composing it with the
+    # default-direction step closes the roundtrip and the Jacobians cancel.
+    class _Context:
+        model_metadata = _MODEL_METADATA_SC0
+
+    reparam = SpinConventionReparam(direction="to_network")
+    samples = _samples()
+    given = {
+        k: torch.as_tensor(samples[k].to_numpy())
+        for k in reparam.inputs + reparam.conditioning
+    }
+    out, log_prob_contribution = reparam.sample_and_log_prob(1, _Context(), given)
+    expected = reparam.to_network(samples, _MODEL_METADATA_SC0)
+    for k in reparam.parameters:
+        assert np.allclose(out[k].numpy(), expected[k].to_numpy())
+
+    back = reparam.inverse(out, _Context(), {**given, **out})
+    for k in reparam.parameters:
+        assert np.allclose(back[k].numpy(), samples[k].to_numpy(), atol=1e-10)
+
+    restored, log_det_back = SpinConventionReparam().sample_and_log_prob(
+        1, _Context(), {**given, **out}
+    )
+    for k in reparam.parameters:
+        assert np.allclose(restored[k].numpy(), samples[k].to_numpy(), atol=1e-10)
+    assert np.allclose((log_prob_contribution + log_det_back).numpy(), 0.0, atol=1e-8)
+
+
+def test_direction_validated_and_described():
+    with pytest.raises(ValueError, match="direction"):
+        SpinConventionReparam(direction="sideways")
+    assert (
+        SpinConventionReparam(direction="to_network").describe()["direction"]
+        == "to_network"
+    )
+    assert SpinConventionReparam().describe()["direction"] == "to_physical"

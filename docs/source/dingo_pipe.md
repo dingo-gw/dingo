@@ -151,7 +151,13 @@ The next step is sampling from the Dingo model. The model is loaded into a [GWCo
 
 If using GNPE, one can optionally specify `num-gnpe-iterations` (it defaults to 30). Importantly, obtaining the log probability when using GNPE requires an [extra step of training an unconditional flow](result.md#density-recovery). This is done using the `recover-log-prob` flag, which defaults to `True`. The default density recovery settings can be overwritten by providing a `density-recovery-settings` dictionary in the `.ini` file.
 
-Single-network models that condition on context parameters (e.g., chirp-mass-conditioned [BNS](bns.md) networks) take their pinned values from `fixed-context-parameters`, or determine the trigger chirp mass from the data with `chirp-mass-scan`. Both options are described on the [binary neutron stars](bns.md) page.
+Single-network models that condition on context parameters, such as chirp-mass-conditioned [BNS](bns.md) networks, take their pinned values from `fixed-context-parameters`, or determine the trigger chirp mass from the data with `chirp-mass-scan`:
+
+fixed-context-parameters
+: Dictionary pinning the model's context parameters, e.g. `{chirp_mass_proxy: 1.19786}`. A single-network model with context parameters requires all of them pinned, unless the chirp-mass proxy is supplied by the scan. Cannot be combined with `model-init` (iterative GNPE).
+
+chirp-mass-scan
+: Set to `true` to determine the trigger chirp mass from the data with defaults derived from the model (grid from the training prior and kernel, 10 draws per grid point). A dictionary overrides individual settings, e.g. `{num_samples: 10, overlap_factor: 2, block_size: 32}`; `num_processes` defaults to `request-cpus`. Mutually exclusive with a pinned `chirp_mass_proxy`; the remaining context parameters are still supplied via `fixed-context-parameters`. The scan is described under [the chirp-mass scan](bns.md#the-chirp-mass-scan).
 
 Since sampling uses GPU hardware, there is an additional key `sampling-requirements` for HTCondor requirements during the sampling stage. This is intended for specifying GPU requirements such as memory or CUDA version.
 

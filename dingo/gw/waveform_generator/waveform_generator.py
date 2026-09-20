@@ -361,7 +361,11 @@ class WaveformGenerator:
             wf_dict = self._domain_transform(wf_dict)
 
         if self.transform is not None:
-            return self.transform(wf_dict)
+            # The transform takes a sample dict, so that parameter-dependent
+            # compression transforms (e.g. HeterodynePhase) can be composed with
+            # whitening and SVD.
+            sample = {"waveform": wf_dict, "parameters": parameters}
+            return self.transform(sample)["waveform"]
         else:
             return wf_dict
 
@@ -486,8 +490,12 @@ class WaveformGenerator:
         ecc_params = (0.0, 0.0, 0.0)  # longAscNodes, eccentricity, meanPerAno
         # for BNS/NSBH: insert tidal deformability
         if "lambda_1" in p or "lambda_2" in p:
-            if lal_params is None:
-                lal_params = lal.CreateDict()
+            # Copy so tidal entries do not leak into self.lal_params across calls.
+            lal_params = (
+                lal.CreateDict()
+                if lal_params is None
+                else lal.DictDuplicate(lal_params)
+            )
             lalsim_SimInspiralWaveformParamsInsertTidalLambda1(
                 lal_params, p.get("lambda_1", 0)
             )
@@ -848,6 +856,17 @@ class WaveformGenerator:
                 f"path."
             )
             use_dft = False
+        if use_dft and self.spin_conversion_phase is None:
+            # The DFT inverts waveforms that differ only by a shift of the phase.
+            # With spin_conversion_phase=None a phase shift also rotates the
+            # in-plane spins, so the grid points would differ in the spins too
+            # and the recovered m-components would be wrong.
+            warnings.warn(
+                "use_dft_phase_decomposition requires a fixed "
+                "spin_conversion_phase; with None, a phase shift also rotates "
+                "the in-plane spins. Falling back to the individual-mode path."
+            )
+            use_dft = False
 
         if isinstance(self.domain, UniformFrequencyDomain):
             # Generate FD modes in for frequencies [-f_max, ..., 0, ..., f_max].
@@ -999,7 +1018,14 @@ class WaveformGenerator:
                 f"domain and frame as one of the approximants should just be a matter of "
                 f"adding the approximant number (here: {self.approximant}) to the "
                 f"corresponding if statement. However, when doing this please make sure "
-                f"to test that this works as intended! Ideally, add some unit tests."
+                f"to test that this works as intended! Ideally, add some unit tests. "
+                f"Note: if LALSimulation does not implement SimInspiralChooseFDModes "
+                f"for this approximant (e.g. matter models such as the NRTidal "
+                f"family), this route cannot work at all; use the DFT phase "
+                f"decomposition instead (use_dft_phase_decomposition=True, with a "
+                f"mode_list or DEFAULT_ELL_MAX entry to size its grid), or "
+                f"co_rotate_spins for synthetic phase with an approximant that has "
+                f"only a co-precessing (2, |m|=2) pair."
             )
 
     def generate_TD_modes_L0(self, parameters):

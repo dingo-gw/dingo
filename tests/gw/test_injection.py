@@ -71,3 +71,14 @@ def test_signal_m_EOB(signal_setup_EOB, BBH_parameters):
         for k in waveform.keys()
     ]
     assert np.max(mismatches) < 1e-4
+
+
+def test_signal_dicts_carry_only_data_and_parameters(signal_setup_EOB, BBH_parameters):
+    # The projection transforms consume the extrinsic parameters; the emptied
+    # scratch part of the training sample layout is not returned.
+    signal = signal_setup_EOB
+    assert set(signal.signal(BBH_parameters)) == {"waveform", "parameters"}
+    assert all(
+        set(s) == {"waveform", "parameters"}
+        for s in signal.signal_m(BBH_parameters).values()
+    )

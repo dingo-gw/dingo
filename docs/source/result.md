@@ -36,7 +36,10 @@ uniform_weight: 0.01
 num_processes: 100
 ```
 approximation_22_mode
-: Whether to make the approximation that only the $(l, m) = (2, 2)$ mode is present, i.e., waveforms transform as $\exp(2 i \phi_c)$. This simplifies computations since it does not require caching of waveform modes.
+: Whether to make the approximation that only the $(l, m) = (2, 2)$ mode is present, i.e., waveforms transform as $\exp(2 i \phi_c)$. This simplifies computations since it does not require caching of waveform modes. It is faster than the exact mode sum and accurate for weakly precessing signals.
+
+co_rotate_spins
+: Draw the phase in the physical spin convention, where a phase shift co-rotates the in-plane spins, and fold the implied rotation into the `theta_jn` / `phi_jl` columns (their values change along with the added `phase`). For approximants whose co-precessing-frame content is a single $(2, |m| = 2)$ pair (e.g. IMRPhenomPv2, IMRPhenomXP, IMRPhenomXP_NRTidalv3) this is *exact* at the cost of `approximation_22_mode`. Overrides `approximation_22_mode`.
 
 n_grid
 : Specifies the phase grid on which the likelihoods are evaluated.
@@ -46,6 +49,8 @@ uniform_weight
 
 num_processes
 : For parallelization of synthetic phase sampling. This is usually the most expensive part of importance sampling, so it is advantageous to perform calculations in parallel.
+
+Which of the phase options to use depends on the mode content of the approximant. `co_rotate_spins: true` draws the phase in the physical spin convention, where a phase shift co-rotates the in-plane spins, so the waveform transforms as a global $e^{2i\phi}$ factor, and rotates `theta_jn` / `phi_jl` accordingly. For a model whose co-precessing-frame content is a single $(2, \pm 2)$ pair this is exact at a single waveform evaluation per sample; a two-waveform probe verifies the property at runtime and falls back to the exact mode sum otherwise. The plain `approximation_22_mode: true` shortcut has the same cost but is approximate for precessing signals: precession mixes the inertial-frame $m$-components, placing a spurious phase peak at $\phi + \pi$. The exact mode sum (`approximation_22_mode: false`) costs $2\ell_{\max}+1 = 5$ evaluations per sample. For NRTidal models, which have no frequency-domain modes in LALSimulation, it requires the DFT phase decomposition with an explicit `mode_list: [[2, 2], [2, -2]]` in the waveform-generator settings.
 
 ## Importance sampling
 
