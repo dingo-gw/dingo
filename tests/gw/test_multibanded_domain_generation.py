@@ -593,7 +593,7 @@ class TestHeterodynePolarizations:
         assert heterodyne_polarizations(pols, ufd, params, {}) is pols
 
     @pytest.mark.parametrize("order", [0, 2])
-    def test_heterodynes_each_row_at_offset_chirp_mass(self, ufd, order):
+    def test_heterodynes_each_row_at_alternating_offset(self, ufd, order):
         from dingo.gw.dataset._multibanded_domain_utils import heterodyne_polarizations
         from dingo.gw.transforms import factor_fiducial_waveform
 
@@ -615,7 +615,7 @@ class TestHeterodynePolarizations:
                 expected = factor_fiducial_waveform(
                     pols[k][i],
                     ufd,
-                    1.2 + 0.1 * i + 0.005,
+                    1.2 + 0.1 * i + (-1) ** i * 0.005,
                     [0.7, 0.8, 0.9][i],
                     order=order,
                 )
@@ -694,3 +694,80 @@ def test_heterodyned_waveforms_decimate_further(tmp_path):
     bins_het_offset = num_bins(BNS_UFD_SETTINGS, 0.02)
     assert bins_het < bins_plain / 2
     assert bins_het <= bins_het_offset < bins_plain
+
+
+def test_alternating_offset_covers_both_kernel_edges(tmp_path, monkeypatch):
+    """The bands must serve a proxy on either side of the true chirp mass. The residual
+    oscillation differs between the two sides (the offset term of the phase adds to or
+    cancels against the post-Newtonian remainder), so a domain determined from one
+    side alone fails on the other; the alternating-sign offset covers both."""
+    import yaml
+    from bilby.core.utils import random as bilby_random
+
+    import dingo.gw.dataset.generate_multibanded_domain as gmd
+    from dingo.gw.dataset._multibanded_domain_utils import (
+        build_extreme_prior,
+        heterodyne_polarizations,
+    )
+    from dingo.gw.domains import build_domain
+    from dingo.gw.transforms import factor_fiducial_waveform
+
+    path = tmp_path / "settings_ufd.yaml"
+    with open(path, "w") as f:
+        yaml.dump(BNS_UFD_SETTINGS, f)
+    target, delta = 1e-3, 0.005
+
+    def domain_from(sign):
+        # sign=None: the tool as shipped (alternating); otherwise one-sided heterodyning.
+        if sign is None:
+            monkeypatch.setattr(
+                gmd, "heterodyne_polarizations", heterodyne_polarizations
+            )
+        else:
+            monkeypatch.setattr(
+                gmd,
+                "heterodyne_polarizations",
+                lambda pols, domain, params, settings, offset: heterodyne_polarizations(
+                    pols,
+                    domain,
+                    params.assign(chirp_mass=params["chirp_mass"] + sign * offset),
+                    settings,
+                ),
+            )
+        bilby_random.seed(0)
+        out = gmd.generate_multibanded_domain_settings(
+            str(path),
+            num_samples=8,
+            target_median_mismatch=target,
+            chirp_mass_proxy_offset=delta,
+        )
+        with open(out) as f:
+            return build_domain(yaml.safe_load(f)["domain"])
+
+    mfd_alternating = domain_from(None)
+    mfd_minus = domain_from(-1.0)
+
+    # Fresh waveforms, heterodyned at either edge of the kernel.
+    plain = dict(
+        BNS_UFD_SETTINGS, compression={"whitening": "aLIGO_ZERO_DET_high_P_asd.txt"}
+    )
+    bilby_random.seed(1)
+    ufd, parameters, pols, _, _, asd = gmd._generate_whitened_waveforms(
+        plain, build_extreme_prior(plain), gmd._get_asd_file(plain), 16
+    )
+
+    def median_mismatch(mfd, sign):
+        chirp_mass = parameters["chirp_mass"].to_numpy() + sign * delta
+        het = {k: factor_fiducial_waveform(v, ufd, chirp_mass) for k, v in pols.items()}
+        return np.median(gmd._compute_mismatches(het, ufd, mfd, asd))
+
+    print(
+        f"\nalternating ({len(mfd_alternating)} bins): +delta "
+        f"{median_mismatch(mfd_alternating, 1.0):.2e}, -delta "
+        f"{median_mismatch(mfd_alternating, -1.0):.2e}; -delta-only "
+        f"({len(mfd_minus)} bins): +delta {median_mismatch(mfd_minus, 1.0):.2e}"
+    )
+    assert median_mismatch(mfd_alternating, 1.0) <= 2 * target
+    assert median_mismatch(mfd_alternating, -1.0) <= 2 * target
+    # The domain determined from one side alone is worse on the side it never saw.
+    assert median_mismatch(mfd_minus, 1.0) > median_mismatch(mfd_alternating, 1.0)
