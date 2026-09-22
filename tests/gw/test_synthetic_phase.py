@@ -113,6 +113,72 @@ def test_log_prob_replug_matches_sample():
     assert np.allclose(log_prob.numpy(), log_prob_replug.numpy())
 
 
+def test_chain_with_co_rotation():
+    """The co_rotate_spins chain [table, factor(22-mode), reparam(to_network)]:
+    the composed proposal density is the stored table log-prob plus the phase
+    log-prob plus the rotation Jacobian, only the spin angles are rotated, and
+    the reparam's inverse restores the table's values."""
+    from dingo.core.inference.composer import ChainComposer
+    from dingo.core.inference.steps import SampleTableFactor
+    from dingo.gw.inference.steps import SpinConventionReparam
+
+    class _Context(_MockContext):
+        device = None
+        model_metadata = {
+            "dataset_settings": {
+                "waveform_generator": {
+                    "approximant": "IMRPhenomXPHM",
+                    "f_ref": 20.0,
+                    "spin_conversion_phase": 0.0,
+                }
+            }
+        }
+
+    rng = np.random.default_rng(5)
+    n = 8
+    table_dict = {
+        "chirp_mass": rng.uniform(20.0, 40.0, n),
+        "mass_ratio": rng.uniform(0.5, 1.0, n),
+        "theta_jn": rng.uniform(0.3, np.pi - 0.3, n),
+        "phi_jl": rng.uniform(0.0, 2 * np.pi, n),
+        "a_1": rng.uniform(0.1, 0.9, n),
+        "a_2": rng.uniform(0.1, 0.9, n),
+        "tilt_1": rng.uniform(0.3, np.pi - 0.3, n),
+        "tilt_2": rng.uniform(0.3, np.pi - 0.3, n),
+        "phi_12": rng.uniform(0.0, 2 * np.pi, n),
+    }
+    stored_log_prob = rng.normal(size=n)
+    table = SampleTableFactor(table_dict, log_prob=stored_log_prob)
+    factor = SyntheticPhaseFactor(
+        conditioning=list(table_dict), approximation_22_mode=True, n_grid=101
+    )
+    reparam = SpinConventionReparam(direction="to_network")
+    chain = ChainComposer([table, factor, reparam])
+    _seed(7)
+    out, log_prob = chain.sample_and_log_prob(1, _Context())
+
+    # Only the spin angles rotate with the drawn phase.
+    assert not np.allclose(out["theta_jn"].numpy(), table_dict["theta_jn"], atol=1e-4)
+    assert np.allclose(out["chirp_mass"].numpy(), table_dict["chirp_mass"], atol=1e-4)
+
+    # Composed density: stored + phase log-prob (deterministic replug on the
+    # pre-rotation conditioning) + the rotation Jacobian.
+    given = {k: torch.as_tensor(v, dtype=torch.float32) for k, v in table_dict.items()}
+    log_prob_phase = factor.log_prob({"phase": out["phase"]}, _Context(), given)
+    log_det = reparam._log_det(given["theta_jn"], out["theta_jn"])
+    expected = stored_log_prob + log_prob_phase.numpy() - log_det.numpy()
+    assert np.allclose(log_prob.numpy(), expected, atol=1e-4)
+
+    # The inverse restores the table's spin angles from the rotated ones.
+    conditioning = {k: given[k] for k in reparam.conditioning if k != "phase"}
+    conditioning["phase"] = out["phase"]
+    back = reparam.inverse(
+        {k: out[k] for k in reparam.parameters}, _Context(), conditioning
+    )
+    for k in reparam.parameters:
+        assert np.allclose(back[k].numpy(), table_dict[k], atol=1e-4)
+
+
 def test_factor_builds_likelihood_from_context():
     # The factor takes the likelihood from the context, passing its base-domain
     # choice (the same one importance sampling evaluates with) and any waveform

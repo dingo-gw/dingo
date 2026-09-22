@@ -69,6 +69,19 @@ class SyntheticPhaseFactor(Factor):
     on the default: this factor and `dingo_pipe`'s `PhaseRecoveryDefault` use the
     exact mode, while `Result.sample_synthetic_phase` defaults to the (2, 2)
     approximation when the key is omitted.
+
+    The choice trades speed for accuracy. The approximation is
+    accurate for weakly precessing signals -- its error grows with in-plane spin
+    and with inclination away from face-on/off, where precession mixes the
+    m-components. For approximants with only a co-precessing (2, |m| = 2)
+    pair, `co_rotate_spins` removes this error at the same cost:
+    the reconstruction is then exact even for precessing signals.
+
+    This works because the (2, 2) profile is exact in the physical spin
+    convention, where the phase co-rotates the in-plane spins:
+    `Result.sample_synthetic_phase` follows this factor with a
+    `SpinConventionReparam(direction="to_network")` step. Unlike the exact mode
+    sum, that route does not need a fixed spin-conversion phase.
     """
 
     def __init__(
@@ -535,15 +548,29 @@ class SpinConventionReparam(Reparametrization):
     coordinates: it rotates the line of sight rigidly about the orbital angular
     momentum, preserving the spherical measure `sin(theta_jn) dtheta dphi`, so
     `log_det = log sin(theta_jn) - log sin(theta_jn')`.
+
+    With `direction="to_network"` the step runs the other way, relabeling
+    physical-convention columns into the model's. The synthetic phase's
+    `co_rotate_spins` uses this after drawing a phase in the physical
+    convention, folding the implied spin rotation back into the model's angles.
     """
 
-    def __init__(self, num_processes: int = 1):
+    def __init__(self, num_processes: int = 1, direction: str = "to_physical"):
         """
         Parameters
         ----------
         num_processes : int, default 1
             Parallel processes for the per-sample LAL spin conversion.
+        direction : str, default "to_physical"
+            Which way `forward` maps: "to_physical" relabels model-convention
+            columns to the physical (Bilby) convention, "to_network" the reverse.
+            `inverse` runs the opposite way.
         """
+        if direction not in ("to_physical", "to_network"):
+            raise ValueError(
+                f"direction must be 'to_physical' or 'to_network', got {direction}."
+            )
+        self.direction = direction
         self.parameters = ["theta_jn", "phi_jl"]
         # The bijection overwrites theta_jn / phi_jl in place; the remaining
         # columns (phase, masses, tilts, ...) are read-only conditioning.
@@ -609,12 +636,19 @@ class SpinConventionReparam(Reparametrization):
             samples, f_ref, None, sc_phase, num_processes=self.num_processes
         )
 
+    def _convert(self, theta: pd.DataFrame, model_metadata: dict, invert: bool):
+        """Run the relabel in the step's `direction` (or its opposite, for the
+        reverse fold)."""
+        if (self.direction == "to_physical") != invert:
+            return self.to_physical(theta, model_metadata)
+        return self.to_network(theta, model_metadata)
+
     def forward(self, given, context):
         # The conversion runs in double; the outputs return in the input dtype
         # and device.
         reference = given["theta_jn"]
         theta = pd.DataFrame({k: _to_numpy(v) for k, v in given.items()})
-        converted = self.to_physical(theta, context.model_metadata)
+        converted = self._convert(theta, context.model_metadata, invert=False)
         return {
             k: torch.as_tensor(converted[k].to_numpy()).to(
                 dtype=reference.dtype, device=reference.device
@@ -623,25 +657,28 @@ class SpinConventionReparam(Reparametrization):
         }
 
     def inverse(self, params, context, given=None):
-        # The physical -> network direction also needs the invariant
-        # conditioning (phase, masses, tilts), which the reverse fold supplies
-        # as `given`.
+        # The reverse direction also needs the invariant conditioning (phase,
+        # masses, tilts), which the reverse fold supplies as `given`.
         if given is None:
             raise ValueError(
                 "The spin-convention inverse needs the conditioning block "
                 "(phase, masses, tilts); pass it as `given`, or convert "
-                "DataFrames with to_network()."
+                "DataFrames with to_network()/to_physical()."
             )
         reference = params["theta_jn"]
         rows = {**given, **params}
         theta = pd.DataFrame({k: _to_numpy(v) for k, v in rows.items()})
-        converted = self.to_network(theta, context.model_metadata)
+        converted = self._convert(theta, context.model_metadata, invert=True)
         return {
             k: torch.as_tensor(converted[k].to_numpy()).to(
                 dtype=reference.dtype, device=reference.device
             )
             for k in self.parameters
         }
+
+    def describe(self) -> dict:
+        """The default descriptor, plus the map's direction."""
+        return {**super().describe(), "direction": self.direction}
 
 
 class GNPEKernelCorrection(TargetCorrection):

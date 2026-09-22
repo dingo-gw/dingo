@@ -486,8 +486,12 @@ class WaveformGenerator:
         ecc_params = (0.0, 0.0, 0.0)  # longAscNodes, eccentricity, meanPerAno
         # for BNS/NSBH: insert tidal deformability
         if "lambda_1" in p or "lambda_2" in p:
-            if lal_params is None:
-                lal_params = lal.CreateDict()
+            # Copy so tidal entries do not leak into self.lal_params across calls.
+            lal_params = (
+                lal.CreateDict()
+                if lal_params is None
+                else lal.DictDuplicate(lal_params)
+            )
             lalsim_SimInspiralWaveformParamsInsertTidalLambda1(
                 lal_params, p.get("lambda_1", 0)
             )
@@ -546,10 +550,20 @@ class WaveformGenerator:
             lal_parameter_tuple = (phase, *masses, *spins_cartesian, f_ref, r, iota)
             lal_parameter_tuple = tuple(float(p) for p in lal_parameter_tuple)
             # create lal object for frequency array
-            frequency_array = lal.CreateREAL8Vector(
-                len(self.domain()[self.domain.min_idx :])
-            )
-            frequency_array.data = self.domain()[self.domain.min_idx :]
+            frequencies = self.domain()[self.domain.min_idx :]
+            f_pad = getattr(self.domain, "base_domain", self.domain).f_max
+            if frequencies[-1] < f_pad:
+                # Some models (e.g. IMRPhenomXP_NRTidalv3) place the waveform in
+                # time based on the last frequency they are asked for, so a
+                # request that stops before the merger returns a waveform
+                # shifted by an amount that depends on where the request ends.
+                # Asking for one extra frequency at the base domain's f_max
+                # makes the result independent of the band structure and
+                # consistent with SimInspiralFD; the extra sample is dropped in
+                # generate_FD_waveform.
+                frequencies = np.append(frequencies, f_pad)
+            frequency_array = lal.CreateREAL8Vector(len(frequencies))
+            frequency_array.data = frequencies
             lal_parameter_tuple = (
                 *lal_parameter_tuple,
                 lal_params,
@@ -759,8 +773,9 @@ class WaveformGenerator:
             frequency_array = self.domain()[self.domain.min_idx :]
             h_plus = np.zeros_like(frequency_array, dtype=complex)
             h_cross = np.zeros_like(frequency_array, dtype=complex)
-            h_plus[:] = hp.data.data[:]
-            h_cross[:] = hc.data.data[:]
+            # The request may have been padded to f_max (see _convert_parameters).
+            h_plus[:] = hp.data.data[: len(frequency_array)]
+            h_cross[:] = hc.data.data[: len(frequency_array)]
             return {"h_plus": h_plus, "h_cross": h_cross}
 
         else:
@@ -846,6 +861,17 @@ class WaveformGenerator:
                 f"determined for {self.approximant_str} (no mode_list, no "
                 f"DEFAULT_ELL_MAX entry). Falling back to the individual-mode "
                 f"path."
+            )
+            use_dft = False
+        if use_dft and self.spin_conversion_phase is None:
+            # The DFT inverts waveforms that differ only by a shift of the phase.
+            # With spin_conversion_phase=None a phase shift also rotates the
+            # in-plane spins, so the grid points would differ in the spins too
+            # and the recovered m-components would be wrong.
+            warnings.warn(
+                "use_dft_phase_decomposition requires a fixed "
+                "spin_conversion_phase; with None, a phase shift also rotates "
+                "the in-plane spins. Falling back to the individual-mode path."
             )
             use_dft = False
 
@@ -999,7 +1025,14 @@ class WaveformGenerator:
                 f"domain and frame as one of the approximants should just be a matter of "
                 f"adding the approximant number (here: {self.approximant}) to the "
                 f"corresponding if statement. However, when doing this please make sure "
-                f"to test that this works as intended! Ideally, add some unit tests."
+                f"to test that this works as intended! Ideally, add some unit tests. "
+                f"Note: if LALSimulation does not implement SimInspiralChooseFDModes "
+                f"for this approximant (e.g. matter models such as the NRTidal "
+                f"family), this route cannot work at all; use the DFT phase "
+                f"decomposition instead (use_dft_phase_decomposition=True, with a "
+                f"mode_list or DEFAULT_ELL_MAX entry to size its grid), or "
+                f"co_rotate_spins for synthetic phase with an approximant that has "
+                f"only a co-precessing (2, |m|=2) pair."
             )
 
     def generate_TD_modes_L0(self, parameters):

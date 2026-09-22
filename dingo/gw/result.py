@@ -1,5 +1,6 @@
 import copy
 import time
+import warnings
 from typing import Optional
 
 import numpy as np
@@ -18,6 +19,46 @@ from dingo.gw.frequency_updates import resolve_frequency_bounds
 
 
 RANDOM_STATE = 150914
+
+
+def _co_rotating_phase_mismatch(waveform_generator, theta, delta=0.9):
+    """
+    Probe whether phase shifts in the physical spin convention act as a global
+    `exp(2i phase)` factor on the waveform: generate the sample `theta` at
+    `phase = 0`, then at `phase = delta` with the in-plane spins co-rotated, and
+    return the larger h_plus / h_cross mismatch against `h(0) * exp(2i delta)`.
+    Zero to round-off iff the approximant has only a co-precessing (2, |m| = 2)
+    pair -- the condition under which `co_rotate_spins` is exact. If `theta` has
+    no precessing-spin parameters there are no in-plane spins to rotate, so the
+    probe simply compares `h(delta)` against `h(0) * exp(2i delta)` -- which
+    still rejects aligned-spin models with higher modes.
+    """
+    import pandas as pd
+    from dingo.gw.conversion import change_spin_conversion_phase
+    from dingo.gw.conversion.spin_conversion import DINGO_PE_SPIN_PARAMETERS
+    from dingo.gw.gwutils import get_mismatch
+
+    theta = {k: float(v) for k, v in theta.items()}
+    h0 = waveform_generator.generate_hplus_hcross({**theta, "phase": 0.0})
+    if set(DINGO_PE_SPIN_PARAMETERS) <= set(theta):
+        rotated = (
+            change_spin_conversion_phase(
+                pd.DataFrame([{**theta, "phase": delta}]),
+                waveform_generator.f_ref,
+                None,
+                waveform_generator.spin_conversion_phase,
+            )
+            .iloc[0]
+            .to_dict()
+        )
+    else:
+        # No precessing-spin parameters: there are no in-plane spins to rotate.
+        rotated = {**theta, "phase": delta}
+    h1 = waveform_generator.generate_hplus_hcross(rotated)
+    return max(
+        get_mismatch(h1[pol], h0[pol] * np.exp(2j * delta), waveform_generator.domain)
+        for pol in ("h_plus", "h_cross")
+    )
 
 
 class Result(CoreResult):
@@ -508,7 +549,14 @@ class Result(CoreResult):
             `num_processes` (optional), `use_dft_phase_decomposition` (optional;
             overrides the waveform generator setting of the same name for this
             step only, selecting how the m-components are obtained -- see
-            WaveformGenerator).
+            WaveformGenerator), `co_rotate_spins` (optional; default False. Draw
+            the phase in the physical spin convention, where it co-rotates the
+            in-plane spins, and rotate `theta_jn` / `phi_jl` accordingly. Exact
+            at the cost of the (2, 2) approximation for approximants with only a
+            co-precessing (2, |m| = 2) pair; a two-waveform probe verifies this
+            and falls back to the exact mode sum otherwise. Overrides
+            `approximation_22_mode` and modifies the `theta_jn` / `phi_jl`
+            columns along with adding `phase`).
         """
         if self.sampler_context is None:
             raise ValueError(
@@ -521,6 +569,7 @@ class Result(CoreResult):
         approximation_22_mode = self.synthetic_phase_kwargs.get(
             "approximation_22_mode", True
         )
+        co_rotate_spins = self.synthetic_phase_kwargs.get("co_rotate_spins", False)
 
         if not (
             isinstance(self.phase_prior, Uniform)
@@ -572,7 +621,8 @@ class Result(CoreResult):
         # fold returns the joint proposal density.
         from dingo.core.inference.composer import ChainComposer
         from dingo.core.inference.steps import SampleTableFactor
-        from dingo.gw.inference.steps import SyntheticPhaseFactor
+        from dingo.gw.conversion.spin_conversion import DINGO_PE_SPIN_PARAMETERS
+        from dingo.gw.inference.steps import SpinConventionReparam, SyntheticPhaseFactor
 
         theta_within = theta.iloc[np.flatnonzero(within_prior)]
         table = SampleTableFactor(
@@ -586,6 +636,36 @@ class Result(CoreResult):
                     "use_dft_phase_decomposition"
                 ]
             }
+        if co_rotate_spins:
+            # Exact only if physical-convention phase shifts act as a global
+            # exp(2i phase) factor, i.e. for approximants with a single
+            # co-precessing (2, |m| = 2) pair. LAL exposes no query for this, so
+            # probe it with two waveform evaluations and fall back otherwise.
+            likelihood = self.sampler_context.likelihood(
+                use_base_domain=self.use_base_domain, wfg_updates=wfg_updates
+            )
+            probe = _co_rotating_phase_mismatch(
+                likelihood.waveform_generator, theta_within.iloc[0].to_dict()
+            )
+            # Eligible models probe at the round-off level (~1e-16); models with
+            # higher modes stay above ~1e-8 even near face-on and equal mass.
+            if probe > 1e-10:
+                warnings.warn(
+                    f"co_rotate_spins requested, but phase shifts are not a "
+                    f"global exp(2i phase) factor for this waveform model "
+                    f"(probe mismatch {probe:.2e}); falling back to the exact "
+                    f"mode sum."
+                )
+                co_rotate_spins = False
+                approximation_22_mode = False
+            else:
+                # The physical-convention conditional is the (2, 2) profile.
+                approximation_22_mode = True
+                if not set(DINGO_PE_SPIN_PARAMETERS) <= set(theta_within.columns):
+                    # No precessing-spin parameters: there are no in-plane spins
+                    # to rotate, so the (2, 2) profile is already exact as is.
+                    co_rotate_spins = False
+
         factor = SyntheticPhaseFactor(
             conditioning=list(theta_within.columns),
             n_grid=self.synthetic_phase_kwargs["n_grid"],
@@ -595,7 +675,17 @@ class Result(CoreResult):
             use_base_domain=self.use_base_domain,
             wfg_updates=wfg_updates,
         )
-        chain = ChainComposer([table, factor])
+        steps = [table, factor]
+        if co_rotate_spins:
+            # The drawn phase co-rotates the in-plane spins; relabel theta_jn /
+            # phi_jl back into the model convention, with the Jacobian joining
+            # the proposal density.
+            steps.append(
+                SpinConventionReparam(
+                    num_processes=max(num_processes, 1), direction="to_network"
+                )
+            )
+        chain = ChainComposer(steps)
         # One phase draw per proposal sample (the table root is emitted once).
         out, log_prob = chain.sample_and_log_prob(1, self.sampler_context)
 
@@ -605,6 +695,13 @@ class Result(CoreResult):
         log_prob_array[within_prior] = log_prob.cpu().numpy()
         self.samples["phase"] = phase_array
         self.samples["log_prob"] = log_prob_array
+        if co_rotate_spins:
+            # The drawn phase co-rotated the in-plane spins, so the
+            # model-convention spin angles changed with it.
+            for k in ("theta_jn", "phi_jl"):
+                column = self.samples[k].to_numpy(dtype=float, copy=True)
+                column[within_prior] = out[k].cpu().numpy()
+                self.samples[k] = column
 
         # Insert the phase prior in the prior, since now the phase is present.
         self.prior["phase"] = self.phase_prior
