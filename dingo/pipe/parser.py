@@ -623,6 +623,19 @@ def create_parser(top_level=True, usage=None):
             "injection only"
         ),
     )
+    # Read by bilby_pipe's create_data for injections; defined here because dingo keeps
+    # its own parser copy. Safe across bilby_pipe versions (older ones just ignore it).
+    injection_parser.add(
+        "--injection-waveform-generator",
+        default=None,
+        type=nonestr,
+        help=(
+            "Waveform generator class used to build injected signals, e.g. "
+            "'bilby.gw.waveform_generator.LALCBCWaveformGenerator'. Constructor args go "
+            "in '--injection-waveform-generator-constructor-dict'. If None (default), "
+            "reuse the waveform generator used for analysis."
+        ),
+    )
     injection_parser.add(
         "--injection-waveform-generator-constructor-dict",
         default=None,
