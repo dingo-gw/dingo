@@ -138,6 +138,37 @@ def test_tidal_22_approximation_mismatch(ufd):
             assert mm_dft < 1e-13
 
 
+def test_mfd_time_origin_grid_independent():
+    """Some models (e.g. IMRPhenomXP_NRTidalv3) place the waveform in time based
+    on the last frequency they are asked for: without the f_max padding, grids
+    ending at 255 and 300 Hz disagree by a 64 ms time shift for this
+    configuration. With the padding, evaluations on differently truncated grids
+    must agree."""
+
+    def single_band(f_end):
+        return MultibandedFrequencyDomain(
+            nodes=[20.0, f_end],
+            delta_f_initial=1.0,
+            base_domain={
+                "type": "UniformFrequencyDomain",
+                "f_min": 20.0,
+                "f_max": 2048.0,
+                "delta_f": 1.0,
+            },
+        )
+
+    bns = {**BNS_PARAMETERS, "chirp_mass": 1.1975}
+    h = []
+    for f_end in (256.0, 301.0):
+        wf_gen = WaveformGenerator(
+            APPROXIMANT, single_band(f_end), F_REF, spin_conversion_phase=0.0
+        )
+        h.append(wf_gen.generate_hplus_hcross(bns)["h_plus"])
+    n = len(h[0])
+    err = np.max(np.abs(h[0] - h[1][:n])) / np.max(np.abs(h[0]))
+    assert err < 1e-10
+
+
 def test_co_rotating_phase_probe(ufd):
     """The co_rotate_spins probe: for IMRPhenomXP_NRTidalv3 (single co-precessing
     (2, +-2) pair) a physical-convention phase shift is a global exp(2i delta)
@@ -157,6 +188,28 @@ def test_co_rotating_phase_probe(ufd):
         "IMRPhenomXPHM", ufd, F_REF, spin_conversion_phase=0.0
     )
     assert _co_rotating_phase_mismatch(wf_gen_hm, bbh) > 1e-4
+
+
+def test_co_rotating_phase_probe_aligned(ufd):
+    """With an aligned-spin parameterization the co-rotation is the identity, and
+    the probe still decides eligibility by the waveform content: a 22-only model
+    passes, an aligned higher-mode model must fail (so co_rotate_spins falls back
+    to the exact mode sum instead of silently keeping the (2, 2) shortcut)."""
+    from dingo.gw.result import _co_rotating_phase_mismatch
+
+    aligned = {
+        "chirp_mass": 30.0,
+        "mass_ratio": 0.8,
+        "chi_1": 0.3,
+        "chi_2": -0.2,
+        "theta_jn": 1.2,
+        "luminosity_distance": 1000.0,
+    }
+    wf_gen_22 = WaveformGenerator("IMRPhenomD", ufd, F_REF, spin_conversion_phase=0.0)
+    assert _co_rotating_phase_mismatch(wf_gen_22, aligned) < 1e-12
+
+    wf_gen_hm = WaveformGenerator("IMRPhenomXHM", ufd, F_REF, spin_conversion_phase=0.0)
+    assert _co_rotating_phase_mismatch(wf_gen_hm, aligned) > 1e-4
 
 
 def test_tidal_lal_params_not_mutated(ufd):

@@ -28,21 +28,33 @@ def _co_rotating_phase_mismatch(waveform_generator, theta, delta=0.9):
     `phase = 0`, then at `phase = delta` with the in-plane spins co-rotated, and
     return the larger h_plus / h_cross mismatch against `h(0) * exp(2i delta)`.
     Zero to round-off iff the approximant has only a co-precessing (2, |m| = 2)
-    pair -- the condition under which `co_rotate_spins` is exact.
+    pair -- the condition under which `co_rotate_spins` is exact. If `theta` has
+    no precessing-spin parameters there are no in-plane spins to rotate, so the
+    probe simply compares `h(delta)` against `h(0) * exp(2i delta)` -- which
+    still rejects aligned-spin models with higher modes.
     """
     import pandas as pd
     from dingo.gw.conversion import change_spin_conversion_phase
+    from dingo.gw.conversion.spin_conversion import DINGO_PE_SPIN_PARAMETERS
     from dingo.gw.gwutils import get_mismatch
 
     theta = {k: float(v) for k, v in theta.items()}
     h0 = waveform_generator.generate_hplus_hcross({**theta, "phase": 0.0})
-    rotated = change_spin_conversion_phase(
-        pd.DataFrame([{**theta, "phase": delta}]),
-        waveform_generator.f_ref,
-        None,
-        waveform_generator.spin_conversion_phase,
-    )
-    h1 = waveform_generator.generate_hplus_hcross(rotated.iloc[0].to_dict())
+    if set(DINGO_PE_SPIN_PARAMETERS) <= set(theta):
+        rotated = (
+            change_spin_conversion_phase(
+                pd.DataFrame([{**theta, "phase": delta}]),
+                waveform_generator.f_ref,
+                None,
+                waveform_generator.spin_conversion_phase,
+            )
+            .iloc[0]
+            .to_dict()
+        )
+    else:
+        # No precessing-spin parameters: there are no in-plane spins to rotate.
+        rotated = {**theta, "phase": delta}
+    h1 = waveform_generator.generate_hplus_hcross(rotated)
     return max(
         get_mismatch(h1[pol], h0[pol] * np.exp(2j * delta), waveform_generator.domain)
         for pol in ("h_plus", "h_cross")
@@ -629,31 +641,28 @@ class Result(CoreResult):
             # exp(2i phase) factor, i.e. for approximants with a single
             # co-precessing (2, |m| = 2) pair. LAL exposes no query for this, so
             # probe it with two waveform evaluations and fall back otherwise.
-            if not set(DINGO_PE_SPIN_PARAMETERS) <= set(theta_within.columns):
+            likelihood = self.sampler_context.likelihood(
+                use_base_domain=self.use_base_domain, wfg_updates=wfg_updates
+            )
+            probe = _co_rotating_phase_mismatch(
+                likelihood.waveform_generator, theta_within.iloc[0].to_dict()
+            )
+            if probe > 1e-10:
                 warnings.warn(
-                    "co_rotate_spins requested, but the samples carry no "
-                    "precessing-spin parameters; proceeding without it."
+                    f"co_rotate_spins requested, but phase shifts are not a "
+                    f"global exp(2i phase) factor for this waveform model "
+                    f"(probe mismatch {probe:.2e}); falling back to the exact "
+                    f"mode sum."
                 )
                 co_rotate_spins = False
+                approximation_22_mode = False
             else:
-                likelihood = self.sampler_context.likelihood(
-                    use_base_domain=self.use_base_domain, wfg_updates=wfg_updates
-                )
-                probe = _co_rotating_phase_mismatch(
-                    likelihood.waveform_generator, theta_within.iloc[0].to_dict()
-                )
-                if probe > 1e-10:
-                    warnings.warn(
-                        f"co_rotate_spins requested, but phase shifts are not a "
-                        f"global exp(2i phase) factor for this waveform model "
-                        f"(probe mismatch {probe:.2e}); falling back to the exact "
-                        f"mode sum."
-                    )
+                # The physical-convention conditional is the (2, 2) profile.
+                approximation_22_mode = True
+                if not set(DINGO_PE_SPIN_PARAMETERS) <= set(theta_within.columns):
+                    # No precessing-spin parameters: there are no in-plane spins
+                    # to rotate, so the (2, 2) profile is already exact as is.
                     co_rotate_spins = False
-                    approximation_22_mode = False
-                else:
-                    # The physical-convention conditional is the (2, 2) profile.
-                    approximation_22_mode = True
 
         factor = SyntheticPhaseFactor(
             conditioning=list(theta_within.columns),

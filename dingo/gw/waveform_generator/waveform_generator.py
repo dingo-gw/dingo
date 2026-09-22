@@ -550,10 +550,20 @@ class WaveformGenerator:
             lal_parameter_tuple = (phase, *masses, *spins_cartesian, f_ref, r, iota)
             lal_parameter_tuple = tuple(float(p) for p in lal_parameter_tuple)
             # create lal object for frequency array
-            frequency_array = lal.CreateREAL8Vector(
-                len(self.domain()[self.domain.min_idx :])
-            )
-            frequency_array.data = self.domain()[self.domain.min_idx :]
+            frequencies = self.domain()[self.domain.min_idx :]
+            f_pad = getattr(self.domain, "base_domain", self.domain).f_max
+            if frequencies[-1] < f_pad:
+                # Some models (e.g. IMRPhenomXP_NRTidalv3) place the waveform in
+                # time based on the last frequency they are asked for, so a
+                # request that stops before the merger returns a waveform
+                # shifted by an amount that depends on where the request ends.
+                # Asking for one extra frequency at the base domain's f_max
+                # makes the result independent of the band structure and
+                # consistent with SimInspiralFD; the extra sample is dropped in
+                # generate_FD_waveform.
+                frequencies = np.append(frequencies, f_pad)
+            frequency_array = lal.CreateREAL8Vector(len(frequencies))
+            frequency_array.data = frequencies
             lal_parameter_tuple = (
                 *lal_parameter_tuple,
                 lal_params,
@@ -763,8 +773,9 @@ class WaveformGenerator:
             frequency_array = self.domain()[self.domain.min_idx :]
             h_plus = np.zeros_like(frequency_array, dtype=complex)
             h_cross = np.zeros_like(frequency_array, dtype=complex)
-            h_plus[:] = hp.data.data[:]
-            h_cross[:] = hc.data.data[:]
+            # The request may have been padded to f_max (see _convert_parameters).
+            h_plus[:] = hp.data.data[: len(frequency_array)]
+            h_cross[:] = hc.data.data[: len(frequency_array)]
             return {"h_plus": h_plus, "h_cross": h_cross}
 
         else:
