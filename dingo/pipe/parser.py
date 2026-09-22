@@ -641,10 +641,10 @@ def create_parser(top_level=True, usage=None):
         default=None,
         type=nonestr,
         help=(
-            "A dictionary of arbitrary arguments to pass"
-            " to the bilby waveform generator class constructor for the injection"
-            " only. The class will be the same as the one specified in"
-            " '--waveform-generator'."
+            "A dictionary of arbitrary arguments to pass to the constructor of the "
+            "injection waveform generator class. That class is "
+            "'--injection-waveform-generator' if set, otherwise the waveform generator "
+            "used for analysis."
         ),
     )
     injection_parser.add(
