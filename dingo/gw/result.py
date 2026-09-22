@@ -647,6 +647,8 @@ class Result(CoreResult):
             probe = _co_rotating_phase_mismatch(
                 likelihood.waveform_generator, theta_within.iloc[0].to_dict()
             )
+            # Eligible models probe at the round-off level (~1e-16); models with
+            # higher modes stay above ~1e-8 even near face-on and equal mass.
             if probe > 1e-10:
                 warnings.warn(
                     f"co_rotate_spins requested, but phase shifts are not a "
