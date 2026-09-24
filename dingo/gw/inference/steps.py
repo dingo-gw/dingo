@@ -118,7 +118,7 @@ class SyntheticPhaseFactor(Factor):
         cache_log_likelihood : bool, default False
             Also emit the log likelihood at the drawn phase as the column
             `log_likelihood`, for reuse by importance sampling. Requires the exact
-            mode (`approximation_22_mode=False`).
+            mode (`approximation_22_mode=False`) and the DFT phase decomposition.
         """
         if cache_log_likelihood and approximation_22_mode:
             raise ValueError(
