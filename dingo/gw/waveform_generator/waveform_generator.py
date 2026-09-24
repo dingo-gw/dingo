@@ -164,6 +164,17 @@ class WaveformGenerator:
         return self._domain
 
     @property
+    def uses_dft_phase_decomposition(self) -> bool:
+        """Whether generate_hplus_hcross_m obtains the m-components by DFT inversion
+        of the polarizations on a phase grid. They then sum to exactly the output of
+        generate_hplus_hcross; the individual-mode paths differ from it slightly."""
+        return bool(
+            self.use_dft_phase_decomposition
+            and LS.SimInspiralImplementedFDApproximants(self.approximant)
+            and (self.mode_list is not None or self.approximant_str in DEFAULT_ELL_MAX)
+        )
+
+    @property
     def spin_conversion_phase(self):
         return self._spin_conversion_phase
 
@@ -833,9 +844,8 @@ class WaveformGenerator:
         elif not isinstance(list(parameters.values())[0], float):
             raise ValueError("parameters dictionary must contain floats", parameters)
 
-        use_dft = self.use_dft_phase_decomposition
         if (
-            use_dft
+            self.use_dft_phase_decomposition
             and self.mode_list is None
             and self.approximant_str not in DEFAULT_ELL_MAX
         ):
@@ -847,11 +857,10 @@ class WaveformGenerator:
                 f"DEFAULT_ELL_MAX entry). Falling back to the individual-mode "
                 f"path."
             )
-            use_dft = False
 
         if isinstance(self.domain, UniformFrequencyDomain):
             # Generate FD modes in for frequencies [-f_max, ..., 0, ..., f_max].
-            if LS.SimInspiralImplementedFDApproximants(self.approximant) and use_dft:
+            if self.uses_dft_phase_decomposition:
                 # DFT approach: evaluate the summed FD polarizations on a grid
                 # of N phase offsets starting at the reference phase, then recover
                 # the m-components by inverting the grid with a DFT.
@@ -899,7 +908,7 @@ class WaveformGenerator:
                     h["h_cross"] = h["h_cross"][: len(self.domain)]
 
         elif isinstance(self.domain, MultibandedFrequencyDomain):
-            if LS.SimInspiralImplementedFDApproximants(self.approximant) and use_dft:
+            if self.uses_dft_phase_decomposition:
                 # DFT approach, as in the UniformFrequencyDomain branch above. The
                 # polarizations are evaluated at the MFD frequencies, as in
                 # generate_hplus_hcross, so the m-components sum to exactly that
@@ -1134,6 +1143,13 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
         else:
             self._use_base_domain = False
             self._domain_transform = None
+
+    @property
+    def uses_dft_phase_decomposition(self) -> bool:
+        """See WaveformGenerator.uses_dft_phase_decomposition."""
+        return (
+            self.use_dft_phase_decomposition and self.approximant_str == "SEOBNRv5PHM"
+        )
 
     def _convert_parameters(
         self,
@@ -1380,10 +1396,7 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
                 self.approximant_str == "SEOBNRv5PHM"
                 or self.approximant_str == "SEOBNRv5HM"
             ):
-                if (
-                    self.use_dft_phase_decomposition
-                    and self.approximant_str == "SEOBNRv5PHM"
-                ):
+                if self.uses_dft_phase_decomposition:
                     # Optimized path: the EOB dynamics are solved once, then
                     # the cached co-precessing modes are projected onto the
                     # polarizations at each of N equally-spaced phi_c values, and
