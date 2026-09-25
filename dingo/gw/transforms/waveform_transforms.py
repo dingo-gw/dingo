@@ -160,14 +160,22 @@ class DecimateWaveformsAndASDS(object):
                     k: self.multibanded_frequency_domain.decimate(v)
                     for k, v in whitened_waveforms.items()
                 }
-                asds_dec = {
-                    k: 1 / self.multibanded_frequency_domain.decimate(1 / v)
-                    for k, v in sample["asds"].items()
-                }
-                # color the whitened waveforms with the effective asd
-                waveform_dec = {
-                    k: v * asds_dec[k] for k, v in whitened_waveforms_dec.items()
-                }
+                with np.errstate(divide="ignore"):
+                    asds_dec = {
+                        k: 1 / self.multibanded_frequency_domain.decimate(1 / v)
+                        for k, v in sample["asds"].items()
+                    }
+                # Color the whitened waveforms with the effective asd. A decimated bin
+                # whose base bins all have an infinite ASD (bilby fills frequencies
+                # beyond a PSD file's range with inf) holds no data: its effective ASD
+                # is inf and its whitened strain is zero, so coloring would give
+                # 0 * inf = NaN. Set the strain to zero there instead; a NaN reaches
+                # the network input and poisons it even where the token is masked.
+                with np.errstate(invalid="ignore"):
+                    waveform_dec = {
+                        k: np.where(np.isinf(asds_dec[k]), 0.0, v * asds_dec[k])
+                        for k, v in whitened_waveforms_dec.items()
+                    }
                 sample["waveform"] = waveform_dec
                 sample["asds"] = asds_dec
 

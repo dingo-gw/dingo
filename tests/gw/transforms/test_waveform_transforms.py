@@ -376,3 +376,67 @@ def test_MaskDataForFrequencyRangeUpdate(request, setup):
         mask = np.repeat(mask[np.newaxis, :], axis=0, repeats=batch_size)
     assert np.all([np.all(v[mask] == 0.0) for v in out["waveform"].values()])
     assert np.all([np.all(v[mask] == 1.0) for v in out["asds"].values()])
+
+
+@pytest.fixture
+def decimation_setup():
+    """A multibanded domain and a base-domain event sample whose ASD, like the one bilby
+    builds from a PSD file ending below the domain's f_max, is inf above that frequency."""
+    domain = MultibandedFrequencyDomain(
+        nodes=[20.0, 26.0, 34.0, 46.0, 62.0, 78.0, 1038.0],
+        delta_f_initial=0.0625,
+        base_domain={
+            "type": "UniformFrequencyDomain",
+            "f_min": 20.0,
+            "f_max": 2048.0,
+            "delta_f": 0.0625,
+        },
+    )
+    base = domain.base_domain
+    rng = np.random.default_rng(0)
+    n = len(base)
+    strain = rng.normal(size=n) + 1j * rng.normal(size=n)
+    asd = np.full(n, 1e-23)
+    f_psd_max = 512.0
+    asd[base.sample_frequencies > f_psd_max] = np.inf
+    return domain, strain, asd, f_psd_max
+
+
+def test_decimation_of_nonfinite_asd_gives_no_nan(decimation_setup):
+    """Decimation bins lying entirely beyond the PSD's range must not become NaN.
+
+    Whitened decimation colors the decimated whitened strain with 1 / decimate(1 / asd).
+    Where every base bin of a decimation bin has an infinite ASD that product is
+    0 * inf = NaN, and a single NaN token poisons the transformer embedding even if the
+    token is masked (attention computes 0 * NaN), so real-data runs with such PSDs fail.
+    """
+    from dingo.gw.transforms import DecimateWaveformsAndASDS
+
+    domain, strain, asd, f_psd_max = decimation_setup
+    out = DecimateWaveformsAndASDS(domain, decimation_mode="whitened")(
+        {"waveform": {"H1": strain}, "asds": {"H1": asd}}
+    )
+    waveform, asd_dec = out["waveform"]["H1"], out["asds"]["H1"]
+
+    assert not np.isnan(waveform).any()
+    assert not np.isnan(asd_dec).any()
+    # Beyond the PSD's range there is no data: the whitened strain is zero there.
+    beyond = np.isinf(asd_dec)
+    assert beyond.any(), "test setup should produce fully-infinite decimation bins"
+    np.testing.assert_array_equal(waveform[beyond], 0)
+    assert np.all(domain()[beyond] > f_psd_max - domain.delta_f.max())
+
+
+def test_decimation_below_psd_range_is_unchanged(decimation_setup):
+    """Bins where the ASD is finite decimate exactly as with a finite ASD everywhere."""
+    from dingo.gw.transforms import DecimateWaveformsAndASDS
+
+    domain, strain, asd, _ = decimation_setup
+    transform = DecimateWaveformsAndASDS(domain, decimation_mode="whitened")
+    out = transform({"waveform": {"H1": strain}, "asds": {"H1": asd}})
+    ref = transform(
+        {"waveform": {"H1": strain}, "asds": {"H1": np.full_like(asd, 1e-23)}}
+    )
+    finite = np.isfinite(out["asds"]["H1"]) & (domain() < 500.0)
+    np.testing.assert_allclose(out["waveform"]["H1"][finite], ref["waveform"]["H1"][finite])
+    np.testing.assert_allclose(out["asds"]["H1"][finite], ref["asds"]["H1"][finite])
