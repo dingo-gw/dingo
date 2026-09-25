@@ -136,11 +136,6 @@ class SyntheticPhaseFactor(Factor):
         self.cache_log_likelihood = cache_log_likelihood
         self.annotations = ["log_likelihood"] if cache_log_likelihood else []
 
-    @property
-    def produces(self) -> list[str]:
-        """`phase`, plus `log_likelihood` if it is cached."""
-        return self.parameters + self.annotations
-
     def sample_and_log_prob(self, num_samples, context, given=None):
         """Draw one phase per `theta_rest` row (`num_samples` must be 1); return the phases
         and their proposal log-prob `log q(phase | theta_rest, d)`."""
@@ -408,7 +403,7 @@ class GNPEFlowFactor(Factor):
     @property
     def produces(self) -> list[str]:
         """Emitted columns: the inference block plus the recomputed detector times."""
-        return self.parameters + self.gnpe_parameters
+        return super().produces + self.gnpe_parameters
 
     def sample_and_log_prob(self, num_samples, context, given=None):
         """Draw `num_samples` parameter sets per proxy row (the draws for a row are
