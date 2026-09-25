@@ -68,7 +68,8 @@ ordinary Python, however, and can just as well be assembled by hand (see
 
 Each entry in a chain is a step. A step is an object with `parameters` (the
 columns it emits), `conditioning` (the earlier columns it reads), `produces` (every
-column it adds, `parameters` plus any side channels), `draws` (whether it draws
+column it adds: `parameters`, plus any annotations kept in the output and side
+channels dropped from it), `draws` (whether it draws
 samples), and a `sample_and_log_prob` method; together these form the `Step`
 protocol. Steps never
 receive event data directly. Instead, the data enters through the shared
@@ -339,9 +340,12 @@ DataFrame runner (`run_sampler`) and the `Result` export (`to_result` / `to_hdf5
 2. **Declare the interface.** Set `parameters` (the columns emitted) and
    `conditioning` (the columns read). A reparametrization also sets `inputs`, the
    columns it transforms, which its outputs replace; its `conditioning` is then
-   the read-only remainder. A factor that emits columns beyond `parameters`
-   declares them in `produces`; such side channels are intermediates for later
-   steps and are dropped from the output. A target correction samples nothing:
+   the read-only remainder. A factor that emits columns beyond `parameters` to
+   be kept in the output for importance sampling (such as the synthetic phase's
+   cached `log_likelihood`) lists them in `annotations`, which `produces`
+   includes by default. Other extra columns are side channels, intermediates for
+   later steps that are dropped from the output; the factor declares them by
+   overriding `produces`. A target correction samples nothing:
    its `parameters` are empty, and it declares its annotation column in `produces`.
    A factor that does not draw new samples (a point mass, a fixed table) sets
    `draws = False`, so that the composer runs it once rather than asking it for
