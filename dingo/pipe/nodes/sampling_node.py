@@ -53,25 +53,29 @@ class SamplingNode(AnalysisNode):
                     self.extra_lines.append(f'MY.DESIRED_Sites = "{sites}"')
                 self.requirements.append("IS_GLIDEIN=?=True")
 
-                # modifying the paths for OSDF networks
-                network_files = []
-                for s in [self.inputs.model, self.inputs.model_init]:
-                    if s is None:
-                        continue
-                    if "osdf" in s:
-                        # stripping osdf prefix as it is not needed
-                        network_files.append(f"igwn+osdf://{s.replace('/osdf', '')}")
-                    else:
-                        network_files.append(s)
+            # Networks (and the container on the OSG path) must transfer for
+            # local-pool/container-universe jobs too: /osdf and /home are not
+            # visible on execute nodes, and sampling resolves the model via the
+            # transfer fallback.
+            # modifying the paths for OSDF networks
+            network_files = []
+            for s in [self.inputs.model, self.inputs.model_init]:
+                if s is None:
+                    continue
+                if "osdf" in s:
+                    # stripping osdf prefix as it is not needed
+                    network_files.append(f"igwn+osdf://{s.replace('/osdf', '')}")
+                else:
+                    network_files.append(s)
 
-                input_files_to_transfer.extend(network_files)
+            input_files_to_transfer.extend(network_files)
 
-                if self.transfer_container:
-                    input_files_to_transfer.append(self.inputs.container)
+            if self.transfer_container:
+                input_files_to_transfer.append(self.inputs.container)
 
-                # Credentials are needed to access any OSDF files
-                if any(["osdf" in s for s in input_files_to_transfer]):
-                    self.extra_lines.extend(self.scitoken_lines)
+            # Credentials are needed to access any OSDF files
+            if any(["osdf" in s for s in input_files_to_transfer]):
+                self.extra_lines.extend(self.scitoken_lines)
 
             self.extra_lines.extend(
                 self._condor_file_transfer_lines(
