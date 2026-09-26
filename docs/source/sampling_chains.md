@@ -149,8 +149,8 @@ $q(\hat\theta)\,q(\theta | d, \hat\theta)$ over parameters and proxies, and the
 matching target then includes the kernel term $p(\hat\theta | \theta)$. This term
 is evaluated at the detector times recomputed from $\theta$, and the result is
 recorded with the samples. The recomputed detector times are a *side channel* of the
-main network: a column a step emits beyond its `parameters`, which later steps may
-read but which is not part of the chain's output. A target correction has no
+main network: a column a step emits beyond its `parameters` and `annotations`,
+which later steps may read but which is not part of the chain's output. A target correction has no
 inverse, so `ChainComposer.log_prob` skips it.
 
 ### Density-free blocks
