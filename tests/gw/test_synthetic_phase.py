@@ -2,6 +2,8 @@
 context / likelihood so no waveform models or LAL calls are needed. End-to-end parity
 against Result.sample_proposal_extensions is covered by the model-based harness."""
 
+from types import SimpleNamespace
+
 import numpy as np
 import pytest
 import torch
@@ -15,8 +17,12 @@ from dingo.gw.likelihood import StationaryGaussianGWLikelihood
 class _MockLikelihood:
     """Exposes the methods the factor uses, deterministic in `chirp_mass`."""
 
-    def __init__(self):
+    def __init__(self, uses_dft_phase_decomposition=True):
         self.phase_grid = None
+        self.waveform_generator = SimpleNamespace(
+            uses_dft_phase_decomposition=uses_dft_phase_decomposition,
+            approximant_str="mock",
+        )
 
     def d_inner_h_complex_multi(self, theta, num_processes=1):
         # (2, 2)-approx path: one complex overlap (d | h) per row.
@@ -205,6 +211,23 @@ def test_cached_log_likelihood_is_chain_output():
     context.device = None
     out, _ = ChainComposer([table, factor]).sample_and_log_prob(1, context)
     assert set(out) == {"chirp_mass", "phase", "log_likelihood"}
+
+
+def test_cached_log_likelihood_requires_dft_phase_decomposition():
+    # Without the DFT decomposition the m-components do not sum to exactly the
+    # waveform of a direct likelihood call, so caching raises rather than bias IS.
+    class _NoDFTContext(_MockContext):
+        def likelihood(self, **kwargs):
+            return _MockLikelihood(uses_dft_phase_decomposition=False)
+
+    factor = SyntheticPhaseFactor(
+        conditioning=["chirp_mass"],
+        n_grid=33,
+        approximation_22_mode=False,
+        cache_log_likelihood=True,
+    )
+    with pytest.raises(ValueError, match="DFT phase decomposition"):
+        factor.sample_and_log_prob(1, _NoDFTContext(), _given())
 
 
 def test_cached_log_likelihood_requires_exact_mode():
