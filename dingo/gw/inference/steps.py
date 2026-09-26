@@ -148,6 +148,16 @@ class SyntheticPhaseFactor(Factor):
         n = len(reference)
         logger.info(f"Estimating synthetic phase for {n} samples.")
         t0 = time.time()
+        if self.cache_log_likelihood:
+            # The cache matches a direct likelihood call only with the DFT decomposition.
+            waveform_generator = context.likelihood(
+                use_base_domain=self.use_base_domain, wfg_updates=self.wfg_updates
+            ).waveform_generator
+            if not waveform_generator.uses_dft_phase_decomposition:
+                raise ValueError(
+                    "cache_log_likelihood requires the DFT phase decomposition, which "
+                    f"{waveform_generator.approximant_str} does not use here."
+                )
         phases, phase_posterior, terms = self._phase_profile(given, context)
         new_phase, log_prob = interpolated_sample_and_log_prob_multi(
             phases, phase_posterior, self.num_processes
