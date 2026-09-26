@@ -215,6 +215,19 @@ def test_synthetic_phase_adds_phase_column():
     assert not np.array_equal(result.samples["log_prob"].to_numpy(), log_prob_before)
 
 
+def test_proposal_extensions_drop_stale_log_likelihood():
+    # A log likelihood from an earlier importance sampling run does not describe the
+    # redrawn phases, so reusing it as a cache must fail rather than bias the weights.
+    result = make_gw_result(drop_phase=True)
+    result.samples["log_likelihood"] = 0.0
+    result.sample_proposal_extensions(
+        synthetic_phase_kwargs={"n_grid": 16, "approximation_22_mode": True}
+    )
+    assert "log_likelihood" not in result.samples.columns
+    with pytest.raises(KeyError, match="requires log likelihoods"):
+        result.importance_sample(use_cached_log_likelihood=True)
+
+
 def test_synthetic_phase_requires_uniform_phase_prior():
     # When `phase` is in the samples, the phase prior is not split off (it is None),
     # so synthetic phase sampling is not applicable and must raise.

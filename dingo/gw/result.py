@@ -430,6 +430,10 @@ class Result(CoreResult):
             raise ValueError(
                 "Pass calibration_sampling_kwargs and / or synthetic_phase_kwargs."
             )
+        if "log_likelihood" in self.samples:
+            # A stored log likelihood (cached earlier, or from a previous importance
+            # sampling run) does not describe the redrawn phases or calibration.
+            self.samples = self.samples.drop(columns="log_likelihood")
 
         param_keys = [k for k, v in self.prior.items() if not isinstance(v, Constraint)]
         theta = self.samples[param_keys]
@@ -513,9 +517,6 @@ class Result(CoreResult):
             correction_type_dict = correction_type
         else:
             raise ValueError(f"{correction_type} not understood")
-        if "log_likelihood" in self.samples:
-            # A stored log likelihood does not include the new calibration.
-            self.samples = self.samples.drop(columns="log_likelihood")
 
         # Build the calibration priors. As in Bilby, the spline nodes are placed
         # across each detector's frequency range, the same range the likelihood
