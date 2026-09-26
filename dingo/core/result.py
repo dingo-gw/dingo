@@ -262,6 +262,7 @@ class Result(DingoDataset):
         self,
         num_processes: int = 1,
         use_cached_log_likelihood: bool = False,
+        cached_log_likelihood_tolerance: float = 1e-2,
         **likelihood_kwargs,
     ):
         """
@@ -299,7 +300,12 @@ class Result(DingoDataset):
             (e.g., cached by the synthetic phase) instead of evaluating the
             likelihood. Every sample within the prior must have a finite cached
             value. Not compatible with marginalization, since the cached values are
-            not marginalized.
+            not marginalized. The cached values are checked against a direct
+            evaluation on a few samples; if they deviate by more than
+            `cached_log_likelihood_tolerance`, the likelihood is evaluated instead.
+        cached_log_likelihood_tolerance : float, default 1e-2
+            Maximum deviation (in nats) of the cached log likelihoods from a direct
+            evaluation for the cache to be used.
         likelihood_kwargs : dict
             kwargs that are forwarded to the likelihood constructor. E.g., options for
             marginalization.
@@ -357,6 +363,7 @@ class Result(DingoDataset):
         # it may not even be possible to generate signals outside the prior (e.g.,
         # for BH spins > 1).
         valid_samples = np.isfinite(log_prior + delta_log_prob_target)
+        theta = theta.iloc[valid_samples]
         if use_cached_log_likelihood:
             log_likelihood = self.samples["log_likelihood"].to_numpy()[valid_samples]
             if not np.all(np.isfinite(log_likelihood)):
@@ -365,11 +372,36 @@ class Result(DingoDataset):
                     f"have no cached log likelihood. Were the samples or the prior "
                     f"changed after the log likelihoods were cached?"
                 )
-            print(f"Using {len(log_likelihood)} cached log likelihoods.")
-            # Samples outside the prior carry no log likelihood, as without the cache.
-            self.samples["log_likelihood"] = np.nan
-        else:
-            theta = theta.iloc[valid_samples]
+            # The cached values are assembled from the m-components of the waveform,
+            # which sum to the waveform of the direct likelihood only for some models
+            # and settings. Verify this on a few samples instead of trusting it.
+            idx = np.random.default_rng(0).choice(
+                len(theta), size=min(10, len(theta)), replace=False
+            )
+            deviation = 0.0
+            if len(idx) > 0:
+                deviation = np.max(
+                    np.abs(
+                        self.likelihood.log_likelihood_multi(
+                            theta.iloc[idx], num_processes=min(num_processes, len(idx))
+                        )
+                        - log_likelihood[idx]
+                    )
+                )
+            if deviation > cached_log_likelihood_tolerance:
+                print(
+                    f"Cached log likelihoods deviate from a direct evaluation by up to "
+                    f"{deviation:.2g} nats over {len(idx)} samples, more than the "
+                    f"tolerance of {cached_log_likelihood_tolerance} nats. Evaluating "
+                    f"the likelihood instead."
+                )
+                use_cached_log_likelihood = False
+            else:
+                print(
+                    f"Using {len(log_likelihood)} cached log likelihoods, verified to "
+                    f"{deviation:.2g} nats on {len(idx)} samples."
+                )
+        if not use_cached_log_likelihood:
             print(f"Calculating {len(theta)} likelihoods.")
             t0 = time.time()
             log_likelihood = self.likelihood.log_likelihood_multi(
@@ -379,6 +411,8 @@ class Result(DingoDataset):
 
         self.log_noise_evidence = self.likelihood.log_Zn
         self.samples["log_prior"] = log_prior
+        # Samples outside the prior carry no log likelihood.
+        self.samples["log_likelihood"] = np.nan
         self.samples.loc[valid_samples, "log_likelihood"] = log_likelihood
         self._calculate_evidence()
 
