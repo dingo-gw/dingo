@@ -574,6 +574,16 @@ def test_reset_event_keeps_the_record_the_samples_were_drawn_under():
     assert result.importance_sampling_metadata["proposal_event_metadata"] == {"T": 4.0}
 
 
+def test_reset_event_drops_stored_log_likelihood():
+    # A log likelihood cached on the old data must not be reused with the new data.
+    from types import SimpleNamespace
+
+    samples = pd.DataFrame({"x": [1.0, 2.0], "log_likelihood": [-1.0, -2.0]})
+    result = Result(dictionary={"samples": samples, "event_metadata": {"T": 4.0}})
+    result.reset_event(SimpleNamespace(data={}, settings={"T": 8.0}))
+    assert "log_likelihood" not in result.samples.columns
+
+
 # ---------------------------------------------------------------------------
 # importance_sample with cached log likelihoods
 # ---------------------------------------------------------------------------
