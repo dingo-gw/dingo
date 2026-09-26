@@ -271,7 +271,7 @@ class ImportanceSamplingInput(Input):
             )
             if use_cached_log_likelihood and (
                 synthetic_phase_kwargs.get("approximation_22_mode", True)
-                or any(likelihood_kwargs.values())
+                or any(v is not None for v in likelihood_kwargs.values())
                 or not self._synthetic_phase_modes_exact(synthetic_phase_kwargs)
             ):
                 logger.info(

@@ -316,7 +316,8 @@ class Result(DingoDataset):
                     "use_cached_log_likelihood=True requires log likelihoods stored "
                     "in the samples."
                 )
-            if any(likelihood_kwargs.values()):
+            # As in _build_likelihood, any settings dict (even {}) marginalizes.
+            if any(v is not None for v in likelihood_kwargs.values()):
                 raise ValueError(
                     f"use_cached_log_likelihood=True cannot be combined with the "
                     f"likelihood options {likelihood_kwargs}."
