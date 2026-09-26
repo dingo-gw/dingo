@@ -164,7 +164,7 @@ class Factor(ABC):
     annotations : list[str]
         Columns the factor emits beyond its `parameters` that are kept in the chain
         output for importance sampling, such as a cached log likelihood. They are part
-        of `produces`; other side channels are dropped. Target corrections declare
+        of `produces`; side channels are dropped. Target corrections declare
         their columns the same way.
     """
 
