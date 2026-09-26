@@ -44,6 +44,9 @@ n_grid
 uniform_weight
 : Base probability level to add to ensure mass coverage.
 
+cache_log_likelihood
+: Whether to also store the log likelihood at the sampled $\phi_c$ in the `log_likelihood` column (exact mode only), so that `importance_sample(use_cached_log_likelihood=True)` does not need to generate the waveform again. The sampled $\phi_c$ is drawn from the grid distribution interpolated between grid points, so its likelihood is evaluated exactly from the cached mode inner products rather than read off the grid. The cached value matches a direct evaluation when the m-components obtained from `generate_hplus_hcross_m` sum to exactly the waveform from `generate_hplus_hcross`. This is guaranteed by construction for the DFT phase decomposition, so `dingo_pipe` enables caching by default only when the likelihood is not marginalized and the DFT phase decomposition is used. `importance_sample` also checks the cached values against a direct evaluation on 10 samples, and evaluates the likelihood instead if they deviate by more than `cached_log_likelihood_tolerance` (default $10^{-2}$).
+
 num_processes
 : For parallelization of synthetic phase sampling. This is usually the most expensive part of importance sampling, so it is advantageous to perform calculations in parallel.
 

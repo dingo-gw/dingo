@@ -268,15 +268,14 @@ class ChainComposer:
                     if c not in step.parameters:
                         samples.pop(c)
             total = None if lp is None or total is None else total + lp
-        # Side channels -- columns a step emits beyond its parameters, such as the
-        # detector times a GNPE network recomputes -- are intermediates for later
-        # steps, not output. A target correction's annotations are output.
+        # Side channels -- columns a step emits beyond its parameters and annotations,
+        # such as the detector times a GNPE network recomputes -- are intermediates for
+        # later steps, not output. Columns a step declares as `annotations` (a target
+        # correction's, or a by-product such as a cached log likelihood) are output.
         parameters = {p for step in self.steps for p in step.parameters}
         for step in self.steps:
-            if isinstance(step, TargetCorrection):
-                continue
             for c in step.produces:
-                if c not in parameters:
+                if c not in parameters and c not in getattr(step, "annotations", []):
                     samples.pop(c, None)
         return samples, total
 

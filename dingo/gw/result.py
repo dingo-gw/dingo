@@ -420,11 +420,20 @@ class Result(CoreResult):
                 Overrides the waveform generator setting of the same name for this
                 step only, selecting how the m-components are obtained (see
                 WaveformGenerator).
+            cache_log_likelihood : bool, default False
+                Also store the log likelihood at the drawn phase in
+                samples["log_likelihood"], for importance_sample(
+                use_cached_log_likelihood=True). Exact mode only. It includes the
+                calibration drawn in the same chain.
         """
         if calibration_sampling_kwargs is None and synthetic_phase_kwargs is None:
             raise ValueError(
                 "Pass calibration_sampling_kwargs and / or synthetic_phase_kwargs."
             )
+        if "log_likelihood" in self.samples:
+            # A stored log likelihood (cached earlier, or from a previous importance
+            # sampling run) does not describe the redrawn phases or calibration.
+            self.samples = self.samples.drop(columns="log_likelihood")
 
         param_keys = [k for k, v in self.prior.items() if not isinstance(v, Constraint)]
         theta = self.samples[param_keys]
@@ -455,9 +464,9 @@ class Result(CoreResult):
         )
 
         # Out-of-prior samples get placeholder values 0 (finite, so that their prior
-        # is -inf rather than nan) and log_prob = nan.
+        # is -inf rather than nan), log_prob = nan and no cached log likelihood.
         for k in [c for s in steps for c in s.produces]:
-            column = np.zeros(len(theta))
+            column = np.full(len(theta), np.nan if k == "log_likelihood" else 0.0)
             column[within_prior] = out[k].cpu().numpy()
             self.samples[k] = column
         log_prob_array = np.full(len(theta), np.nan)
@@ -640,6 +649,9 @@ class Result(CoreResult):
             ),
             use_base_domain=self.use_base_domain,
             wfg_updates=wfg_updates,
+            cache_log_likelihood=synthetic_phase_kwargs.get(
+                "cache_log_likelihood", False
+            ),
         )
         return step, within_prior
 

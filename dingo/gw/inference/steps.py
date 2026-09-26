@@ -69,6 +69,18 @@ class SyntheticPhaseFactor(Factor):
     on the default: this factor and `dingo_pipe`'s `PhaseRecoveryDefault` use the
     exact mode, while `Result.sample_proposal_extensions` defaults to the (2, 2)
     approximation when the key is omitted.
+
+    With `cache_log_likelihood=True` (exact mode only) the factor also emits the log
+    likelihood at the drawn phase as the annotation column `log_likelihood`, so that
+    importance sampling need not evaluate the waveform again. The phase is drawn from
+    the grid distribution *interpolated* between grid points, so the drawn phase
+    generally lies between them and its likelihood is not one of the grid values.
+    Rather, it is evaluated exactly at the drawn phase from the same mode inner
+    products that produced the grid (a cheap sum over modes, no waveform call).
+    Snapping the draws to the grid points instead would make the phase proposal
+    discrete, inconsistent with the continuous interpolated density returned as the
+    log probability, and interpolating the grid of log likelihoods would only be
+    approximate.
     """
 
     def __init__(
@@ -80,6 +92,7 @@ class SyntheticPhaseFactor(Factor):
         num_processes: int = 1,
         use_base_domain: bool = False,
         wfg_updates: Optional[dict] = None,
+        cache_log_likelihood: bool = False,
     ):
         """
         Parameters
@@ -102,7 +115,16 @@ class SyntheticPhaseFactor(Factor):
             Overrides for the waveform generator settings stored with the network,
             e.g. `use_dft_phase_decomposition` (passed on to
             `SamplerContext.likelihood`).
+        cache_log_likelihood : bool, default False
+            Also emit the log likelihood at the drawn phase as the column
+            `log_likelihood`, for reuse by importance sampling. Requires the exact
+            mode (`approximation_22_mode=False`) and the DFT phase decomposition.
         """
+        if cache_log_likelihood and approximation_22_mode:
+            raise ValueError(
+                "cache_log_likelihood requires the exact mode "
+                "(approximation_22_mode=False)."
+            )
         self.parameters = ["phase"]
         self.conditioning = list(conditioning)
         self.n_grid = n_grid
@@ -111,6 +133,8 @@ class SyntheticPhaseFactor(Factor):
         self.num_processes = num_processes
         self.use_base_domain = use_base_domain
         self.wfg_updates = wfg_updates
+        self.cache_log_likelihood = cache_log_likelihood
+        self.annotations = ["log_likelihood"] if cache_log_likelihood else []
 
     def sample_and_log_prob(self, num_samples, context, given=None):
         """Draw one phase per `theta_rest` row (`num_samples` must be 1); return the phases
@@ -124,21 +148,38 @@ class SyntheticPhaseFactor(Factor):
         n = len(reference)
         logger.info(f"Estimating synthetic phase for {n} samples.")
         t0 = time.time()
-        phases, phase_posterior = self._phase_profile(given, context)
+        if self.cache_log_likelihood:
+            # The cache matches a direct likelihood call only with the DFT decomposition.
+            waveform_generator = context.likelihood(
+                use_base_domain=self.use_base_domain, wfg_updates=self.wfg_updates
+            ).waveform_generator
+            if not waveform_generator.uses_dft_phase_decomposition:
+                raise ValueError(
+                    "cache_log_likelihood requires the DFT phase decomposition, which "
+                    f"{waveform_generator.approximant_str} does not use here."
+                )
+        phases, phase_posterior, terms = self._phase_profile(given, context)
         new_phase, log_prob = interpolated_sample_and_log_prob_multi(
             phases, phase_posterior, self.num_processes
         )
+        samples = {"phase": torch.as_tensor(new_phase, device=device)}
+        if self.cache_log_likelihood:
+            # Exact log likelihood at the drawn (off-grid) phase, see class docstring.
+            likelihood = context.likelihood(
+                use_base_domain=self.use_base_domain, wfg_updates=self.wfg_updates
+            )
+            log_likelihood = likelihood.log_likelihood_from_phase_grid_terms(
+                terms, new_phase[:, None]
+            )[:, 0]
+            samples["log_likelihood"] = torch.as_tensor(log_likelihood, device=device)
         logger.info(f"Done. This took {time.time() - t0:.2f} s.")
-        return (
-            {"phase": torch.as_tensor(new_phase, device=device)},
-            torch.as_tensor(log_prob, device=device),
-        )
+        return samples, torch.as_tensor(log_prob, device=device)
 
     def log_prob(self, theta_i, context, given=None):
         """Evaluate `log q(phase | theta_rest, d)` at the given phases (re-plug / IS)."""
         reference = next(iter(given.values()))
         device = reference.device if torch.is_tensor(reference) else None
-        phases, phase_posterior = self._phase_profile(given, context)
+        phases, phase_posterior, _ = self._phase_profile(given, context)
         log_prob = interpolated_log_prob_multi(
             phases, phase_posterior, _to_numpy(theta_i["phase"]), self.num_processes
         )
@@ -154,17 +195,20 @@ class SyntheticPhaseFactor(Factor):
             "approximation_22_mode": self.approximation_22_mode,
             "uniform_weight": self.uniform_weight,
             "use_base_domain": self.use_base_domain,
+            "cache_log_likelihood": self.cache_log_likelihood,
         }
 
     def _phase_profile(self, given, context):
         """The phase grid and the mass-covered (un-normalized) phase distribution, one row
         per sample: evaluate `log L` on the grid, exponentiate (shifted by the per-row
-        max), and add the uniform floor."""
+        max), and add the uniform floor. Also returns the stacked mode terms of the
+        likelihood in exact mode (else `None`)."""
         theta = pd.DataFrame({k: _to_numpy(v) for k, v in given.items()})
         likelihood = context.likelihood(
             use_base_domain=self.use_base_domain, wfg_updates=self.wfg_updates
         )
         phases = np.linspace(0, 2 * np.pi, self.n_grid)
+        terms = None
         if self.approximation_22_mode:
             # Assume the waveform is (2, 2)-dominated (transforms as exp(2i phase)), so the
             # phase-dependent log-posterior is Re[(d | h(phase=0)) exp(2i phase)].
@@ -174,11 +218,22 @@ class SyntheticPhaseFactor(Factor):
             phase_log_posterior = np.outer(d_inner_h, np.exp(2j * phases)).real
         else:
             # Exact: each mode m contributes exp(-i m phase); needs spin_conversion_phase=0.
-            likelihood.phase_grid = phases
-            phase_log_posterior = apply_func_with_multiprocessing(
-                likelihood.log_likelihood_phase_grid,
-                theta,
-                num_processes=self.num_processes,
+            # One waveform evaluation per sample gives the mode terms, which are
+            # stacked and evaluated on the grid for all samples at once.
+            terms_per_sample = apply_func_with_multiprocessing(
+                likelihood.phase_grid_terms, theta, self.num_processes
+            )
+            terms = {
+                # The mode orders are the same for every sample.
+                "m_vals": terms_per_sample[0]["m_vals"],
+                "deltas": terms_per_sample[0]["deltas"],
+                **{
+                    k: np.array([t[k] for t in terms_per_sample])
+                    for k in ("kappa2_modes", "rho2opt_crossterms", "rho2opt_const")
+                },
+            }
+            phase_log_posterior = likelihood.log_likelihood_from_phase_grid_terms(
+                terms, phases
             )
         phase_posterior = np.exp(
             phase_log_posterior - np.amax(phase_log_posterior, axis=1, keepdims=True)
@@ -187,7 +242,7 @@ class SyntheticPhaseFactor(Factor):
         phase_posterior += (
             phase_posterior.mean(axis=-1, keepdims=True) * self.uniform_weight
         )
-        return phases, phase_posterior
+        return phases, phase_posterior, terms
 
 
 def _build_gnpe_transforms(model: BasePosteriorModel):
@@ -358,7 +413,7 @@ class GNPEFlowFactor(Factor):
     @property
     def produces(self) -> list[str]:
         """Emitted columns: the inference block plus the recomputed detector times."""
-        return self.parameters + self.gnpe_parameters
+        return super().produces + self.gnpe_parameters
 
     def sample_and_log_prob(self, num_samples, context, given=None):
         """Draw `num_samples` parameter sets per proxy row (the draws for a row are
