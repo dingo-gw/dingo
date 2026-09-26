@@ -629,12 +629,26 @@ def _make_result_for_is():
 def test_importance_sample_uses_cached_log_likelihood():
     result = _make_result_for_is()
     result.importance_sample(use_cached_log_likelihood=True)
-    assert result.likelihood.evaluated == []
+    # Only the spot check evaluates the likelihood, here on all 4 valid samples.
+    assert sorted(result.likelihood.evaluated) == [0.0, 1.0, 2.0, 3.0]
     np.testing.assert_allclose(
         result.samples["log_likelihood"].to_numpy()[:4], [0.0, -0.5, -2.0, -4.5]
     )
     assert np.isnan(result.samples["log_likelihood"].iloc[4])
     assert result.samples["weights"].iloc[4] == 0.0
+
+
+def test_importance_sample_rejects_inexact_cache():
+    # Cached values off by more than the tolerance are replaced by a direct evaluation.
+    result = _make_result_for_is()
+    result.samples["log_likelihood"] += 0.1
+    result.importance_sample(use_cached_log_likelihood=True)
+    # Spot check on the 4 valid samples, then all 4 evaluated directly.
+    assert len(result.likelihood.evaluated) == 8
+    np.testing.assert_allclose(
+        result.samples["log_likelihood"].to_numpy()[:4], [0.0, -0.5, -2.0, -4.5]
+    )
+    assert np.isnan(result.samples["log_likelihood"].iloc[4])
 
 
 def test_importance_sample_cache_must_cover_samples_within_prior():
