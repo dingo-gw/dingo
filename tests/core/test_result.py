@@ -640,11 +640,14 @@ def test_importance_sample_ignores_cache_by_default():
     assert result.likelihood.evaluated == [0.0, 1.0, 2.0, 3.0]
 
 
-def test_importance_sample_cache_rejects_marginalization():
+@pytest.mark.parametrize("time_marginalization_kwargs", [{"n_fft": 1}, {}])
+def test_importance_sample_cache_rejects_marginalization(time_marginalization_kwargs):
+    # An empty settings dict also turns marginalization on (with default settings).
     result = _make_result_for_is()
     with pytest.raises(ValueError):
         result.importance_sample(
-            use_cached_log_likelihood=True, time_marginalization_kwargs={"n_fft": 1}
+            use_cached_log_likelihood=True,
+            time_marginalization_kwargs=time_marginalization_kwargs,
         )
 
 
