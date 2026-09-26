@@ -212,6 +212,10 @@ class Result(DingoDataset):
         self.sampler_context = self._build_context()
         self._build_domain()
 
+        # A log likelihood cached on the old data does not describe the new data.
+        if self.samples is not None and "log_likelihood" in self.samples:
+            self.samples = self.samples.drop(columns="log_likelihood")
+
     @property
     def num_samples(self):
         if self.samples is not None:
