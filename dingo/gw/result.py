@@ -14,7 +14,7 @@ from dingo.core.utils.backward_compatibility import (
     update_model_config,
 )
 from dingo.core.inference.composer import ChainComposer
-from dingo.core.inference.steps import SampleTableFactor
+from dingo.core.inference.steps import PriorFactor, SampleTableFactor
 from bilby.gw.detector import InterferometerList
 from dingo.gw.frequency_updates import resolve_frequency_bounds
 
@@ -469,6 +469,19 @@ class Result(CoreResult):
         log_prob_array[within_prior] = log_prob.cpu().numpy()
         self.samples["log_prob"] = log_prob_array
 
+        # Record the settings and the calibration priors only now that the chain has
+        # run, so that a failure leaves the result unchanged.
+        prior_update = self.importance_sampling_metadata.get("prior_update", {})
+        for s in steps:
+            if isinstance(s, PriorFactor):
+                # Recorded in string form, for persistence when saving to hdf5.
+                prior_update.update({k: repr(s.prior[k]) for k in s.parameters})
+        self.importance_sampling_metadata["prior_update"] = prior_update
+        if calibration_sampling_kwargs is not None:
+            self.calibration_sampling_kwargs = calibration_sampling_kwargs
+        if synthetic_phase_kwargs is not None:
+            self.synthetic_phase_kwargs = synthetic_phase_kwargs
+
         # Rebuild the prior: it now includes the calibration priors (from
         # prior_update), and the phase prior rejoins it once phase is in the samples.
         self._build_prior()
@@ -484,8 +497,8 @@ class Result(CoreResult):
         Set up the calibration steps of `sample_proposal_extensions`: one
         `PriorFactor` per detector, drawing the calibration parameters (e.g.
         `recalib_H1_amplitude_0`) from the calibration prior, which acts as their
-        proposal. The priors are recorded in the importance-sampling `prior_update`,
-        so that they join `self.prior`.
+        proposal. Since the calibration parameters are new to the target as well,
+        `sample_proposal_extensions` also adds these priors to `self.prior`.
 
         Parameters
         ----------
@@ -496,10 +509,6 @@ class Result(CoreResult):
         -------
         list[PriorFactor]
         """
-        from dingo.core.inference.steps import PriorFactor
-
-        self.calibration_sampling_kwargs = calibration_sampling_kwargs
-
         # Handle correction_type defaults
         correction_type = calibration_sampling_kwargs.get("correction_type", "data")
         if correction_type is None:
@@ -524,7 +533,6 @@ class Result(CoreResult):
             minimum_frequency=self.minimum_frequency,
             maximum_frequency=self.maximum_frequency,
         )
-        prior_update = self.importance_sampling_metadata.get("prior_update", {})
         steps = []
         for ifo in self.interferometers:
             f_min, f_max = frequency_bounds[ifo]
@@ -551,10 +559,7 @@ class Result(CoreResult):
                     for attr, value in prior_obj.get_instantiation_dict().items():
                         if isinstance(value, np.generic):
                             setattr(prior_obj, attr, value.item())
-                    # Recorded for persistence when saving to hdf5.
-                    prior_update[param_name] = repr(prior_obj)
             steps.append(PriorFactor(calibration_prior))
-        self.importance_sampling_metadata["prior_update"] = prior_update
         return steps
 
     def _synthetic_phase_step(
@@ -589,7 +594,6 @@ class Result(CoreResult):
                 "Synthetic phase requires a sampler context; this result does not "
                 "carry full model metadata."
             )
-        self.synthetic_phase_kwargs = synthetic_phase_kwargs
         if not (
             isinstance(self.phase_prior, Uniform)
             and (self.phase_prior._minimum, self.phase_prior._maximum) == (0, 2 * np.pi)
