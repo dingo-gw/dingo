@@ -3,7 +3,7 @@ import time
 from typing import Optional
 
 import numpy as np
-from bilby.core.prior import Uniform, Constraint, PriorDict, DeltaFunction
+from bilby.core.prior import Uniform, Constraint, PriorDict
 from bilby.gw.prior import CalibrationPriorDict
 from bilby_pipe.utils import CALIBRATION_CORRECTION_TYPE_LOOKUP
 
@@ -357,6 +357,28 @@ class Result(CoreResult):
             use_base_domain=self.use_base_domain,
         )
 
+        # The likelihood places its own calibration nodes, log-spaced across each
+        # detector's frequency range. Check that this range matches the end nodes
+        # the calibration parameters were drawn at.
+        if self.calibration_sampling_kwargs is not None:
+            update = self.likelihood.frequency_update or {}
+            bounds = resolve_frequency_bounds(
+                self.interferometers,
+                self.likelihood.data_domain,
+                minimum_frequency=update.get("minimum_frequency"),
+                maximum_frequency=update.get("maximum_frequency"),
+            )
+            n = self.calibration_sampling_kwargs["num_calibration_nodes"]
+            for ifo, (f_min, f_max) in bounds.items():
+                f_first = self.prior[f"recalib_{ifo}_frequency_0"].peak
+                f_last = self.prior[f"recalib_{ifo}_frequency_{n - 1}"].peak
+                if not np.allclose([f_first, f_last], [f_min, f_max]):
+                    raise ValueError(
+                        f"The likelihood's calibration nodes for {ifo} span "
+                        f"[{f_min}, {f_max}] Hz, but the calibration parameters "
+                        f"were drawn at nodes spanning [{f_first}, {f_last}] Hz."
+                    )
+
     def sample_proposal_extensions(
         self,
         calibration_sampling_kwargs: Optional[dict] = None,
@@ -544,21 +566,13 @@ class Result(CoreResult):
                 ifo,
                 correction_type=correction_type_dict[ifo],
             )
-            # Remove the delta function priors on the frequency nodes (and on
-            # amplitude and phase, if present). Their density at the sampled point
-            # is infinite, and they only fix parameters to constants.
-            for param_name, prior_obj in list(calibration_prior.items()):
-                if isinstance(prior_obj, DeltaFunction):
-                    calibration_prior.pop(param_name)
-                else:
-                    # bilby's Prior.__repr__ isn't parseable for numpy scalars on
-                    # numpy>2.0. Upstream fix:
-                    # https://github.com/bilby-dev/bilby/pull/1108
-                    # Can be removed once dingo requires a bilby release that
-                    # includes it.
-                    for attr, value in prior_obj.get_instantiation_dict().items():
-                        if isinstance(value, np.generic):
-                            setattr(prior_obj, attr, value.item())
+            # bilby's Prior.__repr__ isn't parseable for numpy scalars on
+            # numpy>2.0. Upstream fix: https://github.com/bilby-dev/bilby/pull/1108
+            # Can be removed once dingo requires a bilby release that includes it.
+            for prior_obj in calibration_prior.values():
+                for attr, value in prior_obj.get_instantiation_dict().items():
+                    if isinstance(value, np.generic):
+                        setattr(prior_obj, attr, value.item())
             steps.append(PriorFactor(calibration_prior))
         return steps
 

@@ -411,10 +411,9 @@ def test_calibration_sampling_adds_recalib_columns(tmp_path):
         calibration_sampling_kwargs=_calibration_kwargs(tmp_path, num_nodes=n_nodes)
     )
 
-    # Amplitude + phase nodes per detector (the frequency nodes are delta functions
-    # and are dropped before sampling).
+    # Amplitude, phase and (fixed) frequency per node and detector.
     recalib_cols = [c for c in result.samples.columns if c.startswith("recalib_")]
-    assert len(recalib_cols) == 2 * n_nodes * len(DETECTORS)
+    assert len(recalib_cols) == 3 * n_nodes * len(DETECTORS)
     # The calibration prior log_prob is folded into the proposal log_prob.
     assert not np.array_equal(result.samples["log_prob"].to_numpy(), log_prob_before)
     # The calibration priors are recorded for persistence and added to the prior.
@@ -474,6 +473,24 @@ def test_calibration_sampling_nodes_span_event_range(tmp_path):
                 name = f"recalib_{ifo}_{quantity}_{i}"
                 assert result.prior[name].mu == expected[name].mu
                 assert result.prior[name].sigma == expected[name].sigma
+
+
+def test_likelihood_checks_the_recorded_calibration_nodes(tmp_path):
+    # The node frequencies (fixed parameters of the prior) survive a round trip and
+    # match the likelihood's frequency range; a mismatch raises.
+    event_metadata = {"minimum_frequency": {"H1": 30.0, "L1": 25.0}}
+    result = make_gw_result(event_metadata=event_metadata)
+    result.sample_proposal_extensions(
+        calibration_sampling_kwargs=_calibration_kwargs(tmp_path)
+    )
+    file_name = str(tmp_path / "result.hdf5")
+    result.to_file(file_name=file_name)
+    reloaded = Result(file_name=file_name)
+    reloaded._build_likelihood()
+
+    reloaded.prior["recalib_H1_frequency_0"].peak *= 1.01
+    with pytest.raises(ValueError, match="calibration nodes for H1"):
+        reloaded._build_likelihood()
 
 
 def test_reset_event_with_wider_data_gives_the_likelihood_the_recorded_grid():
@@ -557,9 +574,10 @@ def test_calibration_and_synthetic_phase_run_as_one_chain(tmp_path):
     assert np.isnan(result.samples.loc[5, "log_prob"])
     assert (result.samples.loc[5, recalib + ["phase"]] == 0.0).all()
 
-    log_q_calibration = PriorDict({k: result.prior[k] for k in recalib}).ln_prob(
-        inside[recalib], axis=0
-    )
+    # The fixed node frequencies contribute nothing to the proposal density.
+    calibration_prior = PriorDict({k: result.prior[k] for k in recalib})
+    sampled = calibration_prior.non_fixed_keys
+    log_q_calibration = calibration_prior.ln_prob(inside[sampled], axis=0)
     factor = SyntheticPhaseFactor(
         conditioning=theta_keys + recalib, n_grid=64, approximation_22_mode=True
     )
