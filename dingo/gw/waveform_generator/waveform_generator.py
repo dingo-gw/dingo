@@ -748,9 +748,11 @@ class WaveformGenerator:
                 h_plus[: len(hp.data.data)] = hp.data.data
                 h_cross[: len(hc.data.data)] = hc.data.data
 
-            # Undo the time shift done in SimInspiralFD to the waveform
+            # Undo the time shift done in SimInspiralFD to the waveform. The domain's
+            # frequencies are float32, so compute the phase in float64: in single
+            # precision it is off by several ns in time.
             dt = 1 / hp.deltaF + (hp.epoch.gpsSeconds + hp.epoch.gpsNanoSeconds * 1e-9)
-            time_shift = np.exp(-1j * 2 * np.pi * dt * frequency_array)
+            time_shift = np.exp(-1j * 2 * np.pi * dt * frequency_array.astype(float))
             h_plus *= time_shift
             h_cross *= time_shift
             return {"h_plus": h_plus, "h_cross": h_cross}
@@ -1292,9 +1294,10 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
             h_plus = hp.value
             h_cross = hc.value
 
-        # Undo the time shift done in SimInspiralFD to the waveform
+        # Undo the time shift done in SimInspiralFD to the waveform, in float64 (see
+        # WaveformGenerator.generate_FD_waveform).
         dt = 1 / hp.df.value + hp.epoch.value
-        time_shift = np.exp(-1j * 2 * np.pi * dt * frequency_array)
+        time_shift = np.exp(-1j * 2 * np.pi * dt * frequency_array.astype(float))
         h_plus *= time_shift
         h_cross *= time_shift
         pol_dict = {"h_plus": h_plus, "h_cross": h_cross}

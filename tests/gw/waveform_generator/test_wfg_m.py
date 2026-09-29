@@ -354,9 +354,9 @@ def dft_vs_standard_tolerance(approximant):
     disagreement bounded here is the individual-mode route's, already known and
     already tolerated above.
 
-    For SEOBNRv5PHM both routes track the model closely and the difference is a
-    ~1 ns offset from epoch rounding plus ~6e-6 rad of phase scatter, from
-    conditioning and FFT-ing the polarizations rather than the individual modes.
+    For SEOBNRv5PHM both routes track the model closely and the difference is
+    ~1e-6 rad of phase scatter, from conditioning and FFT-ing the polarizations
+    rather than the individual modes.
 
     Either way the bound is set by the weakest m-components: the absolute error is
     roughly common across m while the amplitudes span five orders of magnitude, so
@@ -377,8 +377,12 @@ def test_dft_reconstructs_phase_shift(dft_wfg_pair, uniform_fd_domain):
     trigonometric polynomial to be right, not just the sampled values.
 
     get_mismatch normalises, so it cannot see an overall scale error. The
-    amplitude is therefore checked separately: measured departures from unity are
-    1e-15 (XPHM) and 3e-9 (SEOBNRv5PHM).
+    amplitude is therefore checked separately. Both agree to round-off: measured
+    mismatches are 2e-16 (XPHM) and 6e-14 (SEOBNRv5PHM), and departures of the
+    amplitude from unity 1e-15 and 2e-14. For SEOBNRv5PHM this needs the time shift
+    of the direct route in double precision (see
+    test_time_shift_in_double_precision); in single precision the two differed by
+    a mismatch of 3e-12 and an amplitude of 3e-9.
     """
     wfg_dft, _ = dft_wfg_pair
     min_idx = uniform_fd_domain.min_idx
@@ -397,13 +401,13 @@ def test_dft_reconstructs_phase_shift(dft_wfg_pair, uniform_fd_domain):
                     uniform_fd_domain,
                     asd_file="aLIGO_ZERO_DET_high_P_asd.txt",
                 )
-                assert mismatch < 1e-9, f"{name}, phase_shift={phase_shift}"
+                assert mismatch < 1e-12, f"{name}, phase_shift={phase_shift}"
 
                 amplitude_ratio = np.linalg.norm(pol[name][min_idx:]) / np.linalg.norm(
                     pol_ref[name][min_idx:]
                 )
                 assert (
-                    abs(amplitude_ratio - 1) < 1e-6
+                    abs(amplitude_ratio - 1) < 1e-12
                 ), f"{name}, phase_shift={phase_shift}, ratio={amplitude_ratio}"
 
 
@@ -428,6 +432,46 @@ def test_dft_matches_standard_path(
                     asd_file="aLIGO_ZERO_DET_high_P_asd.txt",
                 )
                 assert mismatch < dft_vs_standard_tolerance, f"m={m}, {name}"
+
+
+@pytest.mark.parametrize("approximant", dft_approximant_list)
+def test_time_shift_in_double_precision(dft_wfg_pair, monkeypatch):
+    """Waveforms do not depend on the precision of the domain's frequencies.
+
+    The domain stores its frequencies as float32, and the waveform generators
+    multiply by exp(-2 pi i f dt) to undo the epoch of the LAL / gwsignal output
+    (dt ~ 0.1 s). Computed in single precision, rounding 2 pi dt shifts the
+    waveform by up to dt * 2**-24 ~ 6 ns, and rounding the phase adds ~2e-6 rad
+    of noise. This covers the direct route of both approximants and the
+    individual-mode route of SEOBNRv5PHM, whose time-domain modes are shifted the
+    same way.
+    """
+    from dingo.gw.domains import UniformFrequencyDomain
+
+    wfg_dft, wfg_std = dft_wfg_pair
+    p = DFT_PARAMETERS[0]
+    reference = [wfg_dft.generate_hplus_hcross(p), wfg_std.generate_hplus_hcross_m(p)]
+
+    sample_frequencies = UniformFrequencyDomain.sample_frequencies
+    monkeypatch.setattr(
+        UniformFrequencyDomain,
+        "sample_frequencies",
+        property(lambda self: sample_frequencies.fget(self).astype(np.float64)),
+    )
+    in_float64 = [wfg_dft.generate_hplus_hcross(p), wfg_std.generate_hplus_hcross_m(p)]
+
+    pol, pol_m = reference
+    pol_64, pol_m_64 = in_float64
+    for name in pol:
+        np.testing.assert_allclose(
+            pol[name], pol_64[name], rtol=0, atol=1e-12 * np.abs(pol_64[name]).max()
+        )
+    for m in pol_m:
+        for name in pol_m[m]:
+            scale = np.abs(pol_m_64[m][name]).max()
+            np.testing.assert_allclose(
+                pol_m[m][name], pol_m_64[m][name], rtol=0, atol=1e-12 * scale
+            )
 
 
 @pytest.mark.parametrize("approximant", dft_approximant_list)
