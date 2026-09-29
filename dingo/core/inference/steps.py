@@ -453,11 +453,13 @@ class PriorFactor(Factor):
         Parameters
         ----------
         prior : bilby.core.prior.PriorDict
-            The prior to draw from. It should contain no delta functions, whose
-            density at the drawn point is infinite.
+            The prior to draw from. Constraints are applied but not sampled. Fixed
+            parameters (e.g. delta functions) are emitted at their values, and, as
+            for `DeltaFactor`, contribute nothing to the log probability (their
+            density at the drawn point is infinite).
         """
         self.prior = prior
-        self.parameters = list(prior.keys())
+        self.parameters = [k for k in prior if k not in prior.constraint_keys]
         self.conditioning: list[str] = []
 
     def sample_and_log_prob(self, num_samples, context, given=None):
@@ -466,7 +468,9 @@ class PriorFactor(Factor):
         # Fresh tensors are placed on the chain's device (as for DeltaFactor).
         device = context.device if context is not None else None
         draws = self.prior.sample(num_samples)
-        log_prob = self.prior.ln_prob(draws, axis=0)
+        log_prob = self.prior.ln_prob(
+            {k: draws[k] for k in self.prior.non_fixed_keys}, axis=0
+        )
         samples = {
             k: torch.as_tensor(np.asarray(v), device=device) for k, v in draws.items()
         }
@@ -475,7 +479,9 @@ class PriorFactor(Factor):
     def log_prob(self, theta_i, context, given=None):
         """Evaluate the prior log probability. See `Factor.log_prob`."""
         reference_column = next(iter(theta_i.values()))
-        theta = {k: theta_i[k].detach().cpu().numpy() for k in self.parameters}
+        theta = {
+            k: theta_i[k].detach().cpu().numpy() for k in self.prior.non_fixed_keys
+        }
         return torch.as_tensor(
             np.asarray(self.prior.ln_prob(theta, axis=0)),
             device=reference_column.device,

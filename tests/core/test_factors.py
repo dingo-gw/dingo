@@ -299,18 +299,27 @@ def test_sample_table_log_prob_raises():
 
 def test_prior_factor_draws_with_prior_log_prob():
     # Unconditioned after a table root: one prior draw per table row, whose prior
-    # log-prob is added to the stored one.
-    from bilby.core.prior import Gaussian, PriorDict
+    # log-prob is added to the stored one. A fixed parameter is emitted at its value
+    # without log-prob; a constraint is not a parameter.
+    from bilby.core.prior import Constraint, DeltaFunction, Gaussian, PriorDict
 
-    prior = PriorDict({"c": Gaussian(0.0, 1.0), "d": Gaussian(1.0, 2.0)})
+    prior = PriorDict(
+        {
+            "c": Gaussian(0.0, 1.0),
+            "d": Gaussian(1.0, 2.0),
+            "e": Constraint(-1.0, 1.0),
+            "f": DeltaFunction(1.0),
+        }
+    )
     factor = PriorFactor(prior)
-    assert factor.parameters == ["c", "d"] and factor.conditioning == []
+    assert factor.parameters == ["c", "d", "f"] and factor.conditioning == []
 
     stored = torch.tensor([0.5, 0.6, 0.7])
     table = SampleTableFactor({"a": torch.arange(3.0)}, log_prob=stored)
     out, lp = ChainComposer([table, factor]).sample_and_log_prob(1, None)
 
     assert out["c"].shape == (3,) and out["d"].shape == (3,)
+    assert (out["f"] == 1.0).all()
     draws = {k: out[k].numpy() for k in ("c", "d")}
     expected = torch.as_tensor(prior.ln_prob(draws, axis=0))
     assert torch.allclose(lp, stored + expected)
