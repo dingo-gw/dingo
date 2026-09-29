@@ -308,15 +308,8 @@ class Result(DingoDataset):
             delta_log_prob_target = 0.0
 
         # Calculate the (un-normalized) target density as prior times likelihood,
-        # evaluated at the same sample points. The prior must be evaluated only for the
-        # non-fixed (delta) parameters.
-        param_keys_non_fixed = [
-            k
-            for k, v in self.prior.items()
-            if not isinstance(v, (Constraint, DeltaFunction))
-        ]
-        theta_non_fixed = self.samples[param_keys_non_fixed]
-        log_prior = self.prior.ln_prob(theta_non_fixed, axis=0)
+        # evaluated at the same sample points.
+        log_prior = self._log_prior()
 
         # select parameters in self.samples (required as log_prob and potentially gnpe
         # proxies are also stored in self.samples, but are not needed for the likelihood.
@@ -343,6 +336,29 @@ class Result(DingoDataset):
         self.samples["log_prior"] = log_prior
         self.samples.loc[valid_samples, "log_likelihood"] = log_likelihood
         self._calculate_evidence()
+
+    def _log_prior(self) -> np.ndarray:
+        """
+        Evaluate the log prior of the samples, which is -inf outside the prior.
+
+        The prior density is evaluated only for the non-fixed parameters:
+        DeltaFunction priors return ln_prob = +inf at the peak, which makes bilby's
+        check_ln_prob skip the constraints and return +inf for every sample, and RA
+        corrections (trigger_time vs model ref_time) can shift fixed parameters by
+        tiny amounts, making their ln_prob = -inf. The constraints are then evaluated
+        separately, on all (fixed and non-fixed) parameters.
+        """
+        param_keys_non_fixed = [
+            k
+            for k, v in self.prior.items()
+            if not isinstance(v, (Constraint, DeltaFunction))
+        ]
+        log_prior = self.prior.ln_prob(self.samples[param_keys_non_fixed], axis=0)
+        # Pass a plain dict: bilby's evaluate_constraints mishandles a DataFrame
+        # (DataFrame.values is a property, not a method).
+        param_keys = [k for k, v in self.prior.items() if not isinstance(v, Constraint)]
+        constraints = self.prior.evaluate_constraints(dict(self.samples[param_keys]))
+        return np.where(constraints == 0, -np.inf, log_prior)
 
     def _calculate_evidence(self):
         """Calculate the Bayesian log evidence and sample weights.

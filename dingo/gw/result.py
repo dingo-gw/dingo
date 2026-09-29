@@ -377,9 +377,9 @@ class Result(CoreResult):
         The calibration parameters are drawn first, so the phase distribution is
         built from the likelihood including the drawn calibration curve.
 
-        With a synthetic phase, the chain runs on the within-prior samples only.
-        Out-of-prior samples receive placeholder values 0 for the new parameters
-        and `log_prob = nan`, and carry zero weight in importance sampling.
+        The chain runs on the within-prior samples only. Out-of-prior samples
+        receive placeholder values 0 for the new parameters and `log_prob = nan`,
+        and carry zero weight in importance sampling.
         Afterwards the prior includes the new parameters.
 
         This method modifies self.samples in place.
@@ -428,17 +428,22 @@ class Result(CoreResult):
 
         param_keys = [k for k, v in self.prior.items() if not isinstance(v, Constraint)]
         theta = self.samples[param_keys]
-        within_prior = np.ones(len(theta), dtype=bool)
+        # Out-of-prior samples carry zero weight in importance sampling (which uses
+        # the same _log_prior), and it may not even be possible to generate signals
+        # for them (e.g., for BH spins > 1).
+        within_prior = np.isfinite(self._log_prior())
 
         steps = []
         if calibration_sampling_kwargs is not None:
             steps += self._calibration_steps(calibration_sampling_kwargs)
         if synthetic_phase_kwargs is not None:
-            step, within_prior = self._synthetic_phase_step(
-                synthetic_phase_kwargs,
-                conditioning=param_keys + [p for s in steps for p in s.parameters],
+            steps.append(
+                self._synthetic_phase_step(
+                    synthetic_phase_kwargs,
+                    conditioning=param_keys + [p for s in steps for p in s.parameters],
+                    num_samples=np.sum(within_prior),
+                )
             )
-            steps.append(step)
 
         table = SampleTableFactor(
             {k: theta[k].to_numpy()[within_prior] for k in param_keys},
@@ -553,15 +558,15 @@ class Result(CoreResult):
         return steps
 
     def _synthetic_phase_step(
-        self, synthetic_phase_kwargs: dict, conditioning: list[str]
-    ) -> tuple:
+        self, synthetic_phase_kwargs: dict, conditioning: list[str], num_samples: int
+    ) -> "SyntheticPhaseFactor":
         """
         Set up the synthetic phase step of `sample_proposal_extensions`: a
         `SyntheticPhaseFactor`, which constructs `q(phase | theta, d)` per sample
         from the likelihood on a phase grid (with a uniform floor for mass coverage,
         so importance sampling remains exact even where the conditional is
         approximate). It applies to samples in the full parameter space except the
-        phase, and only to samples within the prior.
+        phase.
 
         Parameters
         ----------
@@ -570,12 +575,12 @@ class Result(CoreResult):
         conditioning : list[str]
             The columns the phase distribution conditions on: the proposal
             parameters and any calibration parameters drawn earlier in the chain.
+        num_samples : int
+            Number of samples the chain runs on, used to cap the number of processes.
 
         Returns
         -------
-        step : SyntheticPhaseFactor
-        within_prior : np.ndarray
-            Boolean mask of the samples within the prior, on which the chain runs.
+        SyntheticPhaseFactor
         """
         from dingo.gw.inference.steps import SyntheticPhaseFactor
 
@@ -594,31 +599,6 @@ class Result(CoreResult):
                 f" However, the prior is {self.phase_prior}."
             )
 
-        # Restrict to samples that are within the prior.
-        param_keys = [k for k, v in self.prior.items() if not isinstance(v, Constraint)]
-        theta = self.samples[param_keys]
-        # Compute log_prior only for non-DeltaFunction parameters.  DeltaFunction
-        # priors return ln_prob = +inf at the peak, which causes check_ln_prob to
-        # skip constraint evaluation and return +inf for every sample, so
-        # np.isfinite(log_prior) would be False for all samples.  Additionally, RA
-        # corrections (trigger_time vs model ref_time) can shift fixed parameters by
-        # tiny amounts, making DeltaFunction ln_prob = -inf for all samples.
-        prior_keys_for_lp = [
-            k
-            for k, v in self.prior.items()
-            if not isinstance(v, Constraint) and not isinstance(v, DeltaFunction)
-        ]
-        log_prior = self.prior.ln_prob(self.samples[prior_keys_for_lp], axis=0)
-        # Pass a plain dict so bilby's evaluate_constraints handles the argument
-        # correctly.  bilby's evaluate_constraints mishandles a DataFrame argument:
-        # its internal .values() call raises TypeError (DataFrame.values is a
-        # property, not a method), causing the try/except inside bilby to fall
-        # through to ``np.ones_like(out_sample)``, which returns a 2-D array and
-        # causes a shape-broadcast error in the subsequent element-wise multiplication.
-        constraints = self.prior.evaluate_constraints(dict(theta))
-        np.putmask(log_prior, constraints == 0, -np.inf)
-        within_prior = np.isfinite(log_prior)
-
         wfg_updates = None
         if "use_dft_phase_decomposition" in synthetic_phase_kwargs:
             wfg_updates = {
@@ -636,12 +616,12 @@ class Result(CoreResult):
             # Put a cap on the number of processes to avoid overhead.
             num_processes=min(
                 synthetic_phase_kwargs.get("num_processes", 1),
-                np.sum(within_prior) // 10,
+                num_samples // 10,
             ),
             use_base_domain=self.use_base_domain,
             wfg_updates=wfg_updates,
         )
-        return step, within_prior
+        return step
 
     def get_samples_bilby_phase(self, num_processes=1):
         """
