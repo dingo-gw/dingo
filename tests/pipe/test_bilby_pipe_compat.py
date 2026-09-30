@@ -41,9 +41,10 @@ def test_datageneration_input_provides_bilby_injection_attrs(tmp_path):
     self.* attributes bilby_pipe reads when building an injection. Calling the helper
     that failed in a real injection run raises AttributeError if dingo omits one such
     attribute (e.g. waveform_generator_class_ctor_args)."""
+    (tmp_path / "dummy.pt").touch()  # never loaded here, but the path should exist
     args = {a.dest: a.default for a in create_generation_parser()._actions if a.dest != "help"}
     args.update(
-        model="dummy.pt", model_init=None, idx=0, label="test", outdir=str(tmp_path),
+        model=str(tmp_path / "dummy.pt"), model_init=None, idx=0, label="test", outdir=str(tmp_path),
         trigger_time=0.0, detectors=["H1", "L1"], duration=4.0, sampling_frequency=4096,
         minimum_frequency=20.0, maximum_frequency=1024.0, reference_frequency=20.0,
     )
