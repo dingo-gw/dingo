@@ -493,6 +493,45 @@ def test_likelihood_checks_the_recorded_calibration_nodes(tmp_path):
         reloaded._build_likelihood()
 
 
+def test_likelihood_skips_the_node_check_for_results_without_nodes(tmp_path):
+    # Results from earlier Dingo versions stored no node frequencies in the prior.
+    result = make_gw_result()
+    result.sample_proposal_extensions(
+        calibration_sampling_kwargs=_calibration_kwargs(tmp_path)
+    )
+    prior_update = result.importance_sampling_metadata["prior_update"]
+    for key in [k for k in prior_update if "_frequency_" in k]:
+        del prior_update[key]
+    file_name = str(tmp_path / "result.hdf5")
+    result.to_file(file_name=file_name)
+    reloaded = Result(file_name=file_name)
+    assert "recalib_H1_frequency_0" not in reloaded.prior
+    reloaded._build_likelihood()
+
+
+def test_update_prior_keeps_the_calibration_priors(tmp_path):
+    # update_prior merges into the recorded prior_update, so the calibration priors
+    # stay in the target prior after a reload. It also leaves out the fixed node
+    # frequencies when evaluating the prior, so the evidence stays consistent.
+    result = make_gw_result()
+    result.sample_proposal_extensions(
+        calibration_sampling_kwargs=_calibration_kwargs(tmp_path)
+    )
+    result.importance_sample()
+    log_evidence = result.log_evidence
+    recorded = dict(result.importance_sampling_metadata["prior_update"])
+    result.update_prior(dict(_LD_PRIOR_UPDATE))
+    assert abs(result.log_evidence - log_evidence) < 10
+    assert result.importance_sampling_metadata["prior_update"] == {
+        **recorded,
+        **_LD_PRIOR_UPDATE,
+    }
+    file_name = str(tmp_path / "result.hdf5")
+    result.to_file(file_name=file_name)
+    reloaded = Result(file_name=file_name)
+    assert all(key in reloaded.prior for key in recorded)
+
+
 def test_reset_event_with_wider_data_gives_the_likelihood_the_recorded_grid():
     # The importance-sampling stage hands the Result an event dataset generated for
     # a wider range; the Result's context builds the likelihood on the recorded

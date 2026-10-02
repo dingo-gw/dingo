@@ -244,17 +244,19 @@ class Result(CoreResult):
             prior_update is provided in this form so that it can be properly saved with
             the Result and later instantiated.
         """
-        self.importance_sampling_metadata["prior_update"] = prior_update.copy()
+        # Merge with the recorded updates (e.g. calibration priors added by
+        # sample_proposal_extensions), so that a reload rebuilds all of them.
+        self.importance_sampling_metadata["prior_update"] = {
+            **self.importance_sampling_metadata.get("prior_update", {}),
+            **prior_update,
+        }
         # PriorDict instantiates in place, so work on a copy: the caller's dict
         # keeps its string form.
         prior_update = PriorDict(prior_update.copy())
 
-        param_keys = [k for k, v in self.prior.items() if not isinstance(v, Constraint)]
-        theta = self.samples[param_keys]
-
         if self.log_evidence is None:
             # Save old prior evaluations.
-            log_prior_old = self.prior.ln_prob(theta, axis=0)
+            log_prior_old = self._log_prior()
 
         # Update the prior itself, careful to split off geocent_time and phase priors
         # if necessary.
@@ -267,7 +269,7 @@ class Result(CoreResult):
         )  # TODO: Does this update cached constraint ratio?
 
         # Evaluate new prior.
-        log_prior = self.prior.ln_prob(theta, axis=0)
+        log_prior = self._log_prior()
         self.samples["log_prior"] = log_prior
 
         if self.log_evidence is None:
@@ -370,6 +372,13 @@ class Result(CoreResult):
             )
             n = self.calibration_sampling_kwargs["num_calibration_nodes"]
             for ifo, (f_min, f_max) in bounds.items():
+                if f"recalib_{ifo}_frequency_0" not in self.prior:
+                    # Results from earlier Dingo versions did not store the nodes.
+                    print(
+                        f"No calibration node frequencies stored for {ifo}; not "
+                        f"checking them against the likelihood."
+                    )
+                    continue
                 f_first = self.prior[f"recalib_{ifo}_frequency_0"].peak
                 f_last = self.prior[f"recalib_{ifo}_frequency_{n - 1}"].peak
                 if not np.allclose([f_first, f_last], [f_min, f_max]):
