@@ -434,20 +434,21 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
 
         # Step 1: Compute signal for phase = 0, separated into the m-contributions from
         # the individual modes, projected at each basis polarization angle.
-        # mu[b][m][ifo] is the whitened strain of mode m at the b-th angle.
-        signals = self.signal_m({**theta, "phase": 0}, (0.0, np.pi / 4))
-        mu = [{m: pol["waveform"] for m, pol in signal.items()} for signal in signals]
+        # mu[m][ifo][b] is the whitened strain of mode m at the b-th angle.
+        mu = self.signal_m({**theta, "phase": 0}, (0.0, np.pi / 4))
 
         # Step 2: Precompute complex inner products (mu, mu) and (d, mu) for the
         # individual modes m (and basis pairs b, c).
         min_idx = self.data_domain.min_idx
-        m_vals = sorted(mu[0].keys())
+        m_vals = sorted(mu.keys())
 
         def overlap(x, y):
-            # Complex inner product summed over detectors; x, y are {ifo: strain}.
+            # Complex inner products sum(x.conj() * y) over frequency bins and
+            # detectors; x, y are {ifo: strain} with optional leading basis axes,
+            # so two (2, F) strains give the (2, 2) matrix over basis pairs [b, c].
             return sum(
-                inner_product_complex(x_ifo, y_ifo, min_idx)
-                for x_ifo, y_ifo in zip(x.values(), y.values())
+                np.inner(x[ifo][..., min_idx:].conj(), y[ifo][..., min_idx:])
+                for ifo in x
             )
 
         # rho2opt is defined as the inner product of the waveform mu with itself.
@@ -465,21 +466,14 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         # same expansion holds per basis pair (b, c), weighted by w_b w_c. Below we
         # precompute the cross terms sum(mu^b_m.conj() * mu^c_n) and the constant
         # contribution for m = n.
-        rho2opt_const = np.array(
-            [
-                [sum(overlap(mu_b[m], mu_c[m]).real for m in m_vals) for mu_c in mu]
-                for mu_b in mu
-            ]
-        )
+        rho2opt_const = sum(overlap(mu[m], mu[m]).real for m in m_vals)
         # The cross terms only depend on the mode difference delta = n - m, so we
         # accumulate them by delta. For m in -4..4 this collapses 36 pairs onto 8
         # distinct deltas, i.e. a 4.5x smaller exponential matrix in the evaluation.
         crossterms_by_delta = defaultdict(lambda: np.zeros((2, 2), dtype=complex))
         for idx, m in enumerate(m_vals):
             for n in m_vals[idx + 1 :]:
-                pair = np.array(
-                    [[overlap(mu_b[m], mu_c[n]) for mu_c in mu] for mu_b in mu]
-                )
+                pair = overlap(mu[m], mu[n])
                 # (m, n) and (n, m) contribute symmetrically: entry [b, c] collects
                 # (mu^b_m, mu^c_n) + (mu^c_m, mu^b_n).
                 crossterms_by_delta[n - m] += pair + pair.T
@@ -495,7 +489,7 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         #   (d, mu^_m) = [(d.conj() * mu_m) * exp(-i * m * phi)].real.
         #
         # Below we precompute (d.conj() * mu^b_m) for the different modes m.
-        kappa2_modes = np.array([[overlap(d, mu_b[m]) for m in m_vals] for mu_b in mu])
+        kappa2_modes = np.array([overlap(d, mu[m]) for m in m_vals]).T
 
         return {
             "m_vals": np.array(m_vals),

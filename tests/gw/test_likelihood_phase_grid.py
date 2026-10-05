@@ -68,10 +68,8 @@ def test_phase_grid_matches_direct_evaluation(likelihood):
     grid = likelihood.log_likelihood_phase_grid(THETA, phases=phases)
 
     pol_m = {
-        m: pol["waveform"]
-        for m, pol in likelihood.signal_m({**THETA, "phase": 0}, [THETA["psi"]])[
-            0
-        ].items()
+        m: {ifo: strain[0] for ifo, strain in pol.items()}
+        for m, pol in likelihood.signal_m({**THETA, "phase": 0}, [THETA["psi"]]).items()
     }
     d = likelihood.whitened_strains
     min_idx = likelihood.data_domain.min_idx
