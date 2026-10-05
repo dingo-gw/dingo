@@ -548,8 +548,10 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
             crossterms.reshape(*crossterms.shape[:-3], 4, -1) @ phasor_delta
         ).real.reshape(*kappa2_b.shape[:-2], 2, 2, -1)
         # Contract the basis axes with the weights.
-        kappa2 = np.einsum("...bg,...hb->...gh", kappa2_b, w)
-        rho2opt = np.einsum("...bcg,...hb,...hc->...gh", rho2opt_bc, w, w)
+        kappa2 = np.einsum("...bg,...hb->...gh", kappa2_b, w, optimize=True)
+        rho2opt = np.einsum(
+            "...bcg,...hb,...hc->...gh", rho2opt_bc, w, w, optimize=True
+        )
         log_likelihood = self.log_Zn + kappa2 - 0.5 * rho2opt
         return log_likelihood
 

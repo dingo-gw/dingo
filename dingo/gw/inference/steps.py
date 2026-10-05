@@ -23,7 +23,6 @@ from dingo.core.inference.steps import (
     _n_rows,
 )
 from dingo.core.multiprocessing import apply_func_with_multiprocessing
-from scipy.special import logsumexp
 from dingo.core.posterior_models import BasePosteriorModel
 from dingo.core.transforms import RenameKey
 from dingo.gw.conversion import change_spin_conversion_phase
@@ -286,7 +285,7 @@ class SyntheticPhasePsiFactor(Factor):
     """
 
     # Upper bound on the (chunk, n_grid_phase, n_grid_psi) grid held at once, in elements.
-    max_grid_elements = 50_000_000
+    max_grid_elements = 8_000_000
 
     def __init__(
         self,
@@ -434,7 +433,13 @@ class SyntheticPhasePsiFactor(Factor):
             )
             # Drop the endpoint psi = pi: psi has period pi, so it repeats the
             # phase-dependent psi = 0 column and would double-count it.
-            log_marginal[sl] = logsumexp(grid[..., :-1], axis=-1)
+            # A plain numpy logsumexp: scipy's is 2-4x slower on this strided grid.
+            # when the grid size is small
+            grid = grid[..., :-1]
+            peak = grid.max(axis=-1)
+            log_marginal[sl] = peak + np.log(
+                np.exp(grid - peak[..., None]).sum(axis=-1)
+            )
         return (
             likelihood,
             terms,
