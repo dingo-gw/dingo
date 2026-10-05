@@ -36,9 +36,9 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       # pyseobnr (for the SEOBNRv5PHM tests) depends on pygsl_lite, which builds
-      # from source against GSL.
-      - name: Install GSL
-        run: sudo apt-get update && sudo apt-get install -y libgsl-dev
+      # from source against GSL and may regenerate its wrappers with SWIG.
+      - name: Install GSL and SWIG
+        run: sudo apt-get update && sudo apt-get install -y libgsl-dev swig
 
       - name: Install the project
         run: uv sync --extra dev --extra pyseobnr
