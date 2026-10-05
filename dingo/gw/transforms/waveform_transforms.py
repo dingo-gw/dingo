@@ -165,8 +165,6 @@ class DecimateWaveformsAndASDS(object):
                         k: 1 / self.multibanded_frequency_domain.decimate(1 / v)
                         for k, v in sample["asds"].items()
                     }
-                # Color the whitened waveforms with the effective asd. 
-                with np.errstate(invalid="ignore"):
                     # Prevent NaN in the waveform due to 0 * np.inf, set
                     # to 0 instead.
                     waveform_dec = {
