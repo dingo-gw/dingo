@@ -4,7 +4,6 @@ synthetic-phase-psi factors, and the coordinate reparametrizations."""
 from __future__ import annotations
 import logging
 import time
-from functools import partial
 from typing import Optional
 import numpy as np
 import pandas as pd
@@ -49,13 +48,13 @@ def _to_numpy(v) -> np.ndarray:
     return np.asarray(v)
 
 
-def _stacked_phase_grid_terms(likelihood, theta, psi_dependent, num_processes):
+def _stacked_phase_grid_terms(likelihood, theta, num_processes):
     """The phase grid terms of every row of `theta` (one waveform evaluation each,
     in parallel), stacked along a leading batch axis for one vectorized grid
     evaluation, see `StationaryGaussianGWLikelihood.log_likelihood_from_phase_grid_terms`.
     """
     terms_per_sample = apply_func_with_multiprocessing(
-        partial(likelihood.phase_grid_terms, psi_dependent=psi_dependent),
+        likelihood.phase_grid_terms,
         theta,
         num_processes,
     )
@@ -200,8 +199,8 @@ class SyntheticPhaseFactor(Factor):
                 use_base_domain=self.use_base_domain, wfg_updates=self.wfg_updates
             )
             log_likelihood = likelihood.log_likelihood_from_phase_grid_terms(
-                terms, new_phase[:, None]
-            )[:, 0]
+                terms, new_phase[:, None], _to_numpy(given["psi"])[:, None]
+            )[:, 0, 0]
             samples["log_likelihood"] = torch.as_tensor(log_likelihood, device=device)
         logger.info(f"Done. This took {time.time() - t0:.2f} s.")
         return samples, torch.as_tensor(log_prob, device=device)
@@ -251,12 +250,10 @@ class SyntheticPhaseFactor(Factor):
             # Exact: each mode m contributes exp(-i m phase); needs spin_conversion_phase=0.
             # One waveform evaluation per sample gives the mode terms, which are
             # stacked and evaluated on the grid for all samples at once.
-            terms = _stacked_phase_grid_terms(
-                likelihood, theta, False, self.num_processes
-            )
+            terms = _stacked_phase_grid_terms(likelihood, theta, self.num_processes)
             phase_log_posterior = likelihood.log_likelihood_from_phase_grid_terms(
-                terms, phases
-            )
+                terms, phases, theta["psi"].to_numpy()[:, None]
+            )[..., 0]
         return phases, _floored_density(phase_log_posterior, self.uniform_weight), terms
 
 
@@ -410,7 +407,7 @@ class SyntheticPhasePsiFactor(Factor):
         likelihood = context.likelihood(
             use_base_domain=self.use_base_domain, wfg_updates=self.wfg_updates
         )
-        terms = _stacked_phase_grid_terms(likelihood, theta, True, self.num_processes)
+        terms = _stacked_phase_grid_terms(likelihood, theta, self.num_processes)
         phases = np.linspace(0, 2 * np.pi, self.n_grid_phase)
         psis = np.linspace(0, np.pi, self.n_grid_psi)
         n = len(theta)

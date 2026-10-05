@@ -58,7 +58,7 @@ def test_signal_m_EOB(signal_setup_EOB, BBH_parameters):
 
     phase_shift = np.random.uniform(high=2 * np.pi)
     waveform_ref = signal.signal({**p, "phase": p["phase"] + phase_shift})["waveform"]
-    waveform_m = signal.signal_m(p)
+    waveform_m = signal.signal_m(p, [p["psi"]])[0]
     waveform_m = {k: v["waveform"] for k, v in waveform_m.items()}
     waveform = sum_contributions_m(waveform_m, phase_shift=phase_shift)
     mismatches = [

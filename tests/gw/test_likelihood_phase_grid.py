@@ -69,7 +69,9 @@ def test_phase_grid_matches_direct_evaluation(likelihood):
 
     pol_m = {
         m: pol["waveform"]
-        for m, pol in likelihood.signal_m({**THETA, "phase": 0}).items()
+        for m, pol in likelihood.signal_m({**THETA, "phase": 0}, [THETA["psi"]])[
+            0
+        ].items()
     }
     d = likelihood.whitened_strains
     min_idx = likelihood.data_domain.min_idx
@@ -113,15 +115,17 @@ def test_terms_reproduce_direct_likelihood_at_off_grid_phase(likelihood):
     for extra in ({}, calibration):
         theta = {**THETA, **extra}
         terms = likelihood.phase_grid_terms(theta)
-        from_terms = likelihood.log_likelihood_from_phase_grid_terms(terms, phases)
+        from_terms = likelihood.log_likelihood_from_phase_grid_terms(
+            terms, phases, [theta["psi"]]
+        )[:, 0]
         direct = [likelihood.log_likelihood({**theta, "phase": p}) for p in phases]
         np.testing.assert_allclose(from_terms, direct, rtol=1e-9)
     # The calibration curve changes the likelihood.
     assert not np.allclose(
         from_terms,
         likelihood.log_likelihood_from_phase_grid_terms(
-            likelihood.phase_grid_terms(THETA), phases
-        ),
+            likelihood.phase_grid_terms(THETA), phases, [THETA["psi"]]
+        )[:, 0],
     )
 
 
@@ -141,26 +145,29 @@ def test_stacked_terms_match_per_sample_evaluation(likelihood):
     }
     grid = np.linspace(0, 2 * np.pi, 7)
     drawn = np.array([0.3, 4.2])
-    on_grid = likelihood.log_likelihood_from_phase_grid_terms(terms, grid)
-    at_drawn = likelihood.log_likelihood_from_phase_grid_terms(terms, drawn[:, None])
-    assert on_grid.shape == (2, 7) and at_drawn.shape == (2, 1)
+    psis = [THETA["psi"]]
+    on_grid = likelihood.log_likelihood_from_phase_grid_terms(terms, grid, psis)
+    at_drawn = likelihood.log_likelihood_from_phase_grid_terms(
+        terms, drawn[:, None], psis
+    )
+    assert on_grid.shape == (2, 7, 1) and at_drawn.shape == (2, 1, 1)
     for i, t in enumerate(terms_per_sample):
         np.testing.assert_allclose(
-            on_grid[i], likelihood.log_likelihood_from_phase_grid_terms(t, grid)
+            on_grid[i], likelihood.log_likelihood_from_phase_grid_terms(t, grid, psis)
         )
         np.testing.assert_allclose(
             at_drawn[i],
-            likelihood.log_likelihood_from_phase_grid_terms(t, drawn[i : i + 1]),
+            likelihood.log_likelihood_from_phase_grid_terms(t, drawn[i : i + 1], psis),
         )
 
 
-def test_psi_dependent_terms_reproduce_direct_likelihood(likelihood):
-    """log L from psi-dependent terms at off-grid (phase, psi) equals the direct
+def test_terms_reproduce_direct_likelihood_at_off_grid_psi(likelihood):
+    """log L from the terms at off-grid (phase, psi) equals the direct
     likelihood, so both s(psi) = cos2psi s(0) + sin2psi s(pi/4) and the mode algebra
     hold through the real projection pipeline."""
     phases = np.array([0.37, 2.9, 5.81])
     psis = np.array([0.1, 1.2, 2.8])
-    terms = likelihood.phase_grid_terms(THETA, psi_dependent=True)
+    terms = likelihood.phase_grid_terms(THETA)
     grid = likelihood.log_likelihood_from_phase_grid_terms(terms, phases, psis)
     direct = [
         [likelihood.log_likelihood({**THETA, "phase": p, "psi": s}) for s in psis]
@@ -170,23 +177,11 @@ def test_psi_dependent_terms_reproduce_direct_likelihood(likelihood):
     np.testing.assert_allclose(grid, direct, rtol=1e-9)
 
 
-def test_psi_dependent_terms_reduce_to_phase_only(likelihood):
-    """At the sample's psi, the K = 2 grid equals the K = 1 phase grid."""
-    phases = np.linspace(0, 2 * np.pi, 17, endpoint=False)
-    theta = {**THETA, "psi": 0.7}
-    grid = likelihood.log_likelihood_from_phase_grid_terms(
-        likelihood.phase_grid_terms(theta, psi_dependent=True), phases, np.array([0.7])
-    )[:, 0]
-    np.testing.assert_allclose(
-        grid, likelihood.log_likelihood_phase_grid(theta, phases=phases), rtol=1e-9
-    )
-
-
-def test_stacked_psi_dependent_terms_at_one_point_per_sample(likelihood):
-    """Stacked K = 2 terms evaluate at one (phase, psi) per sample, shape (N, 1, 1).
+def test_stacked_terms_at_one_point_per_sample(likelihood):
+    """Stacked terms evaluate at one (phase, psi) per sample, shape (N, 1, 1).
     This is what the synthetic phase+psi cache uses."""
     thetas = [{**THETA, "mass_1": m1} for m1 in (45.0, 50.0)]
-    per = [likelihood.phase_grid_terms(t, psi_dependent=True) for t in thetas]
+    per = [likelihood.phase_grid_terms(t) for t in thetas]
     terms = {
         "m_vals": per[0]["m_vals"],
         "deltas": per[0]["deltas"],
@@ -210,20 +205,7 @@ def test_stacked_psi_dependent_terms_at_one_point_per_sample(likelihood):
     assert grid.shape == (2, 5, 3)
 
 
-def test_psis_must_match_basis(likelihood):
-    """psis is required for psi-dependent terms and rejected otherwise."""
-    phases = np.array([0.1])
-    with pytest.raises(ValueError):
-        likelihood.log_likelihood_from_phase_grid_terms(
-            likelihood.phase_grid_terms(THETA), phases, np.array([0.2])
-        )
-    with pytest.raises(ValueError):
-        likelihood.log_likelihood_from_phase_grid_terms(
-            likelihood.phase_grid_terms(THETA, psi_dependent=True), phases
-        )
-
-
-def test_psi_dependent_algebra_matches_brute_force():
+def test_phase_psi_algebra_matches_brute_force():
     """The (phase, psi) grid algebra, checked without a waveform model: terms built
     from random per-mode strains A_m (psi = 0) and B_m (psi = pi/4) and random data
     reproduce the brute-force log Zn + Re<d, mu> - <mu, mu> / 2 with

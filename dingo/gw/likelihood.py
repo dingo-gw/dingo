@@ -375,38 +375,35 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         if phases is None:
             phases = self.phase_grid
         terms = self.phase_grid_terms(theta)
-        return self.log_likelihood_from_phase_grid_terms(terms, phases)
+        return self.log_likelihood_from_phase_grid_terms(terms, phases, [theta["psi"]])[
+            :, 0
+        ]
 
-    def phase_grid_terms(self, theta: dict, psi_dependent: bool = False) -> dict:
+    def phase_grid_terms(self, theta: dict) -> dict:
         """
         Compute, from a single waveform evaluation at phase = 0, the inner products
-        from which the log likelihood follows at any phase, see
-        `log_likelihood_from_phase_grid_terms`.
+        from which the log likelihood follows at any phase and polarization angle,
+        see `log_likelihood_from_phase_grid_terms`.
 
-        The modes are projected onto the detectors at K polarization angles, the
-        basis. With `psi_dependent=False` the basis is the single projection at
-        theta["psi"] (K = 1). With `psi_dependent=True` it is the projections at
-        psi = 0 and psi = pi / 4 (K = 2), from which the signal at any psi follows
-        as cos(2 psi) mu(0) + sin(2 psi) mu(pi / 4), since psi enters only the
-        antenna patterns and every later projection step is linear.
+        The modes are projected onto the detectors at the basis angles psi = 0 and
+        psi = pi / 4 (b = 0, 1). Since psi enters only the antenna patterns and every
+        later projection step is linear, the signal at any psi is
+        cos(2 psi) mu(0) + sin(2 psi) mu(pi / 4).
 
         Parameters
         ----------
         theta: dict
-            BBH parameters. A phase entry is ignored, and so is psi if
-            `psi_dependent`.
-        psi_dependent: bool, default False
-            Project at the psi basis (0, pi / 4) instead of at theta["psi"].
+            BBH parameters. Phase and psi entries are ignored.
 
         Returns
         -------
         dict
             m_vals: (M,) the m-components of the signal;
-            kappa2_modes: (K, M) complex, (d, mu^b_m) per basis projection b and
+            kappa2_modes: (2, M) complex, (d, mu^b_m) per basis projection b and
                 component m;
-            rho2opt_const: (K, K) real, sum_m Re (mu^b_m, mu^c_m);
+            rho2opt_const: (2, 2) real, sum_m Re (mu^b_m, mu^c_m);
             deltas: (P,) the distinct mode differences n - m, for m < n;
-            rho2opt_crossterms: (K, K, P) complex, the sum over pairs with
+            rho2opt_crossterms: (2, 2, P) complex, the sum over pairs with
                 n - m = delta of (mu^b_m, mu^c_n) + (mu^c_m, mu^b_n).
         """
         # TODO: Implement for time marginalization
@@ -434,12 +431,8 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         # Step 1: Compute signal for phase = 0, separated into the m-contributions from
         # the individual modes, projected at each basis polarization angle.
         # mu[b][m][ifo] is the whitened strain of mode m at the b-th angle.
-        if psi_dependent:
-            signals = self.signal_m({**theta, "phase": 0}, psis=(0.0, np.pi / 4))
-        else:
-            signals = [self.signal_m({**theta, "phase": 0})]
+        signals = self.signal_m({**theta, "phase": 0}, (0.0, np.pi / 4))
         mu = [{m: pol["waveform"] for m, pol in signal.items()} for signal in signals]
-        K = len(mu)
 
         # Step 2: Precompute complex inner products (mu, mu) and (d, mu) for the
         # individual modes m (and basis pairs b, c).
@@ -477,14 +470,14 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         # The cross terms only depend on the mode difference delta = n - m, so we
         # accumulate them by delta. For m in -4..4 this collapses 36 pairs onto 8
         # distinct deltas, i.e. a 4.5x smaller exponential matrix in the evaluation.
-        crossterms_by_delta = defaultdict(lambda: np.zeros((K, K), dtype=complex))
+        crossterms_by_delta = defaultdict(lambda: np.zeros((2, 2), dtype=complex))
         for idx, m in enumerate(m_vals):
             for n in m_vals[idx + 1 :]:
                 pair = np.array(
                     [[overlap(mu_b[m], mu_c[n]) for mu_c in mu] for mu_b in mu]
                 )
                 # (m, n) and (n, m) contribute symmetrically: entry [b, c] collects
-                # (mu^b_m, mu^c_n) + (mu^c_m, mu^b_n), i.e. 2 (mu_m, mu_n) for K = 1.
+                # (mu^b_m, mu^c_n) + (mu^c_m, mu^b_n).
                 crossterms_by_delta[n - m] += pair + pair.T
         deltas = sorted(crossterms_by_delta)
 
@@ -511,14 +504,12 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         }
 
     def log_likelihood_from_phase_grid_terms(
-        self, terms: dict, phases: np.ndarray, psis: Optional[np.ndarray] = None
+        self, terms: dict, phases: np.ndarray, psis: np.ndarray
     ) -> np.ndarray:
         """
-        Evaluate the log likelihood at the given phases (and polarization angles)
+        Evaluate the log likelihood at the given phases and polarization angles
         from the terms computed by `phase_grid_terms`, without a waveform
-        evaluation. With basis weights w (w = [1] for the single projection at the
-        sample's psi, w = [cos 2 psi, sin 2 psi] for the (0, pi / 4) basis), per
-        phase ph:
+        evaluation. With basis weights w = [cos 2 psi, sin 2 psi], per phase ph:
 
             kappa2(ph)  = sum_b w_b sum_m (kappa2_modes[b, m] * exp(-i * m * ph)).real
             rho2opt(ph) = sum_{b, c} w_b w_c [rho2opt_const[b, c]
@@ -535,29 +526,19 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
             As returned by `phase_grid_terms`, optionally stacked.
         phases: np.ndarray
             (G,) phases, shared by all samples, or (N, G) phases per sample.
-        psis: np.ndarray, optional
-            (H,) polarization angles, shared, or (N, H) per sample. Required for
-            psi-dependent terms (K = 2) and not allowed otherwise.
+        psis: np.ndarray
+            (H,) polarization angles, shared, or (N, H) per sample.
 
         Returns
         -------
         np.ndarray
-            (G,) log likelihoods for unstacked terms, else (N, G). With psis, the
-            outer grid (G, H), else (N, G, H).
+            Log likelihoods on the outer (phase, psi) grid, of shape (G, H), or
+            (N, G, H) with a sample axis.
         """
         phases = np.asarray(phases)
-        K = terms["kappa2_modes"].shape[-2]
-        if (K == 2) != (psis is not None):
-            raise ValueError(
-                f"psis must be given exactly for psi-dependent terms (basis size "
-                f"{K}), got psis={psis}."
-            )
-        # Basis weights of shape (..., H, K).
-        if psis is None:
-            w = np.ones((1, 1))
-        else:
-            psis = np.asarray(psis)
-            w = np.stack([np.cos(2 * psis), np.sin(2 * psis)], axis=-1)
+        psis = np.asarray(psis)
+        # Basis weights of shape (..., H, K) with K = 2.
+        w = np.stack([np.cos(2 * psis), np.sin(2 * psis)], axis=-1)
         # Phasors exp(-i * order * ph) of shape (..., orders, G), contracted with the
         # coefficients of shape (..., K, orders) over the orders, leaving the basis
         # axes: (..., K, G) and (..., K, K, G).
@@ -566,13 +547,13 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         kappa2_b = (terms["kappa2_modes"] @ phasor_m).real
         crossterms = terms["rho2opt_crossterms"]
         rho2opt_bc = np.asarray(terms["rho2opt_const"])[..., None] + (
-            crossterms.reshape(*crossterms.shape[:-3], K * K, -1) @ phasor_delta
-        ).real.reshape(*kappa2_b.shape[:-2], K, K, -1)
+            crossterms.reshape(*crossterms.shape[:-3], 4, -1) @ phasor_delta
+        ).real.reshape(*kappa2_b.shape[:-2], 2, 2, -1)
         # Contract the basis axes with the weights.
         kappa2 = np.einsum("...bg,...hb->...gh", kappa2_b, w)
         rho2opt = np.einsum("...bcg,...hb,...hc->...gh", rho2opt_bc, w, w)
         log_likelihood = self.log_Zn + kappa2 - 0.5 * rho2opt
-        return log_likelihood[..., 0] if psis is None else log_likelihood
+        return log_likelihood
 
     def _log_likelihood_phase_marginalized(self, theta):
         """

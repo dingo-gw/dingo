@@ -242,7 +242,7 @@ class GWSignal(object):
     # namely storing ASDs from numpy arrays, from ASDDatasets, loading from files,
     # etc. For now this functionality is partially implemented here.
 
-    def signal_m(self, theta, psis=None):
+    def signal_m(self, theta, psis):
         """
         Compute the GW signal for parameters theta. Same as self.signal(theta) method,
         but it does not sum the contributions of the individual modes, and instead
@@ -258,15 +258,13 @@ class GWSignal(object):
         theta: dict
             Signal parameters. Includes intrinsic parameters to be passed to waveform
             generator, and extrinsic parameters for detector projection.
-        psis: sequence of float, optional
-            Polarization angles at which to project the modes, overriding
-            theta["psi"]. The waveform is generated once and projected once per
-            angle. psi only enters the antenna patterns, so this is how the phase
-            grid obtains its psi-dependent terms.
+        psis: sequence of float
+            Polarization angles at which to project the modes; theta["psi"] is
+            ignored. The waveform is generated once and projected once per angle.
 
         Returns
         -------
-        dict, or list of dict if psis is given (one per angle, in order)
+        list of dict, one per angle in psis
             keys:
                 waveform:
                     GW strain signal for each detector, with individual contributions
@@ -291,10 +289,8 @@ class GWSignal(object):
 
         # Step 2: project m-contributions to h_plus and h_cross onto detectors
         out = []
-        for psi in [None] if psis is None else psis:
-            extrinsic = (
-                theta_extrinsic if psi is None else {**theta_extrinsic, "psi": psi}
-            )
+        for psi in psis:
+            extrinsic = {**theta_extrinsic, "psi": psi}
             sample_out = {}
             for m, pol in pol_m.items():
                 sample = {
@@ -307,7 +303,7 @@ class GWSignal(object):
                 sample_out[m] = self.projection_transforms(sample)
             out.append(sample_out)
 
-        return out[0] if psis is None else out
+        return out
 
     @property
     def asd(self):

@@ -28,19 +28,18 @@ class _MockLikelihood:
         # (2, 2)-approx path: one complex overlap (d | h) per row.
         return np.array([complex(cm, 0.5) for cm in theta["chirp_mass"].to_numpy()])
 
-    def phase_grid_terms(self, theta, psi_dependent=False):
-        # exact path: a single m = 1 mode with (d | mu_1) = chirp_mass, so that
-        # log L(phase) = chirp_mass * cos(phase). With the psi basis, the second
-        # projection has (d | mu_1) = chirp_mass / 2, so that
-        # log L(phase, psi) = chirp_mass * cos(phase) * (cos 2psi + sin 2psi / 2).
-        K = 2 if psi_dependent else 1
-        kappa = complex(theta["chirp_mass"]) * np.array([1.0, 0.5])[:K]
+    def phase_grid_terms(self, theta):
+        # exact path: a single m = 1 mode with (d | mu_1) = chirp_mass at psi = 0 and
+        # chirp_mass / 2 at psi = pi / 4, so that
+        # log L(phase, psi) = chirp_mass * cos(phase) * (cos 2psi + sin 2psi / 2),
+        # and log L(phase) = chirp_mass * cos(phase) at psi = 0.
+        kappa = complex(theta["chirp_mass"]) * np.array([1.0, 0.5])
         return {
             "m_vals": np.array([1]),
             "kappa2_modes": kappa[:, None],
-            "rho2opt_const": np.zeros((K, K)),
+            "rho2opt_const": np.zeros((2, 2)),
             "deltas": np.array([], dtype=int),
-            "rho2opt_crossterms": np.zeros((K, K, 0), dtype=complex),
+            "rho2opt_crossterms": np.zeros((2, 2, 0), dtype=complex),
         }
 
     log_Zn = 0.0
@@ -60,7 +59,10 @@ class _MockContext:
 
 
 def _given(n=5):
-    return {"chirp_mass": torch.linspace(20.0, 40.0, n, dtype=torch.float64)}
+    return {
+        "chirp_mass": torch.linspace(20.0, 40.0, n, dtype=torch.float64),
+        "psi": torch.zeros(n, dtype=torch.float64),
+    }
 
 
 def _seed(s=0):
@@ -210,9 +212,11 @@ def test_cached_log_likelihood_is_chain_output():
     from dingo.core.inference.composer import ChainComposer
     from dingo.core.inference.steps import SampleTableFactor
 
-    table = SampleTableFactor({"chirp_mass": np.linspace(20.0, 40.0, 4)})
+    table = SampleTableFactor(
+        {"chirp_mass": np.linspace(20.0, 40.0, 4), "psi": np.zeros(4)}
+    )
     factor = SyntheticPhaseFactor(
-        conditioning=["chirp_mass"],
+        conditioning=["chirp_mass", "psi"],
         n_grid_phase=33,
         approximation_22_mode=False,
         cache_log_likelihood=True,
@@ -221,7 +225,7 @@ def test_cached_log_likelihood_is_chain_output():
     context = _MockContext()
     context.device = None
     out, _ = ChainComposer([table, factor]).sample_and_log_prob(1, context)
-    assert set(out) == {"chirp_mass", "phase", "log_likelihood"}
+    assert set(out) == {"chirp_mass", "psi", "phase", "log_likelihood"}
 
 
 def test_cached_log_likelihood_requires_dft_phase_decomposition():
