@@ -199,12 +199,14 @@ def test_importance_sample_requires_log_prob():
         result.importance_sample()
 
 
-def test_sample_synthetic_phase_adds_phase_column():
+def test_synthetic_phase_adds_phase_column():
     result = make_gw_result(drop_phase=True)
     assert "phase" not in result.samples.columns
     log_prob_before = result.samples["log_prob"].to_numpy().copy()
 
-    result.sample_synthetic_phase({"n_grid": 16, "approximation_22_mode": True})
+    result.sample_proposal_extensions(
+        synthetic_phase_kwargs={"n_grid": 16, "approximation_22_mode": True}
+    )
 
     assert "phase" in result.samples.columns
     phase = result.samples["phase"].to_numpy()
@@ -213,12 +215,12 @@ def test_sample_synthetic_phase_adds_phase_column():
     assert not np.array_equal(result.samples["log_prob"].to_numpy(), log_prob_before)
 
 
-def test_sample_synthetic_phase_requires_uniform_phase_prior():
+def test_synthetic_phase_requires_uniform_phase_prior():
     # When `phase` is in the samples, the phase prior is not split off (it is None),
     # so synthetic phase sampling is not applicable and must raise.
     result = make_gw_result(drop_phase=False)
     with pytest.raises(ValueError, match="[Pp]hase prior"):
-        result.sample_synthetic_phase({"n_grid": 16})
+        result.sample_proposal_extensions(synthetic_phase_kwargs={"n_grid": 16})
 
 
 # ---------------------------------------------------------------------------
@@ -361,7 +363,7 @@ def test_update_prior_round_trips_through_file(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# sample_calibration_parameters
+# calibration sampling (sample_proposal_extensions)
 # ---------------------------------------------------------------------------
 
 
@@ -400,19 +402,18 @@ def _calibration_kwargs(tmp_path, correction_type="data", num_nodes=5):
     }
 
 
-def test_sample_calibration_parameters_adds_recalib_columns(tmp_path):
+def test_calibration_sampling_adds_recalib_columns(tmp_path):
     result = make_gw_result()
     log_prob_before = result.samples["log_prob"].to_numpy().copy()
     n_nodes = 5
 
-    result.sample_calibration_parameters(
-        _calibration_kwargs(tmp_path, num_nodes=n_nodes)
+    result.sample_proposal_extensions(
+        calibration_sampling_kwargs=_calibration_kwargs(tmp_path, num_nodes=n_nodes)
     )
 
-    # Amplitude + phase nodes per detector (the frequency nodes are delta functions
-    # and are dropped before sampling).
+    # Amplitude, phase and (fixed) frequency per node and detector.
     recalib_cols = [c for c in result.samples.columns if c.startswith("recalib_")]
-    assert len(recalib_cols) == 2 * n_nodes * len(DETECTORS)
+    assert len(recalib_cols) == 3 * n_nodes * len(DETECTORS)
     # The calibration prior log_prob is folded into the proposal log_prob.
     assert not np.array_equal(result.samples["log_prob"].to_numpy(), log_prob_before)
     # The calibration priors are recorded for persistence and added to the prior.
@@ -420,28 +421,32 @@ def test_sample_calibration_parameters_adds_recalib_columns(tmp_path):
     assert any("recalib" in key for key in result.prior.keys())
 
 
-def test_sample_calibration_parameters_invalid_correction_type():
+def test_calibration_sampling_invalid_correction_type():
     result = make_gw_result()
     # Parsed before any envelope file is read, so no files are needed.
     with pytest.raises(ValueError, match="not understood"):
-        result.sample_calibration_parameters({"correction_type": "bogus"})
+        result.sample_proposal_extensions(
+            calibration_sampling_kwargs={"correction_type": "bogus"}
+        )
 
 
 @pytest.mark.parametrize(
     "correction_type",
     ["data", "template", {"H1": "data", "L1": "template"}, None],
 )
-def test_sample_calibration_parameters_correction_type_variants(
+def test_calibration_sampling_correction_type_variants(
     tmp_path, correction_type
 ):
     result = make_gw_result()
-    result.sample_calibration_parameters(
-        _calibration_kwargs(tmp_path, correction_type=correction_type)
+    result.sample_proposal_extensions(
+        calibration_sampling_kwargs=_calibration_kwargs(
+            tmp_path, correction_type=correction_type
+        )
     )
     assert any(c.startswith("recalib_") for c in result.samples.columns)
 
 
-def test_sample_calibration_parameters_nodes_span_event_range(tmp_path):
+def test_calibration_sampling_nodes_span_event_range(tmp_path):
     # The calibration nodes follow the event's per-detector analysis range (the
     # range the likelihood masks its ASDs to), as Bilby's do, not the domain bounds.
     from bilby.gw.prior import CalibrationPriorDict
@@ -453,7 +458,7 @@ def test_sample_calibration_parameters_nodes_span_event_range(tmp_path):
     result = make_gw_result(event_metadata=event_metadata)
     n_nodes = 5
     kwargs = _calibration_kwargs(tmp_path, num_nodes=n_nodes)
-    result.sample_calibration_parameters(kwargs)
+    result.sample_proposal_extensions(calibration_sampling_kwargs=kwargs)
     for ifo in DETECTORS:
         expected = CalibrationPriorDict.from_envelope_file(
             kwargs["calibration_envelope"][ifo],
@@ -468,6 +473,63 @@ def test_sample_calibration_parameters_nodes_span_event_range(tmp_path):
                 name = f"recalib_{ifo}_{quantity}_{i}"
                 assert result.prior[name].mu == expected[name].mu
                 assert result.prior[name].sigma == expected[name].sigma
+
+
+def test_likelihood_checks_the_recorded_calibration_nodes(tmp_path):
+    # The node frequencies (fixed parameters of the prior) survive a round trip and
+    # match the likelihood's frequency range; a mismatch raises.
+    event_metadata = {"minimum_frequency": {"H1": 30.0, "L1": 25.0}}
+    result = make_gw_result(event_metadata=event_metadata)
+    result.sample_proposal_extensions(
+        calibration_sampling_kwargs=_calibration_kwargs(tmp_path)
+    )
+    file_name = str(tmp_path / "result.hdf5")
+    result.to_file(file_name=file_name)
+    reloaded = Result(file_name=file_name)
+    reloaded._build_likelihood()
+
+    reloaded.prior["recalib_H1_frequency_0"].peak *= 1.01
+    with pytest.raises(ValueError, match="calibration nodes for H1"):
+        reloaded._build_likelihood()
+
+
+def test_likelihood_skips_the_node_check_for_results_without_nodes(tmp_path):
+    # Results from earlier Dingo versions stored no node frequencies in the prior.
+    result = make_gw_result()
+    result.sample_proposal_extensions(
+        calibration_sampling_kwargs=_calibration_kwargs(tmp_path)
+    )
+    prior_update = result.importance_sampling_metadata["prior_update"]
+    for key in [k for k in prior_update if "_frequency_" in k]:
+        del prior_update[key]
+    file_name = str(tmp_path / "result.hdf5")
+    result.to_file(file_name=file_name)
+    reloaded = Result(file_name=file_name)
+    assert "recalib_H1_frequency_0" not in reloaded.prior
+    reloaded._build_likelihood()
+
+
+def test_update_prior_keeps_the_calibration_priors(tmp_path):
+    # update_prior merges into the recorded prior_update, so the calibration priors
+    # stay in the target prior after a reload. It also leaves out the fixed node
+    # frequencies when evaluating the prior, so the evidence stays consistent.
+    result = make_gw_result()
+    result.sample_proposal_extensions(
+        calibration_sampling_kwargs=_calibration_kwargs(tmp_path)
+    )
+    result.importance_sample()
+    log_evidence = result.log_evidence
+    recorded = dict(result.importance_sampling_metadata["prior_update"])
+    result.update_prior(dict(_LD_PRIOR_UPDATE))
+    assert abs(result.log_evidence - log_evidence) < 10
+    assert result.importance_sampling_metadata["prior_update"] == {
+        **recorded,
+        **_LD_PRIOR_UPDATE,
+    }
+    file_name = str(tmp_path / "result.hdf5")
+    result.to_file(file_name=file_name)
+    reloaded = Result(file_name=file_name)
+    assert all(key in reloaded.prior for key in recorded)
 
 
 def test_reset_event_with_wider_data_gives_the_likelihood_the_recorded_grid():
@@ -521,3 +583,72 @@ def test_old_schema_settings_are_converted_on_load():
     assert tokenization == {"num_tokens_per_block": 8, "normalize_position": False}
     waveform, position, token_mask = result.sampler_context.prepared_data()
     assert position.shape == (2 * 8, 3)
+
+
+def test_calibration_and_synthetic_phase_run_as_one_chain(tmp_path):
+    # Calibration is drawn first in the chain, so the synthetic phase is conditioned
+    # on it: log_prob = stored + calibration prior + log q(phase | theta, recalib).
+    from dingo.gw.inference.steps import SyntheticPhaseFactor
+    import torch
+
+    bilby_random.seed(0)
+    np.random.seed(0)
+    result = make_gw_result(n=6, drop_phase=True)
+    # One sample outside the prior, which is skipped and carries zero weight.
+    result.samples.loc[5, "theta_jn"] = -1.0
+    log_prob_before = result.samples["log_prob"].to_numpy().copy()
+    theta_keys = [k for k, v in result.prior.items() if not isinstance(v, Constraint)]
+
+    kwargs = {"n_grid": 64, "approximation_22_mode": True}
+    result.sample_proposal_extensions(
+        calibration_sampling_kwargs=_calibration_kwargs(tmp_path),
+        synthetic_phase_kwargs=kwargs,
+    )
+
+    recalib = [c for c in result.samples.columns if c.startswith("recalib_")]
+    assert recalib and "phase" in result.prior and result.phase_prior is None
+    assert all(c in result.prior for c in recalib)
+
+    inside = result.samples.iloc[:5]
+    assert np.isnan(result.samples.loc[5, "log_prob"])
+    assert (result.samples.loc[5, recalib + ["phase"]] == 0.0).all()
+
+    # The fixed node frequencies contribute nothing to the proposal density.
+    calibration_prior = PriorDict({k: result.prior[k] for k in recalib})
+    sampled = calibration_prior.non_fixed_keys
+    log_q_calibration = calibration_prior.ln_prob(inside[sampled], axis=0)
+    factor = SyntheticPhaseFactor(
+        conditioning=theta_keys + recalib, n_grid=64, approximation_22_mode=True
+    )
+    given = {k: torch.as_tensor(inside[k].to_numpy()) for k in theta_keys + recalib}
+    log_q_phase = factor.log_prob(
+        {"phase": torch.as_tensor(inside["phase"].to_numpy())},
+        result.sampler_context,
+        given,
+    ).numpy()
+    np.testing.assert_allclose(
+        inside["log_prob"].to_numpy(),
+        log_prob_before[:5] + log_q_calibration + log_q_phase,
+        rtol=1e-5,
+    )
+
+    # The phase distribution depends on the drawn calibration.
+    given_uncalibrated = {k: given[k] for k in theta_keys}
+    log_q_phase_uncalibrated = (
+        SyntheticPhaseFactor(
+            conditioning=theta_keys, n_grid=64, approximation_22_mode=True
+        )
+        .log_prob(
+            {"phase": torch.as_tensor(inside["phase"].to_numpy())},
+            result.sampler_context,
+            given_uncalibrated,
+        )
+        .numpy()
+    )
+    assert not np.allclose(log_q_phase, log_q_phase_uncalibrated)
+
+    # Importance sampling gives the out-of-prior sample zero weight.
+    result.importance_sample()
+    weights = result.samples["weights"].to_numpy()
+    assert np.isfinite(result.log_evidence)
+    assert weights[5] == 0.0 and np.all(weights[:5] > 0)
