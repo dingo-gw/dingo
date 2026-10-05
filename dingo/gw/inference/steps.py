@@ -49,10 +49,9 @@ def _to_numpy(v) -> np.ndarray:
 
 
 def _stacked_phase_grid_terms(likelihood, theta, num_processes):
-    """The phase grid terms of every row of `theta` (one waveform evaluation each,
-    in parallel), stacked along a leading batch axis for one vectorized grid
-    evaluation, see `StationaryGaussianGWLikelihood.log_likelihood_from_phase_grid_terms`.
-    """
+    """Compute `likelihood.phase_grid_terms` for each row of `theta`, in parallel, and
+    stack the per-sample arrays along a leading axis for a single call to
+    `log_likelihood_from_phase_grid_terms`."""
     terms_per_sample = apply_func_with_multiprocessing(
         likelihood.phase_grid_terms,
         theta,
@@ -70,9 +69,9 @@ def _stacked_phase_grid_terms(likelihood, theta, num_processes):
 
 
 def _floored_density(log_density, uniform_weight):
-    """Exponentiate a per-row grid of log densities (shifted by the row max) and add
-    a uniform floor of relative weight `uniform_weight`, so that the proposal is
-    positive everywhere and importance sampling stays finite."""
+    """Exponentiate log densities, rescaled to a maximum of 1 along the last axis, and
+    add a constant floor of `uniform_weight` times the mean. The result is
+    unnormalized and strictly positive, so importance weights stay finite."""
     density = np.exp(log_density - np.amax(log_density, axis=-1, keepdims=True))
     return density + density.mean(axis=-1, keepdims=True) * uniform_weight
 
@@ -259,26 +258,31 @@ class SyntheticPhaseFactor(Factor):
 
 class SyntheticPhasePsiFactor(Factor):
     """
-    Reconstruct the coalescence phase and the polarization angle for a network that
-    infers neither: the factor `q(phase, psi | theta_rest, d)`, built from the
+    Reconstruct the phase and polarization angle for a network trained with both
+    marginalized: the factor `q(phase, psi | theta_rest, d)`, built from the
     likelihood on a (phase, psi) grid.
 
-    As for `SyntheticPhaseFactor` in exact mode, a single waveform evaluation per
-    sample suffices: the modes transform as `exp(-i m phase)`, and psi enters only
-    the antenna patterns, so the strain at any psi is `cos(2 psi) mu(0) + sin(2 psi)
-    mu(pi / 4)`. From the resulting mode terms, `log L` follows at any (phase, psi)
-    without further waveform calls. There is no (2, 2)-mode approximation here, and
-    the waveform generator's `spin_conversion_phase` must be 0.
+    One waveform evaluation per sample suffices. The m-components of the signal,
+    generated at phase = 0, transform as `exp(-i m phase)`, and psi enters only
+    through the antenna patterns, so the detector strain at any psi is
 
-    The draw factorizes as `q(phase) q(psi | phase)`. `q(phase)` is the psi-marginal
-    of the grid (the samples are processed in chunks, so that the full
-    `N x n_grid_phase x n_grid_psi` grid is never held at once). `q(psi | phase)` is then
-    evaluated on the psi grid exactly at the drawn phase, not interpolated between
-    grid rows. Both factors get a uniform floor (weight `uniform_weight`) and are
-    sampled from the interpolated grid distribution; `log_prob` rebuilds them the
-    same way. As for the phase factor, `cache_log_likelihood=True` also emits the
-    exact log likelihood at the drawn (phase, psi) as the annotation column
-    `log_likelihood`.
+        mu(psi) = cos(2 psi) mu(0) + sin(2 psi) mu(pi / 4).
+
+    The inner products of the two projections give `log L` at any (phase, psi), see
+    `StationaryGaussianGWLikelihood.phase_grid_terms`. The modes are summed exactly
+    (there is no (2, 2)-mode option), which requires the waveform generator's
+    `spin_conversion_phase = 0`.
+
+    The proposal is `q(phase) q(psi | phase)`. `q(phase)` is the likelihood grid
+    summed over psi, evaluated in chunks of rows sized by `max_grid_elements`.
+    `q(psi | phase)` is the likelihood on the psi grid at the drawn phase itself,
+    not at a phase grid point. As in `SyntheticPhaseFactor`, each is exponentiated,
+    given a uniform floor of weight `uniform_weight`, and sampled on the grid as a
+    piecewise-constant density.
+
+    With `cache_log_likelihood=True` the factor also emits `log L` at the drawn
+    (phase, psi), evaluated exactly from the same inner products, as the
+    annotation column `log_likelihood`.
     """
 
     # Upper bound on the (chunk, n_grid_phase, n_grid_psi) grid held at once, in elements.
@@ -302,21 +306,21 @@ class SyntheticPhasePsiFactor(Factor):
             The physical parameters the likelihood needs to generate the waveform
             (everything the chain has produced except `phase` and `psi`).
         n_grid_phase : int, default 512
-            Number of phase grid points on `[0, 2 pi)`.
+            Number of phase grid points on `[0, 2 pi]`, endpoints included.
         n_grid_psi : int, default 128
-            Number of psi grid points on `[0, pi)`. The grid only shapes the proposal
-            (importance sampling is unbiased for any grid), but it should resolve
-            the likelihood peak, whose width in either angle is about 1 / SNR.
+            Number of psi grid points on `[0, pi]`, endpoints included.
         uniform_weight : float, default 0.01
-            Weight of the uniform floor added to each of the two grid distributions.
+            Weight of the uniform floor added to `q(phase)` and to `q(psi | phase)`.
         num_processes : int, default 1
-            Parallel processes for the per-sample likelihood terms and the draws.
+            Parallel processes for the per-sample waveform evaluations and the
+            interpolated draws.
         use_base_domain : bool, default False
             For a multibanded model, evaluate the likelihood on the undecimated base
             domain (passed on to `SamplerContext.likelihood`).
         wfg_updates : dict, optional
             Overrides for the waveform generator settings stored with the network,
-            e.g. `use_dft_phase_decomposition`.
+            e.g. `use_dft_phase_decomposition` (passed on to
+            `SamplerContext.likelihood`).
         cache_log_likelihood : bool, default False
             Also emit the log likelihood at the drawn (phase, psi) as the column
             `log_likelihood`, for reuse by importance sampling.
@@ -338,8 +342,10 @@ class SyntheticPhasePsiFactor(Factor):
         return self.parameters + self.annotations
 
     def sample_and_log_prob(self, num_samples, context, given=None):
-        """Draw one (phase, psi) per `theta_rest` row (`num_samples` must be 1); return
-        the draws and their proposal log-prob `log q(phase, psi | theta_rest, d)`."""
+        """Draw one (phase, psi) per row of `given` (`num_samples` must be 1): phase
+        from `q(phase)`, then psi from `q(psi | phase)` at the drawn phase. The log
+        probability is `log q(phase) + log q(psi | phase)`. See
+        `Factor.sample_and_log_prob`."""
         if num_samples != 1:
             raise ValueError(
                 "Synthetic phase and psi are 1:1; draw one pair per sample "
@@ -371,8 +377,8 @@ class SyntheticPhasePsiFactor(Factor):
         return samples, torch.as_tensor(log_prob_phase + log_prob_psi, device=device)
 
     def log_prob(self, theta_i, context, given=None):
-        """Evaluate `log q(phase, psi | theta_rest, d)` at the given angles (re-plug /
-        IS), with the same factorization as the draw."""
+        """Evaluate `log q(phase) + log q(psi | phase)` at the given angles, rebuilding
+        both grid distributions from `given`. See `Factor.log_prob`."""
         reference = next(iter(given.values()))
         device = reference.device if torch.is_tensor(reference) else None
         phase, psi = _to_numpy(theta_i["phase"]), _to_numpy(theta_i["psi"])
@@ -400,9 +406,9 @@ class SyntheticPhasePsiFactor(Factor):
         }
 
     def _phase_profile(self, given, context):
-        """The likelihood, the stacked psi-dependent mode terms of all samples, the
-        phase grid, and the floored psi-marginal phase distribution `q(phase)`, one
-        row per sample. The (phase, psi) grid is reduced over psi chunk by chunk."""
+        """Return the likelihood, the stacked phase grid terms of all rows of `given`,
+        the phase grid, and `q(phase)` on it: the likelihood on the (phase, psi) grid
+        summed over psi, then floored; unnormalized, shape (N, n_grid_phase)."""
         theta = pd.DataFrame({k: _to_numpy(v) for k, v in given.items()})
         likelihood = context.likelihood(
             use_base_domain=self.use_base_domain, wfg_updates=self.wfg_updates
@@ -437,8 +443,9 @@ class SyntheticPhasePsiFactor(Factor):
         )
 
     def _psi_profile(self, likelihood, terms, phase):
-        """The psi grid and the floored conditional `q(psi | phase)`, evaluated from
-        the terms exactly at the given phase of each sample (one row each)."""
+        """Return the psi grid and `q(psi | phase)` on it: the likelihood on the psi
+        grid at each row's `phase` (off the phase grid), floored; unnormalized, shape
+        (N, n_grid_psi)."""
         psis = np.linspace(0, np.pi, self.n_grid_psi)
         log_conditional = likelihood.log_likelihood_from_phase_grid_terms(
             terms, np.asarray(phase)[:, None], psis

@@ -381,29 +381,33 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
 
     def phase_grid_terms(self, theta: dict) -> dict:
         """
-        Compute, from a single waveform evaluation at phase = 0, the inner products
-        from which the log likelihood follows at any phase and polarization angle,
-        see `log_likelihood_from_phase_grid_terms`.
+        Compute, from one waveform evaluation at phase = 0, the inner products from
+        which `log_likelihood_from_phase_grid_terms` evaluates the log likelihood at
+        any phase and psi. Each m-component mu_m of the signal transforms as
+        exp(-i m phase). This requires the waveform generator's
+        `spin_conversion_phase = 0`, and no phase or time marginalization.
 
-        The modes are projected onto the detectors at the basis angles psi = 0 and
-        psi = pi / 4 (b = 0, 1). Since psi enters only the antenna patterns and every
-        later projection step is linear, the signal at any psi is
-        cos(2 psi) mu(0) + sin(2 psi) mu(pi / 4).
+        The m-components are projected onto the detectors at the basis angles
+        psi = 0 and psi = pi / 4 (b = 0, 1). Since psi enters only through the
+        antenna patterns,
+
+            mu(psi) = cos(2 psi) mu(0) + sin(2 psi) mu(pi / 4).
 
         Parameters
         ----------
         theta: dict
-            BBH parameters. Phase and psi entries are ignored.
+            BBH parameters. The phase and psi are ignored.
 
         Returns
         -------
         dict
-            m_vals: (M,) the m-components of the signal;
-            kappa2_modes: (2, M) complex, (d, mu^b_m) per basis projection b and
-                component m;
+            With mu^b_m the whitened m-component at basis angle b, and
+            (x, y) = sum(x.conj() * y) over frequency bins and detectors:
+            m_vals: (M,) the values of m;
+            kappa2_modes: (2, M) complex, (d, mu^b_m);
             rho2opt_const: (2, 2) real, sum_m Re (mu^b_m, mu^c_m);
-            deltas: (P,) the distinct mode differences n - m, for m < n;
-            rho2opt_crossterms: (2, 2, P) complex, the sum over pairs with
+            deltas: (P,) the distinct differences n - m > 0;
+            rho2opt_crossterms: (2, 2, P) complex, the sum over m < n with
                 n - m = delta of (mu^b_m, mu^c_n) + (mu^c_m, mu^b_n).
         """
         # TODO: Implement for time marginalization
@@ -507,14 +511,14 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         self, terms: dict, phases: np.ndarray, psis: np.ndarray
     ) -> np.ndarray:
         """
-        Evaluate the log likelihood at the given phases and polarization angles
-        from the terms computed by `phase_grid_terms`, without a waveform
-        evaluation. With basis weights w = [cos 2 psi, sin 2 psi], per phase ph:
+        Evaluate the log likelihood on a grid of phases and polarization angles from
+        the output of `phase_grid_terms`, without a waveform evaluation. With basis
+        weights w = [cos 2 psi, sin 2 psi],
 
-            kappa2(ph)  = sum_b w_b sum_m (kappa2_modes[b, m] * exp(-i * m * ph)).real
-            rho2opt(ph) = sum_{b, c} w_b w_c [rho2opt_const[b, c]
-                + sum_delta (rho2opt_crossterms[b, c, delta] * exp(-i * delta * ph)).real]
-            log L(ph)   = log_Zn + kappa2(ph) - rho2opt(ph) / 2
+            kappa2  = sum_b w_b Re sum_m kappa2_modes[b, m] exp(-i m phase)
+            rho2opt = sum_{b, c} w_b w_c (rho2opt_const[b, c]
+                + Re sum_delta rho2opt_crossterms[b, c, delta] exp(-i delta phase))
+            log L   = log_Zn + kappa2 - rho2opt / 2
 
         The terms of several samples can be evaluated at once by stacking
         `kappa2_modes`, `rho2opt_crossterms` and `rho2opt_const` along a leading
@@ -532,8 +536,8 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         Returns
         -------
         np.ndarray
-            Log likelihoods on the outer (phase, psi) grid, of shape (G, H), or
-            (N, G, H) with a sample axis.
+            Log likelihoods over all (phase, psi) pairs, of shape (G, H), or
+            (N, G, H) with a sample axis in the terms or the angles.
         """
         phases = np.asarray(phases)
         psis = np.asarray(psis)
