@@ -332,6 +332,11 @@ class Result(CoreResult):
             time_marginalization_kwargs["t_upper"] = self.geocent_time_prior.maximum
 
         if phase_marginalization_kwargs is not None:
+            if self.psi_prior is not None:
+                raise ValueError(
+                    "Phase marginalization cannot replace synthetic psi; use "
+                    "synthetic_parameters."
+                )
             # check that phase prior is uniform [0, 2pi)
             if not (
                 isinstance(self.phase_prior, Uniform)
@@ -651,6 +656,10 @@ class Result(CoreResult):
             raise ValueError(
                 "Synthetic phase requires a sampler context; this result does not "
                 "carry full model metadata."
+            )
+        if self.psi_prior is not None and self.phase_prior is None:
+            raise ValueError(
+                "Synthetic psi requires a network that marginalizes the phase as well."
             )
         if not (
             isinstance(self.phase_prior, Uniform)

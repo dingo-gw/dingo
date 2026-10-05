@@ -366,6 +366,20 @@ def test_psi_prior_split_off_when_samples_lack_psi():
     assert make_gw_result(drop_phase=True).psi_prior is None
 
 
+def test_synthetic_psi_requires_marginalized_phase():
+    # A network that infers the phase but not psi: recovering psi alone is not
+    # supported, and the error says so rather than blaming the phase prior.
+    result = make_gw_result(drop_psi=True)
+    with pytest.raises(ValueError, match="marginalizes the phase as well"):
+        result.sample_proposal_extensions(synthetic_parameters_kwargs={})
+
+
+def test_phase_marginalization_cannot_replace_synthetic_psi():
+    result = make_gw_result(drop_phase=True, drop_psi=True)
+    with pytest.raises(ValueError, match="cannot replace synthetic psi"):
+        result.importance_sample(phase_marginalization_kwargs={})
+
+
 def test_update_prior_routes_psi_to_split_off_prior():
     result = make_gw_result(drop_phase=True, drop_psi=True)
     result.update_prior(
