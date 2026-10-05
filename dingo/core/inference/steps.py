@@ -624,6 +624,7 @@ class Reparametrization(ABC):
     inputs: list[str]
     conditioning: list[str]
     draws = False
+    annotations: list[str] = []
 
     @property
     def produces(self) -> list[str]:
@@ -866,16 +867,19 @@ class Step(Protocol):
         counts, or is run once (a point mass, a sample table, a one-to-one
         transform).
     produces : list[str]
-        All columns emitted: `parameters`, plus any annotation columns (kept in the
-        output for importance sampling, such as a `TargetCorrection`'s or a cached
-        log likelihood) and side channels (intermediates for later steps, dropped
-        from the output).
+        All columns emitted: `parameters`, plus `annotations` and side channels
+        (intermediates for later steps, dropped from the output).
+    annotations : list[str]
+        Emitted columns beyond `parameters` that are kept in the output for
+        importance sampling, such as a `TargetCorrection`'s or a cached log
+        likelihood.
     """
 
     parameters: list[str]
     conditioning: list[str]
     draws: bool
     produces: list[str]
+    annotations: list[str]
 
     def sample_and_log_prob(
         self,

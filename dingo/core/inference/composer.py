@@ -275,7 +275,7 @@ class ChainComposer:
         parameters = {p for step in self.steps for p in step.parameters}
         for step in self.steps:
             for c in step.produces:
-                if c not in parameters and c not in getattr(step, "annotations", []):
+                if c not in parameters and c not in step.annotations:
                     samples.pop(c, None)
         return samples, total
 
@@ -379,6 +379,7 @@ class GibbsBlock:
     """
 
     draws = True
+    annotations: list[str] = []
 
     @property
     def produces(self) -> list[str]:
