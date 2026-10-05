@@ -35,8 +35,13 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
+      # pyseobnr (for the SEOBNRv5PHM tests) depends on pygsl_lite, which builds
+      # from source against GSL.
+      - name: Install GSL
+        run: sudo apt-get update && sudo apt-get install -y libgsl-dev
+
       - name: Install the project
-        run: uv sync --extra dev
+        run: uv sync --extra dev --extra pyseobnr
 
       - name: Run Pytest
         run: |

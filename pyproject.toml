@@ -88,7 +88,7 @@ dev = [
     "sphinxcontrib-bibtex",
 ]
 wandb = ["wandb"]
-pyseobnr = ["pyseobnr"]
+pyseobnr = ["pyseobnr>=0.3.7"]
 
 [dependency-groups]
 dev = [

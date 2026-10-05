@@ -2,10 +2,12 @@
 Tests for StationaryGaussianGWLikelihood.log_likelihood_phase_grid().
 """
 
+import importlib.util
+
 import numpy as np
 import pytest
 
-from dingo.gw.domains import UniformFrequencyDomain
+from dingo.gw.domains import MultibandedFrequencyDomain, UniformFrequencyDomain
 from dingo.gw.likelihood import StationaryGaussianGWLikelihood, inner_product
 from dingo.gw.waveform_generator import sum_contributions_m
 
@@ -28,9 +30,31 @@ THETA = {
 }
 
 
-@pytest.fixture
-def likelihood():
+# The cached-vs-direct comparison runs per decomposition path: the DFT phase
+# decomposition of a LAL model on uniform and multibanded domains, and of
+# SEOBNRv5PHM (needs pyseobnr >= 0.3.7).
+@pytest.fixture(
+    params=[
+        "IMRPhenomXPHM-uniform",
+        "IMRPhenomXPHM-multibanded",
+        pytest.param(
+            "SEOBNRv5PHM-uniform",
+            marks=pytest.mark.skipif(
+                importlib.util.find_spec("pyseobnr") is None,
+                reason="pyseobnr is not installed",
+            ),
+        ),
+    ]
+)
+def likelihood(request):
+    approximant, kind = request.param.split("-")
     domain = UniformFrequencyDomain(f_min=20.0, f_max=512.0, delta_f=1 / 4.0)
+    if kind == "multibanded":
+        domain = MultibandedFrequencyDomain(
+            nodes=[20.0, 40.0, 80.0, 512.0],
+            delta_f_initial=1 / 4.0,
+            base_domain=domain.domain_dict,
+        )
 
     # Noise realisation as data, flat ASD. As elsewhere in the test suite, values
     # below f_min are zeroed (data) and set to 1 (ASD).
@@ -41,19 +65,24 @@ def likelihood():
         waveform[ifo] = np.where(domain.frequency_mask, d, 0.0)
         asds[ifo] = np.where(domain.frequency_mask, 1e-23, 1.0)
 
-    return StationaryGaussianGWLikelihood(
-        wfg_kwargs={
-            "approximant": "IMRPhenomXPHM",
-            "f_ref": 20.0,
-            # Required by the phase grid: the cartesian spins must not be
-            # rederived at each phase.
-            "spin_conversion_phase": 0.0,
-        },
+    wfg_kwargs = {
+        "approximant": approximant,
+        "f_ref": 20.0,
+        # Required by the phase grid: the cartesian spins must not be
+        # rederived at each phase.
+        "spin_conversion_phase": 0.0,
+    }
+    if approximant == "SEOBNRv5PHM":
+        wfg_kwargs.update(new_interface=True, f_start=20.0)
+    likelihood = StationaryGaussianGWLikelihood(
+        wfg_kwargs=wfg_kwargs,
         wfg_domain=domain,
         data_domain=domain,
         event_data={"waveform": waveform, "asds": asds},
         t_ref=1126259462.4,
     )
+    assert likelihood.waveform_generator.uses_dft_phase_decomposition
+    return likelihood
 
 
 def test_phase_grid_matches_direct_evaluation(likelihood):
@@ -110,12 +139,16 @@ def test_terms_reproduce_direct_likelihood_at_off_grid_phase(likelihood):
         for i in range(5)
     }
     phases = np.array([0.37, 2.9, 5.81])
+    # The LAL models agree to round-off. For SEOBNRv5PHM, pyseobnr's multi-phase and
+    # single-phase evaluations differ slightly (measured ~1e-5 nats).
+    approximant = likelihood.waveform_generator.approximant_str
+    atol = 1e-4 if approximant == "SEOBNRv5PHM" else 0.0
     for extra in ({}, calibration):
         theta = {**THETA, **extra}
         terms = likelihood.phase_grid_terms(theta)
         from_terms = likelihood.log_likelihood_from_phase_grid_terms(terms, phases)
         direct = [likelihood.log_likelihood({**theta, "phase": p}) for p in phases]
-        np.testing.assert_allclose(from_terms, direct, rtol=1e-9)
+        np.testing.assert_allclose(from_terms, direct, rtol=1e-9, atol=atol)
     # The calibration curve changes the likelihood.
     assert not np.allclose(
         from_terms,
