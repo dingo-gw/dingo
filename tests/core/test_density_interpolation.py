@@ -9,8 +9,8 @@ from dingo.core.density.interpolation import (
 
 
 # A uniform distribution on [0, W] discretized on a grid: density = 1/W, so the
-# (normalized) log prob at any interior point is -log(W). The Interped wrapper
-# normalizes internally, so the input `values` need not be normalized.
+# (normalized) log prob at any interior point is -log(W). The density is
+# normalized internally, so the input `values` need not be normalized.
 WIDTH = 2.0
 SAMPLE_POINTS = np.linspace(0.0, WIDTH, 500)
 UNIFORM_VALUES = np.ones_like(SAMPLE_POINTS)
@@ -28,7 +28,7 @@ def test_interpolated_sample_and_log_prob_in_range_and_consistent():
     np.random.seed(0)
     sample, log_prob = interpolated_sample_and_log_prob(SAMPLE_POINTS, UNIFORM_VALUES)
     assert 0.0 <= sample <= WIDTH
-    # Both calls build the same Interped from the same data, so the returned log_prob
+    # Both calls build the same density from the same data, so the returned log_prob
     # equals interpolated_log_prob at the drawn sample to floating-point precision.
     np.testing.assert_allclose(
         log_prob,
@@ -59,3 +59,18 @@ def test_interpolated_sample_and_log_prob_multi_shapes():
     assert samples.shape == (4,)
     assert log_probs.shape == (4,)
     assert np.all((samples >= 0.0) & (samples <= WIDTH))
+
+
+def test_samples_follow_the_evaluated_density():
+    """The draws come from the density that log_prob evaluates: for x ~ q on [0, 1],
+    E[1 / q(x)] = 1. bilby's Interped, which samples the piecewise-constant density
+    but evaluates the piecewise-linear one, gives about 1.08 on this coarse grid."""
+    from bilby.core.utils import random
+
+    random.seed(0)
+    x = np.linspace(0.0, 1.0, 9)
+    values = np.exp(-0.5 * ((x - 0.4) / 0.08) ** 2) + 0.05
+    log_q = np.array(
+        [interpolated_sample_and_log_prob(x, values)[1] for _ in range(20000)]
+    )
+    assert abs(np.mean(np.exp(-log_q)) - 1.0) < 0.04

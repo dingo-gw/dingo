@@ -3,7 +3,8 @@ from multiprocessing import Pool
 from itertools import starmap
 
 import numpy as np
-from bilby.core.prior import Interped
+from bilby.core.utils import random
+from scipy.stats import rv_histogram
 from threadpoolctl import threadpool_limits
 
 
@@ -12,8 +13,8 @@ def interpolated_sample_and_log_prob_multi(
 ):
     """
     Given a distribution discretized on a grid, return a sample and the log prob from an
-    interpolated distribution. Wraps the bilby.core.prior.Interped class. Works with
-    multiprocessing.
+    interpolated distribution, the piecewise-constant density of
+    `_cell_mean_histogram`. Works with multiprocessing.
 
     Parameters
     ----------
@@ -46,7 +47,8 @@ def interpolated_sample_and_log_prob_multi(
 def interpolated_sample_and_log_prob(sample_points, values):
     """
     Given a distribution discretized on a grid, return a sample and the log prob from an
-    interpolated distribution. Wraps the bilby.core.prior.Interped class.
+    interpolated distribution, the piecewise-constant density of
+    `_cell_mean_histogram`.
 
     Parameters
     ----------
@@ -60,10 +62,21 @@ def interpolated_sample_and_log_prob(sample_points, values):
     -------
     (float, float) : sample and log_prob
     """
-    interp = Interped(sample_points, values)
-    sample = interp.sample()
-    log_prob = interp.ln_prob(sample)
-    return sample, log_prob
+    dist = _cell_mean_histogram(sample_points, values)
+    sample = dist.rvs(random_state=random.rng)
+    return sample, dist.logpdf(sample)
+
+
+def _cell_mean_histogram(sample_points, values):
+    """The piecewise-constant density whose height in each grid cell is the mean of
+    `values` at the cell's endpoints, normalized. Each cell keeps the mass the
+    trapezoid rule gives it, and, unlike bilby's `Interped` (which evaluates the
+    piecewise-linear interpolant but samples the piecewise-constant one), sampling
+    and `logpdf` describe the same density."""
+    values = np.asarray(values)
+    return rv_histogram(
+        ((values[:-1] + values[1:]) / 2, np.asarray(sample_points)), density=True
+    )
 
 
 def interpolated_log_prob_multi(
@@ -71,7 +84,8 @@ def interpolated_log_prob_multi(
 ):
     """
     Given a distribution discretized on a grid, the log prob at a specific point
-    using an interpolated distribution. Wraps the bilby.core.prior.Interped class.
+    using an interpolated distribution, the piecewise-constant density of
+    `_cell_mean_histogram`.
     Works with multiprocessing.
 
     Parameters
@@ -104,7 +118,8 @@ def interpolated_log_prob_multi(
 def interpolated_log_prob(sample_points, values, evaluation_point):
     """
     Given a distribution discretized on a grid, return a sample and the log prob from an
-    interpolated distribution. Wraps the bilby.core.prior.Interped class.
+    interpolated distribution, the piecewise-constant density of
+    `_cell_mean_histogram`.
 
     Parameters
     ----------
@@ -120,5 +135,4 @@ def interpolated_log_prob(sample_points, values, evaluation_point):
     -------
     float : log_prob
     """
-    interp = Interped(sample_points, values)
-    return interp.ln_prob(evaluation_point)
+    return _cell_mean_histogram(sample_points, values).logpdf(evaluation_point)

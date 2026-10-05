@@ -323,9 +323,13 @@ def test_phase_psi_log_prob_replug_matches_sample():
 
 def test_phase_psi_density_is_normalized():
     # exp(log q(phase, psi)) integrates to 1 over [0, 2pi) x [0, pi) for one sample.
+    # q is piecewise constant on the grid cells, so integrate by the midpoint rule.
     factor = _psi_factor(n_grid_phase=129, n_grid_psi=65)
+    n_phase, n_psi = 160, 80
     phase_mesh, psi_mesh = np.meshgrid(
-        np.linspace(0, 2 * np.pi, 121), np.linspace(0, np.pi, 61), indexing="ij"
+        (np.arange(n_phase) + 0.5) * 2 * np.pi / n_phase,
+        (np.arange(n_psi) + 0.5) * np.pi / n_psi,
+        indexing="ij",
     )
     n = phase_mesh.size
     given = {"chirp_mass": torch.full((n,), 3.0, dtype=torch.float64)}
@@ -338,7 +342,7 @@ def test_phase_psi_density_is_normalized():
         given,
     ).numpy()
     q = np.exp(log_q).reshape(phase_mesh.shape)
-    integral = np.trapezoid(np.trapezoid(q, psi_mesh[0], axis=1), phase_mesh[:, 0])
+    integral = q.sum() * (2 * np.pi / n_phase) * (np.pi / n_psi)
     assert integral == pytest.approx(1.0, abs=2e-3)
 
 
