@@ -574,14 +574,14 @@ def test_reset_event_keeps_the_record_the_samples_were_drawn_under():
     assert result.importance_sampling_metadata["proposal_event_metadata"] == {"T": 4.0}
 
 
-def test_reset_event_drops_stored_log_likelihood():
+def test_reset_event_drops_cached_log_likelihood():
     # A log likelihood cached on the old data must not be reused with the new data.
     from types import SimpleNamespace
 
-    samples = pd.DataFrame({"x": [1.0, 2.0], "log_likelihood": [-1.0, -2.0]})
+    samples = pd.DataFrame({"x": [1.0, 2.0], "log_likelihood_cache": [-1.0, -2.0]})
     result = Result(dictionary={"samples": samples, "event_metadata": {"T": 4.0}})
     result.reset_event(SimpleNamespace(data={}, settings={"T": 8.0}))
-    assert "log_likelihood" not in result.samples.columns
+    assert "log_likelihood_cache" not in result.samples.columns
 
 
 # ---------------------------------------------------------------------------
@@ -613,12 +613,14 @@ class _ResultWithLikelihood(Result):
 
 
 def _make_result_for_is():
+    x = np.array([0.0, 1.0, 2.0, 3.0, 20.0])
     samples = pd.DataFrame(
         {
-            "x": np.array([0.0, 1.0, 2.0, 3.0, 20.0]),
+            "x": x,
             "log_prob": np.zeros(5),
-            # Cached for all samples within the prior; x = 20 lies outside the prior.
-            "log_likelihood": np.array([0.0, -0.5, -2.0, -4.5, np.nan]),
+            # Cached for all samples within the prior (x = 20 lies outside it), and
+            # offset from a direct evaluation, so that a test can tell which was used.
+            "log_likelihood_cache": np.where(x < 10, -0.5 * x**2 + 1.0, np.nan),
         }
     )
     result = _ResultWithLikelihood(dictionary={"samples": samples})
@@ -628,55 +630,44 @@ def _make_result_for_is():
 
 def test_importance_sample_uses_cached_log_likelihood():
     result = _make_result_for_is()
-    result.importance_sample(use_cached_log_likelihood=True)
-    # Only the spot check evaluates the likelihood, here on all 4 valid samples.
-    assert sorted(result.likelihood.evaluated) == [0.0, 1.0, 2.0, 3.0]
+    result.importance_sample()
+    assert result.likelihood.evaluated == []
     np.testing.assert_allclose(
-        result.samples["log_likelihood"].to_numpy()[:4], [0.0, -0.5, -2.0, -4.5]
+        result.samples["log_likelihood"].to_numpy()[:4], [1.0, 0.5, -1.0, -3.5]
     )
     assert np.isnan(result.samples["log_likelihood"].iloc[4])
     assert result.samples["weights"].iloc[4] == 0.0
 
 
-def test_importance_sample_rejects_inexact_cache():
-    # Cached values off by more than the tolerance are replaced by a direct evaluation.
+def test_importance_sample_reuses_cache_but_not_its_own_output():
+    # A second plain run reuses the cache; the importance-sampling output
+    # (log_likelihood) is never read back.
     result = _make_result_for_is()
-    result.samples["log_likelihood"] += 0.1
-    result.importance_sample(use_cached_log_likelihood=True)
-    # Spot check on the 4 valid samples, then all 4 evaluated directly.
-    assert len(result.likelihood.evaluated) == 8
+    result.importance_sample()
+    result.samples["log_likelihood"] = 0.0
+    result.importance_sample()
+    assert result.likelihood.evaluated == []
     np.testing.assert_allclose(
-        result.samples["log_likelihood"].to_numpy()[:4], [0.0, -0.5, -2.0, -4.5]
+        result.samples["log_likelihood"].to_numpy()[:4], [1.0, 0.5, -1.0, -3.5]
     )
-    assert np.isnan(result.samples["log_likelihood"].iloc[4])
 
 
 def test_importance_sample_cache_must_cover_samples_within_prior():
     result = _make_result_for_is()
-    result.samples.loc[2, "log_likelihood"] = np.nan
+    result.samples.loc[2, "log_likelihood_cache"] = np.nan
     with pytest.raises(ValueError, match="no cached log likelihood"):
-        result.importance_sample(use_cached_log_likelihood=True)
-
-
-def test_importance_sample_ignores_cache_by_default():
-    result = _make_result_for_is()
-    result.importance_sample()
-    assert result.likelihood.evaluated == [0.0, 1.0, 2.0, 3.0]
+        result.importance_sample()
 
 
 @pytest.mark.parametrize("time_marginalization_kwargs", [{"n_fft": 1}, {}])
-def test_importance_sample_cache_rejects_marginalization(time_marginalization_kwargs):
-    # An empty settings dict also turns marginalization on (with default settings).
+def test_importance_sample_ignores_cache_with_likelihood_options(
+    time_marginalization_kwargs,
+):
+    # The cache holds the plain likelihood; an empty settings dict also turns
+    # marginalization on (with default settings).
     result = _make_result_for_is()
-    with pytest.raises(ValueError):
-        result.importance_sample(
-            use_cached_log_likelihood=True,
-            time_marginalization_kwargs=time_marginalization_kwargs,
-        )
-
-
-def test_importance_sample_cache_requires_column():
-    result = _make_result_for_is()
-    del result.samples["log_likelihood"]
-    with pytest.raises(KeyError):
-        result.importance_sample(use_cached_log_likelihood=True)
+    result.importance_sample(time_marginalization_kwargs=time_marginalization_kwargs)
+    assert result.likelihood.evaluated == [0.0, 1.0, 2.0, 3.0]
+    np.testing.assert_allclose(
+        result.samples["log_likelihood"].to_numpy()[:4], [0.0, -0.5, -2.0, -4.5]
+    )

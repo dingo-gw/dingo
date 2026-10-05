@@ -213,8 +213,8 @@ class Result(DingoDataset):
         self._build_domain()
 
         # A log likelihood cached on the old data does not describe the new data.
-        if self.samples is not None and "log_likelihood" in self.samples:
-            self.samples = self.samples.drop(columns="log_likelihood")
+        if self.samples is not None and "log_likelihood_cache" in self.samples:
+            self.samples = self.samples.drop(columns="log_likelihood_cache")
 
     @property
     def num_samples(self):
@@ -258,13 +258,7 @@ class Result(DingoDataset):
         else:
             return None
 
-    def importance_sample(
-        self,
-        num_processes: int = 1,
-        use_cached_log_likelihood: bool = False,
-        cached_log_likelihood_tolerance: float = 1e-2,
-        **likelihood_kwargs,
-    ):
+    def importance_sample(self, num_processes: int = 1, **likelihood_kwargs):
         """
         Calculate importance weights for samples.
 
@@ -295,20 +289,14 @@ class Result(DingoDataset):
         num_processes : int
             Number of parallel processes to use when calculating likelihoods. (This is
             the most expensive task.)
-        use_cached_log_likelihood : bool, default False
-            Use the log likelihoods already in `self.samples["log_likelihood"]`
-            (e.g., cached by the synthetic phase) instead of evaluating the
-            likelihood. Every sample within the prior must have a finite cached
-            value. Not compatible with marginalization, since the cached values are
-            not marginalized. The cached values are checked against a direct
-            evaluation on a few samples; if they deviate by more than
-            `cached_log_likelihood_tolerance`, the likelihood is evaluated instead.
-        cached_log_likelihood_tolerance : float, default 1e-2
-            Maximum deviation (in nats) of the cached log likelihoods from a direct
-            evaluation for the cache to be used.
         likelihood_kwargs : dict
             kwargs that are forwarded to the likelihood constructor. E.g., options for
             marginalization.
+
+        If the samples carry a `log_likelihood_cache` column (the plain log
+        likelihood, stored by a chain step that evaluated it at its draws, e.g. the
+        synthetic phase), it is used instead of evaluating the likelihood, unless
+        likelihood options are given, since these change the likelihood.
         """
 
         if self.samples is None:
@@ -320,18 +308,6 @@ class Result(DingoDataset):
                 "it is necessary to train an unconditional flow based on the existing "
                 "samples. This can then be sampled with log probability."
             )
-        if use_cached_log_likelihood:
-            if "log_likelihood" not in self.samples:
-                raise KeyError(
-                    "use_cached_log_likelihood=True requires log likelihoods stored "
-                    "in the samples."
-                )
-            # As in _build_likelihood, any settings dict (even {}) marginalizes.
-            if any(v is not None for v in likelihood_kwargs.values()):
-                raise ValueError(
-                    f"use_cached_log_likelihood=True cannot be combined with the "
-                    f"likelihood options {likelihood_kwargs}."
-                )
 
         self._build_likelihood(**likelihood_kwargs)
 
@@ -357,44 +333,23 @@ class Result(DingoDataset):
         # for BH spins > 1).
         valid_samples = np.isfinite(log_prior + delta_log_prob_target)
         theta = theta.iloc[valid_samples]
-        if use_cached_log_likelihood:
-            log_likelihood = self.samples["log_likelihood"].to_numpy()[valid_samples]
+
+        # As in _build_likelihood, any settings dict (even {}) changes the likelihood,
+        # so the cached plain log likelihood serves only a plain evaluation.
+        if "log_likelihood_cache" in self.samples and not any(
+            v is not None for v in likelihood_kwargs.values()
+        ):
+            log_likelihood = self.samples["log_likelihood_cache"].to_numpy()[
+                valid_samples
+            ]
             if not np.all(np.isfinite(log_likelihood)):
                 raise ValueError(
                     f"{np.sum(~np.isfinite(log_likelihood))} samples within the prior "
                     f"have no cached log likelihood. Were the samples or the prior "
                     f"changed after the log likelihoods were cached?"
                 )
-            # The cached values are assembled from the m-components of the waveform,
-            # which sum to the waveform of the direct likelihood only for some models
-            # and settings. Verify this on a few samples instead of trusting it.
-            idx = np.random.default_rng(0).choice(
-                len(theta), size=min(10, len(theta)), replace=False
-            )
-            deviation = 0.0
-            if len(idx) > 0:
-                deviation = np.max(
-                    np.abs(
-                        self.likelihood.log_likelihood_multi(
-                            theta.iloc[idx], num_processes=min(num_processes, len(idx))
-                        )
-                        - log_likelihood[idx]
-                    )
-                )
-            if deviation > cached_log_likelihood_tolerance:
-                print(
-                    f"Cached log likelihoods deviate from a direct evaluation by up to "
-                    f"{deviation:.2g} nats over {len(idx)} samples, more than the "
-                    f"tolerance of {cached_log_likelihood_tolerance} nats. Evaluating "
-                    f"the likelihood instead."
-                )
-                use_cached_log_likelihood = False
-            else:
-                print(
-                    f"Using {len(log_likelihood)} cached log likelihoods, verified to "
-                    f"{deviation:.2g} nats on {len(idx)} samples."
-                )
-        if not use_cached_log_likelihood:
+            print(f"Using {len(log_likelihood)} cached log likelihoods.")
+        else:
             print(f"Calculating {len(theta)} likelihoods.")
             t0 = time.time()
             log_likelihood = self.likelihood.log_likelihood_multi(

@@ -342,7 +342,7 @@ DataFrame runner (`run_sampler`) and the `Result` export (`to_result` / `to_hdf5
    columns it transforms, which its outputs replace; its `conditioning` is then
    the read-only remainder. A factor that emits columns beyond `parameters` to
    be kept in the output for importance sampling (such as the synthetic phase's
-   cached `log_likelihood`) lists them in `annotations`, which `produces`
+   `log_likelihood_cache`) lists them in `annotations`, which `produces`
    includes by default. Other extra columns are side channels, intermediates for
    later steps that are dropped from the output; the factor declares them by
    overriding `produces`. A target correction samples nothing:

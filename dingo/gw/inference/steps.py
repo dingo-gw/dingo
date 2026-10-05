@@ -71,16 +71,18 @@ class SyntheticPhaseFactor(Factor):
     approximation when the key is omitted.
 
     With `cache_log_likelihood=True` (exact mode only) the factor also emits the log
-    likelihood at the drawn phase as the annotation column `log_likelihood`, so that
-    importance sampling need not evaluate the waveform again. The phase is drawn from
-    the grid distribution *interpolated* between grid points, so the drawn phase
+    likelihood at the drawn phase as the annotation column `log_likelihood_cache`, so
+    that importance sampling need not evaluate the waveform again. The phase is drawn
+    from the grid distribution *interpolated* between grid points, so the drawn phase
     generally lies between them and its likelihood is not one of the grid values.
     Rather, it is evaluated exactly at the drawn phase from the same mode inner
     products that produced the grid (a cheap sum over modes, no waveform call).
     Snapping the draws to the grid points instead would make the phase proposal
     discrete, inconsistent with the continuous interpolated density returned as the
     log probability, and interpolating the grid of log likelihoods would only be
-    approximate.
+    approximate. The value equals a direct likelihood call only if the m-components
+    sum exactly to the direct waveform, as with the DFT phase decomposition;
+    `Result._synthetic_phase_step` enables caching only then.
     """
 
     def __init__(
@@ -117,14 +119,9 @@ class SyntheticPhaseFactor(Factor):
             `SamplerContext.likelihood`).
         cache_log_likelihood : bool, default False
             Also emit the log likelihood at the drawn phase as the column
-            `log_likelihood`, for reuse by importance sampling. Requires the exact
-            mode (`approximation_22_mode=False`) and the DFT phase decomposition.
+            `log_likelihood_cache`, for reuse by importance sampling. Exact mode
+            only.
         """
-        if cache_log_likelihood and approximation_22_mode:
-            raise ValueError(
-                "cache_log_likelihood requires the exact mode "
-                "(approximation_22_mode=False)."
-            )
         self.parameters = ["phase"]
         self.conditioning = list(conditioning)
         self.n_grid = n_grid
@@ -134,7 +131,7 @@ class SyntheticPhaseFactor(Factor):
         self.use_base_domain = use_base_domain
         self.wfg_updates = wfg_updates
         self.cache_log_likelihood = cache_log_likelihood
-        self.annotations = ["log_likelihood"] if cache_log_likelihood else []
+        self.annotations = ["log_likelihood_cache"] if cache_log_likelihood else []
 
     def sample_and_log_prob(self, num_samples, context, given=None):
         """Draw one phase per `theta_rest` row (`num_samples` must be 1); return the phases
@@ -148,16 +145,6 @@ class SyntheticPhaseFactor(Factor):
         n = len(reference)
         logger.info(f"Estimating synthetic phase for {n} samples.")
         t0 = time.time()
-        if self.cache_log_likelihood:
-            # The cache matches a direct likelihood call only with the DFT decomposition.
-            waveform_generator = context.likelihood(
-                use_base_domain=self.use_base_domain, wfg_updates=self.wfg_updates
-            ).waveform_generator
-            if not waveform_generator.uses_dft_phase_decomposition:
-                raise ValueError(
-                    "cache_log_likelihood requires the DFT phase decomposition, which "
-                    f"{waveform_generator.approximant_str} does not use here."
-                )
         phases, phase_posterior, terms = self._phase_profile(given, context)
         new_phase, log_prob = interpolated_sample_and_log_prob_multi(
             phases, phase_posterior, self.num_processes
@@ -171,7 +158,9 @@ class SyntheticPhaseFactor(Factor):
             log_likelihood = likelihood.log_likelihood_from_phase_grid_terms(
                 terms, new_phase[:, None]
             )[:, 0]
-            samples["log_likelihood"] = torch.as_tensor(log_likelihood, device=device)
+            samples["log_likelihood_cache"] = torch.as_tensor(
+                log_likelihood, device=device
+            )
         logger.info(f"Done. This took {time.time() - t0:.2f} s.")
         return samples, torch.as_tensor(log_prob, device=device)
 
