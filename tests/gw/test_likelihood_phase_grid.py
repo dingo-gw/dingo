@@ -198,6 +198,10 @@ def test_terms_reproduce_direct_likelihood_at_off_grid_psi(likelihood):
     hold through the real projection pipeline."""
     phases = np.array([0.37, 2.9, 5.81])
     psis = np.array([0.1, 1.2, 2.8])
+    # As in test_terms_reproduce_direct_likelihood_at_off_grid_phase, pyseobnr's
+    # multi-phase and single-phase evaluations differ by ~1e-5 nats.
+    approximant = likelihood.waveform_generator.approximant_str
+    atol = 1e-4 if approximant == "SEOBNRv5PHM" else 0.0
     terms = likelihood.phase_grid_terms(THETA)
     grid = likelihood.log_likelihood_from_phase_grid_terms(terms, phases, psis)
     direct = [
@@ -205,13 +209,17 @@ def test_terms_reproduce_direct_likelihood_at_off_grid_psi(likelihood):
         for p in phases
     ]
     assert grid.shape == (3, 3)
-    np.testing.assert_allclose(grid, direct, rtol=1e-9)
+    np.testing.assert_allclose(grid, direct, rtol=1e-9, atol=atol)
 
 
 def test_stacked_terms_at_one_point_per_sample(likelihood):
     """Stacked terms evaluate at one (phase, psi) per sample, shape (N, 1, 1).
     This is what the synthetic phase+psi cache uses."""
     thetas = [{**THETA, "mass_1": m1} for m1 in (45.0, 50.0)]
+    # As in test_terms_reproduce_direct_likelihood_at_off_grid_phase, pyseobnr's
+    # multi-phase and single-phase evaluations differ by ~1e-5 nats.
+    approximant = likelihood.waveform_generator.approximant_str
+    atol = 1e-4 if approximant == "SEOBNRv5PHM" else 0.0
     per = [likelihood.phase_grid_terms(t) for t in thetas]
     terms = {
         "m_vals": per[0]["m_vals"],
@@ -228,7 +236,7 @@ def test_stacked_terms_at_one_point_per_sample(likelihood):
         for t, p, s in zip(thetas, phase, psi)
     ]
     assert out.shape == (2, 1, 1)
-    np.testing.assert_allclose(out[:, 0, 0], direct, rtol=1e-9)
+    np.testing.assert_allclose(out[:, 0, 0], direct, rtol=1e-9, atol=atol)
     # A shared (phase, psi) grid gives (N, G, H).
     grid = likelihood.log_likelihood_from_phase_grid_terms(
         terms, np.linspace(0, 2 * np.pi, 5), np.linspace(0, np.pi, 3)
