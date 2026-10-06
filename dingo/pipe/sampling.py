@@ -4,9 +4,7 @@ import copy
 import sys
 from pathlib import Path
 
-import bilby
 import numpy as np
-import torch
 
 from bilby_pipe.input import Input
 from bilby_pipe.utils import (
@@ -18,6 +16,7 @@ from bilby_pipe.utils import (
 
 from dingo.core.inference.steps import FlowFactor
 from dingo.core.posterior_models.build_model import build_model_from_kwargs
+from dingo.core.utils.torchutils import seed_generators
 from dingo.gw.data.event_dataset import EventDataset
 from dingo.gw.inference.sampler import GWComposedSampler
 from dingo.gw.inference.steps import GNPEKernelFactor
@@ -134,15 +133,16 @@ class SamplingInput(Input):
 
     @sampling_seed.setter
     def sampling_seed(self, sampling_seed):
-        """Mirrors bilby_pipe's DataAnalysisInput, plus torch. The Pool workers of
-        importance sampling and the synthetic phase are not re-seeded: under fork
-        they copy one stream, under spawn they start unseeded (#408)."""
+        """Like bilby_pipe's DataAnalysisInput, but torch, numpy and bilby are seeded
+        from separate children of SeedSequence([seed, 0]), so that they share no
+        stream with each other or with the importance-sampling job (stage 1). Without
+        a seed, one is drawn from 128 bits of OS entropy."""
         if sampling_seed is None:
-            sampling_seed = np.random.randint(1, 1e6)
+            sampling_seed = np.random.SeedSequence().entropy
         self._sampling_seed = int(sampling_seed)
-        torch.manual_seed(self._sampling_seed)
-        np.random.seed(self._sampling_seed)
-        bilby.core.utils.random.seed(self._sampling_seed)
+        seed_generators(
+            np.random.SeedSequence([self._sampling_seed, 0]), all_devices=True
+        )
         logger.info(f"Sampling seed set to {self._sampling_seed}")
 
     def _load_event(self):

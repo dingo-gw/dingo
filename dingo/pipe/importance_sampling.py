@@ -5,9 +5,7 @@ analysis script."""
 import os
 import sys
 
-import bilby
 import numpy as np
-import torch
 import yaml
 from bilby_pipe.input import Input
 from bilby_pipe.utils import (
@@ -19,6 +17,7 @@ from bilby_pipe.utils import (
     BilbyPipeError,
 )
 
+from dingo.core.utils.torchutils import seed_generators
 from dingo.gw.data.event_dataset import EventDataset
 from dingo.gw.domains import MultibandedFrequencyDomain
 from dingo.pipe.default_settings import IMPORTANCE_SAMPLING_SETTINGS
@@ -123,15 +122,16 @@ class ImportanceSamplingInput(Input):
 
     @sampling_seed.setter
     def sampling_seed(self, sampling_seed):
-        """Mirrors bilby_pipe's DataAnalysisInput, plus torch. The Pool workers of
-        importance sampling and the synthetic phase are not re-seeded: under fork
-        they copy one stream, under spawn they start unseeded (#408)."""
+        """Like bilby_pipe's DataAnalysisInput, but torch, numpy and bilby are seeded
+        from separate children of SeedSequence([seed, 1]), so that they share no
+        stream with each other or with the sampling job (stage 0). Without a seed,
+        one is drawn from 128 bits of OS entropy."""
         if sampling_seed is None:
-            sampling_seed = np.random.randint(1, 1e6)
+            sampling_seed = np.random.SeedSequence().entropy
         self._sampling_seed = int(sampling_seed)
-        torch.manual_seed(self._sampling_seed)
-        np.random.seed(self._sampling_seed)
-        bilby.core.utils.random.seed(self._sampling_seed)
+        seed_generators(
+            np.random.SeedSequence([self._sampling_seed, 1]), all_devices=True
+        )
         logger.info(f"Sampling seed set to {self._sampling_seed}")
 
     def _load_proposal(self):
