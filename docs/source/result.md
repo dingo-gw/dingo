@@ -36,7 +36,7 @@ uniform_weight: 0.01
 num_processes: 100
 ```
 approximation_22_mode
-: Whether to make the approximation that only the $(l, m) = (2, 2)$ mode is present, i.e., waveforms transform as $\exp(2 i \phi_c)$. This simplifies computations since it does not require caching of waveform modes.
+: Whether to assume that a phase shift multiplies the waveform by $\exp(2 i \phi_c)$, which holds exactly when only the $(l, m) = (2, \pm 2)$ modes are present. This simplifies computations since it does not require caching of waveform modes. It is *exact*, not an approximation, for approximants whose co-precessing content is a single $(2, \pm 2)$ pair: IMRPhenomPv2, IMRPhenomXP and their NRTidal variants in Bilby's spin convention (`spin_conversion_phase: null`, where a phase shift also rotates the in-plane spins), and aligned-spin $(2, 2)$-only models such as IMRPhenomD in any convention. Elsewhere it is an approximation whose error grows with in-plane spin and with inclination away from face-on.
 
 n_grid
 : Specifies the phase grid on which the likelihoods are evaluated.
@@ -53,7 +53,7 @@ Once samples are in the right form---including all relevant parameters *and* the
 
 As with the synthetic phase, importance sampling allows for parallelization.
 
-If the synthetic phase uses the exact mode sum with the DFT phase decomposition, it also stores the log likelihood at the drawn $\phi_c$ in the column `log_likelihood_cache`. Since the drawn $\phi_c$ generally lies between grid points, this value is evaluated exactly from the mode inner products rather than read off the grid. `importance_sample()` then uses these values instead of generating the waveforms again, unless a marginalized likelihood is requested.
+Where the phase dependence is exact, the synthetic phase also stores the log likelihood at the drawn $\phi_c$ in the column `log_likelihood_cache`: either from the exact mode sum with the DFT phase decomposition, or from the $(2, 2)$ path for the models listed under `approximation_22_mode` above (the only exact route for the NRTidal family, for which LALSimulation implements no frequency-domain modes). The factor probes the waveform before caching, and refuses if a phase shift turns out not to be a global factor. Since the drawn $\phi_c$ generally lies between grid points, this value is evaluated exactly from the mode inner products rather than read off the grid. `importance_sample()` then uses these values instead of generating the waveforms again, unless a marginalized likelihood is requested.
 
 The target may be defined on different data from the proposal (in `dingo_pipe`, an `importance-sampling-updates` duration or frequency range regenerates the event). `reset_event()` then makes `event_metadata` the event analyzed and keeps the record the samples were drawn under as `importance_sampling_metadata["proposal_event_metadata"]`. The data they were drawn from are not kept; they remain in the sampling-stage file.
 

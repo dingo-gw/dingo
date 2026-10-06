@@ -110,6 +110,42 @@ value, and the network draws per row. The scan result (trigger value, signal-to-
 ratio, maximum log likelihood, and the scan settings) is recorded in the sampler
 provenance. For a GW170817-like event the scan costs about a minute of CPU time.
 
+## Tidal parameters
+
+Tidal approximants such as `IMRPhenomXP_NRTidalv3` run through the standard LAL
+`WaveformGenerator` in both uniform and multibanded frequency domains: `lambda_1`
+and `lambda_2` are inserted into the LAL parameter dictionary whenever present.
+
+Beyond a BBH setup, a tidal run needs:
+
+- **Dataset, `waveform_generator`**: the tidal `approximant` and
+  `spin_conversion_phase: null` (Bilby's convention). For models with a single
+  co-precessing $(2, \pm 2)$ pair a phase shift is then a global $e^{2i\phi_c}$
+  factor, so the $(2, 2)$ synthetic phase (`approximation_22_mode: true`) is exact.
+  `spin_conversion_phase: 0.0` is needed only for the exact mode sum, which these
+  models do not support.
+- **Dataset, `intrinsic_prior`**: BNS-appropriate mass and spin ranges (the
+  `default` entries are tuned to BBH), plus `lambda_1: default` /
+  `lambda_2: default` (`Uniform(0, 5000)`) or explicit prior strings.
+- **Training**: list `inference_parameters` explicitly, including `lambda_1` and
+  `lambda_2` (the `default` list contains only the 15 BBH parameters).
+
+For the synthetic phase, `approximation_22_mode: true` is then both the cheapest
+and the exact choice: one waveform evaluation per sample, and the log likelihood
+at the drawn $\phi_c$ comes with it, so importance sampling reuses it instead of
+regenerating the waveforms. Dingo probes the waveform before relying on this and
+refuses to cache if a phase shift turns out not to be a global factor. The exact
+mode sum (`approximation_22_mode: false`) is not an option for the NRTidal
+family: LALSimulation implements no frequency-domain modes for it, and the DFT
+phase decomposition needs the fixed spin convention that we are avoiding here.
+
+A network trained with `spin_conversion_phase: 0.0` is the other case. There a
+phase shift leaves the in-plane spins behind, so the $(2, 2)$ path is an
+approximation (mismatch $\sim 3 \times 10^{-3}$ for IMRPhenomXP_NRTidalv3 at
+$a \sim 0.3$) and its log likelihood is not cached. Importance sampling stays
+unbiased, since the synthetic phase only shapes the proposal, but the sample
+efficiency is lower.
+
 ## Running through dingo_pipe
 
 Two [dingo_pipe](dingo_pipe.md) sampler options control BNS inference:
@@ -163,9 +199,9 @@ Importance sampling follows the standard [workflow](result.md). For a multibande
 model the likelihood is evaluated on the undecimated base domain by default
 (`use_base_domain`, set automatically and adjustable in
 `importance-sampling-settings`). Phase-marginalized networks reconstruct the phase
-synthetically before reweighting; setting `approximation_22_mode: true` treats the
-signal as dominated by the $(2, 2)$ mode, which is appropriate for BNS and
-substantially faster than the mode-summed default.
+synthetically before reweighting; `approximation_22_mode: true` is the right
+setting for BNS, and for a network trained in Bilby's spin convention it is exact
+as well as fast, see [Tidal parameters](#tidal-parameters).
 
 As an indication of expected performance, analyses of GW170817 on public data with a
 development network reach sample efficiencies of roughly 10% and a log Bayes factor

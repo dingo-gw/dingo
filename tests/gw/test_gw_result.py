@@ -714,3 +714,29 @@ def test_calibration_and_synthetic_phase_run_as_one_chain(tmp_path):
     weights = result.samples["weights"].to_numpy()
     assert np.isfinite(result.log_evidence)
     assert weights[5] == 0.0 and np.all(weights[:5] > 0)
+
+
+def test_synthetic_phase_22_cache_matches_direct_importance_sampling():
+    # For a model whose phase shift is a global exp(2i phase) factor, the (2, 2)
+    # path is exact, so the synthetic phase caches its log likelihood and
+    # importance sampling reuses it. IMRPhenomD is (2, 2)-only, hence exact in
+    # either spin convention.
+    result = make_gw_result(drop_phase=True)
+    assert result.sampler_context.likelihood().waveform_generator.phase_is_global_factor
+    bilby_random.seed(0)
+    result.sample_proposal_extensions(
+        synthetic_phase_kwargs={"n_grid": 64, "approximation_22_mode": True}
+    )
+    cached = result.samples["log_likelihood_cache"].to_numpy()
+    assert np.all(np.isfinite(cached))
+
+    result.importance_sample()
+    np.testing.assert_allclose(result.samples["log_likelihood"], cached)
+
+    # And the cached values are the likelihood, not just the profile.
+    result._build_likelihood()
+    theta = result.samples[
+        [k for k, v in result.prior.items() if not isinstance(v, Constraint)]
+    ]
+    direct = result.likelihood.log_likelihood_multi(theta)
+    np.testing.assert_allclose(cached, direct, rtol=1e-9)

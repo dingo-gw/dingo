@@ -9,6 +9,7 @@ import pytest
 import torch
 from bilby.core.utils import random as bilby_random
 
+from dingo.gw.domains import UniformFrequencyDomain
 from dingo.gw.inference.context import GWSamplerContext
 from dingo.gw.inference.steps import SyntheticPhaseFactor
 from dingo.gw.likelihood import StationaryGaussianGWLikelihood
@@ -17,16 +18,21 @@ from dingo.gw.likelihood import StationaryGaussianGWLikelihood
 class _MockLikelihood:
     """Exposes the methods the factor uses, deterministic in `chirp_mass`."""
 
-    def __init__(self, uses_dft_phase_decomposition=True):
+    def __init__(self, uses_dft_phase_decomposition=True, phase_is_global_factor=True):
         self.phase_grid = None
         self.waveform_generator = SimpleNamespace(
             uses_dft_phase_decomposition=uses_dft_phase_decomposition,
+            phase_is_global_factor=phase_is_global_factor,
+            spin_conversion_phase=0.0,
             approximant_str="mock",
         )
 
-    def d_inner_h_complex_multi(self, theta, num_processes=1):
-        # (2, 2)-approx path: one complex overlap (d | h) per row.
-        return np.array([complex(cm, 0.5) for cm in theta["chirp_mass"].to_numpy()])
+    def phase_grid_terms_22(self, theta):
+        # (2, 2) path: the overlap (d | h_0) and the norm (h_0 | h_0) of one row.
+        return {
+            "d_inner_h": complex(theta["chirp_mass"], 0.5),
+            "h_inner_h": 2.0 * float(theta["chirp_mass"]),
+        }
 
     def phase_grid_terms(self, theta):
         # exact path: a single m = 1 mode with (d | mu_1) = chirp_mass, so that
@@ -42,6 +48,9 @@ class _MockLikelihood:
     log_Zn = 0.0
     log_likelihood_from_phase_grid_terms = (
         StationaryGaussianGWLikelihood.log_likelihood_from_phase_grid_terms
+    )
+    log_likelihood_22_from_terms = (
+        StationaryGaussianGWLikelihood.log_likelihood_22_from_terms
     )
 
 
@@ -82,8 +91,9 @@ def test_profile_approx_matches_formula():
     given = _given(n)
     phases, profile, _ = factor._phase_profile(given, _MockContext())
 
-    kappa = np.array([complex(cm, 0.5) for cm in given["chirp_mass"].numpy()])
-    log_posterior = np.outer(kappa, np.exp(2j * phases)).real
+    cm = given["chirp_mass"].numpy()
+    kappa = np.array([complex(c, 0.5) for c in cm])
+    log_posterior = np.outer(kappa, np.exp(2j * phases)).real - cm[:, None]
     expected = np.exp(log_posterior - log_posterior.max(axis=1, keepdims=True))
     expected += expected.mean(axis=1, keepdims=True) * weight
 
@@ -228,3 +238,45 @@ def test_cached_log_likelihood_requires_dft_phase_decomposition():
     )
     with pytest.raises(ValueError, match="DFT phase decomposition"):
         factor.sample_and_log_prob(1, _NoDFTContext(), _given())
+
+
+def test_cached_log_likelihood_requires_an_exact_22_path():
+    # The (2, 2) likelihood equals a direct call only if a phase shift multiplies the
+    # waveform by exp(2i phase); otherwise caching raises rather than bias IS.
+    class _NoGlobalFactorContext(_MockContext):
+        def likelihood(self, **kwargs):
+            return _MockLikelihood(phase_is_global_factor=False)
+
+    factor = SyntheticPhaseFactor(
+        conditioning=["chirp_mass"],
+        n_grid=33,
+        approximation_22_mode=True,
+        cache_log_likelihood=True,
+    )
+    with pytest.raises(ValueError, match="global exp"):
+        factor.sample_and_log_prob(1, _NoGlobalFactorContext(), _given())
+
+
+def test_cached_log_likelihood_refuses_a_nan_probe():
+    # A model listed as having a global exp(2i phase) factor but whose waveform comes
+    # back NaN must fail the probe, not slip through the "mismatch > tolerance" test.
+    class _NaNContext(_MockContext):
+        def likelihood(self, **kwargs):
+            likelihood = _MockLikelihood()
+            likelihood.waveform_generator.domain = UniformFrequencyDomain(
+                20.0, 27.0, 1.0
+            )
+            likelihood.waveform_generator.generate_hplus_hcross = lambda theta: {
+                "h_plus": np.full(8, np.nan, dtype=complex),
+                "h_cross": np.full(8, np.nan, dtype=complex),
+            }
+            return likelihood
+
+    factor = SyntheticPhaseFactor(
+        conditioning=["chirp_mass"],
+        n_grid=33,
+        approximation_22_mode=True,
+        cache_log_likelihood=True,
+    )
+    with pytest.raises(ValueError, match="refusing to cache"):
+        factor.sample_and_log_prob(1, _NaNContext(), _given())
