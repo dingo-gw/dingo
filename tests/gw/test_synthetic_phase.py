@@ -196,7 +196,7 @@ def test_cached_log_likelihood_at_drawn_phase():
         1, context, given
     )
     factor = SyntheticPhaseFactor(**kwargs, cache_log_likelihood=True)
-    assert factor.produces == ["phase", "log_likelihood"]
+    assert factor.produces == ["phase", "log_likelihood_cache"]
     _seed(2)
     block_cached, log_prob_cached = factor.sample_and_log_prob(1, context, given)
 
@@ -204,8 +204,8 @@ def test_cached_log_likelihood_at_drawn_phase():
     assert np.array_equal(phase, block["phase"].numpy())
     assert np.array_equal(log_prob_cached.numpy(), log_prob.numpy())
     expected = np.cos(phase) * given["chirp_mass"].numpy()
-    assert block_cached["log_likelihood"].dtype == torch.float64
-    assert np.allclose(block_cached["log_likelihood"].numpy(), expected)
+    assert block_cached["log_likelihood_cache"].dtype == torch.float64
+    assert np.allclose(block_cached["log_likelihood_cache"].numpy(), expected)
 
 
 def test_cached_log_likelihood_is_chain_output():
@@ -225,7 +225,7 @@ def test_cached_log_likelihood_is_chain_output():
     context = _MockContext()
     context.device = None
     out, _ = ChainComposer([table, factor]).sample_and_log_prob(1, context)
-    assert set(out) == {"chirp_mass", "psi", "phase", "log_likelihood"}
+    assert set(out) == {"chirp_mass", "psi", "phase", "log_likelihood_cache"}
 
 
 def test_cached_log_likelihood_requires_dft_phase_decomposition():
@@ -243,15 +243,6 @@ def test_cached_log_likelihood_requires_dft_phase_decomposition():
     )
     with pytest.raises(ValueError, match="DFT phase decomposition"):
         factor.sample_and_log_prob(1, _NoDFTContext(), _given())
-
-
-def test_cached_log_likelihood_requires_exact_mode():
-    with pytest.raises(ValueError, match="exact mode"):
-        SyntheticPhaseFactor(
-            conditioning=["chirp_mass"],
-            approximation_22_mode=True,
-            cache_log_likelihood=True,
-        )
 
 
 # ---------------------------------------------------------------------------
@@ -352,7 +343,7 @@ def test_phase_psi_cached_log_likelihood_at_drawn_point():
     _seed(2)
     block, log_prob = _psi_factor().sample_and_log_prob(1, context, given)
     factor = _psi_factor(cache_log_likelihood=True)
-    assert factor.produces == ["phase", "psi", "log_likelihood"]
+    assert factor.produces == ["phase", "psi", "log_likelihood_cache"]
     _seed(2)
     block_cached, log_prob_cached = factor.sample_and_log_prob(1, context, given)
     phase, psi = block_cached["phase"].numpy(), block_cached["psi"].numpy()
@@ -360,7 +351,7 @@ def test_phase_psi_cached_log_likelihood_at_drawn_point():
     assert np.array_equal(psi, block["psi"].numpy())
     assert np.array_equal(log_prob_cached.numpy(), log_prob.numpy())
     expected = _MockLikelihood.log_l_phase_psi(given["chirp_mass"].numpy(), phase, psi)
-    assert np.allclose(block_cached["log_likelihood"].numpy(), expected)
+    assert np.allclose(block_cached["log_likelihood_cache"].numpy(), expected)
 
 
 def test_phase_psi_cached_log_likelihood_is_chain_output():
@@ -374,4 +365,4 @@ def test_phase_psi_cached_log_likelihood_is_chain_output():
     out, _ = ChainComposer(
         [table, _psi_factor(cache_log_likelihood=True)]
     ).sample_and_log_prob(1, context)
-    assert set(out) == {"chirp_mass", "phase", "psi", "log_likelihood"}
+    assert set(out) == {"chirp_mass", "phase", "psi", "log_likelihood_cache"}

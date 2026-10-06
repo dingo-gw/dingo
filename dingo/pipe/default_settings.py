@@ -42,7 +42,6 @@ IMPORTANCE_SAMPLING_SETTINGS = {
             "approximation_22_mode": False,
             "n_grid_phase": 5001,
             "uniform_weight": 0.01,
-            "cache_log_likelihood": True,
         },
     },
     # For networks that infer neither phase nor psi: both are drawn from the
@@ -53,7 +52,6 @@ IMPORTANCE_SAMPLING_SETTINGS = {
             "n_grid_phase": 512,
             "n_grid_psi": 128,
             "uniform_weight": 0.01,
-            "cache_log_likelihood": True,
         },
     },
     "MultibandingDefault": {

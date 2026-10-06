@@ -99,16 +99,18 @@ class SyntheticPhaseFactor(Factor):
     approximation when the key is omitted.
 
     With `cache_log_likelihood=True` (exact mode only) the factor also emits the log
-    likelihood at the drawn phase as the annotation column `log_likelihood`, so that
-    importance sampling need not evaluate the waveform again. The phase is drawn from
-    the grid distribution *interpolated* between grid points, so the drawn phase
+    likelihood at the drawn phase as the annotation column `log_likelihood_cache`, so
+    that importance sampling need not evaluate the waveform again. The phase is drawn
+    from the grid distribution *interpolated* between grid points, so the drawn phase
     generally lies between them and its likelihood is not one of the grid values.
     Rather, it is evaluated exactly at the drawn phase from the same mode inner
     products that produced the grid (a cheap sum over modes, no waveform call).
     Snapping the draws to the grid points instead would make the phase proposal
     discrete, inconsistent with the continuous interpolated density returned as the
     log probability, and interpolating the grid of log likelihoods would only be
-    approximate.
+    approximate. The value equals a direct likelihood call only if the m-components
+    sum exactly to the direct waveform, as with the DFT phase decomposition;
+    `Result._synthetic_phase_step` enables caching only then.
     """
 
     def __init__(
@@ -145,14 +147,9 @@ class SyntheticPhaseFactor(Factor):
             `SamplerContext.likelihood`).
         cache_log_likelihood : bool, default False
             Also emit the log likelihood at the drawn phase as the column
-            `log_likelihood`, for reuse by importance sampling. Requires the exact
-            mode (`approximation_22_mode=False`) and the DFT phase decomposition.
+            `log_likelihood_cache`, for reuse by importance sampling. Requires the
+            exact mode and the DFT phase decomposition.
         """
-        if cache_log_likelihood and approximation_22_mode:
-            raise ValueError(
-                "cache_log_likelihood requires the exact mode "
-                "(approximation_22_mode=False)."
-            )
         self.parameters = ["phase"]
         self.conditioning = list(conditioning)
         self.n_grid_phase = n_grid_phase
@@ -162,7 +159,7 @@ class SyntheticPhaseFactor(Factor):
         self.use_base_domain = use_base_domain
         self.wfg_updates = wfg_updates
         self.cache_log_likelihood = cache_log_likelihood
-        self.annotations = ["log_likelihood"] if cache_log_likelihood else []
+        self.annotations = ["log_likelihood_cache"] if cache_log_likelihood else []
 
     def sample_and_log_prob(self, num_samples, context, given=None):
         """Draw one phase per `theta_rest` row (`num_samples` must be 1); return the phases
@@ -199,7 +196,9 @@ class SyntheticPhaseFactor(Factor):
             log_likelihood = likelihood.log_likelihood_from_phase_grid_terms(
                 terms, new_phase[:, None], _to_numpy(given["psi"])[:, None]
             )[:, 0, 0]
-            samples["log_likelihood"] = torch.as_tensor(log_likelihood, device=device)
+            samples["log_likelihood_cache"] = torch.as_tensor(
+                log_likelihood, device=device
+            )
         logger.info(f"Done. This took {time.time() - t0:.2f} s.")
         return samples, torch.as_tensor(log_prob, device=device)
 
@@ -281,7 +280,7 @@ class SyntheticPhasePsiFactor(Factor):
 
     With `cache_log_likelihood=True` the factor also emits `log L` at the drawn
     (phase, psi), evaluated exactly from the same inner products, as the
-    annotation column `log_likelihood`.
+    annotation column `log_likelihood_cache`.
     """
 
     # Upper bound on the (chunk, n_grid_phase, n_grid_psi) grid held at once, in elements.
@@ -322,7 +321,7 @@ class SyntheticPhasePsiFactor(Factor):
             `SamplerContext.likelihood`).
         cache_log_likelihood : bool, default False
             Also emit the log likelihood at the drawn (phase, psi) as the column
-            `log_likelihood`, for reuse by importance sampling.
+            `log_likelihood_cache`, for reuse by importance sampling.
         """
         self.parameters = ["phase", "psi"]
         self.conditioning = list(conditioning)
@@ -333,12 +332,7 @@ class SyntheticPhasePsiFactor(Factor):
         self.use_base_domain = use_base_domain
         self.wfg_updates = wfg_updates
         self.cache_log_likelihood = cache_log_likelihood
-        self.annotations = ["log_likelihood"] if cache_log_likelihood else []
-
-    @property
-    def produces(self) -> list[str]:
-        """`phase` and `psi`, plus `log_likelihood` if it is cached."""
-        return self.parameters + self.annotations
+        self.annotations = ["log_likelihood_cache"] if cache_log_likelihood else []
 
     def sample_and_log_prob(self, num_samples, context, given=None):
         """Draw one (phase, psi) per row of `given` (`num_samples` must be 1): phase
@@ -371,7 +365,9 @@ class SyntheticPhasePsiFactor(Factor):
             log_likelihood = likelihood.log_likelihood_from_phase_grid_terms(
                 terms, new_phase[:, None], new_psi[:, None]
             )[:, 0, 0]
-            samples["log_likelihood"] = torch.as_tensor(log_likelihood, device=device)
+            samples["log_likelihood_cache"] = torch.as_tensor(
+                log_likelihood, device=device
+            )
         logger.info(f"Done. This took {time.time() - t0:.2f} s.")
         return samples, torch.as_tensor(log_prob_phase + log_prob_psi, device=device)
 

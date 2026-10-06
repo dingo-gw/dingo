@@ -242,7 +242,7 @@ def test_sample_table_root_feeds_chain_and_sums_log_prob():
     # the joint proposal density (stored + delta) -- the importance-sampling shape.
     stored = torch.tensor([0.5, 0.6, 0.7])
     table = SampleTableFactor(
-        # float64 input: the table casts to float32, the chain dtype.
+        # float64 input: the table keeps it, so later steps see the stored values.
         {"a": torch.tensor([1.0, 2.0, 3.0], dtype=torch.float64)},
         log_prob=stored,
     )
@@ -259,9 +259,9 @@ def test_sample_table_root_feeds_chain_and_sums_log_prob():
             return torch.full_like(given["a"], 0.25)
 
     out, lp = ChainComposer([table, _PlusOne()]).sample_and_log_prob(1, None)
-    assert out["a"].dtype == torch.float32  # the table casts to the chain dtype
-    assert torch.equal(out["a"], torch.tensor([1.0, 2.0, 3.0]))
-    assert torch.equal(out["b"], torch.tensor([2.0, 3.0, 4.0]))
+    assert out["a"].dtype == torch.float64
+    assert torch.equal(out["a"], torch.tensor([1.0, 2.0, 3.0], dtype=torch.float64))
+    assert torch.equal(out["b"], torch.tensor([2.0, 3.0, 4.0], dtype=torch.float64))
     assert torch.equal(lp, stored + 0.25)
 
 

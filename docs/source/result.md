@@ -51,9 +51,6 @@ n_grid_psi
 uniform_weight
 : Base probability level to add to ensure mass coverage.
 
-cache_log_likelihood
-: Whether to also store the log likelihood at the sampled $\phi_c$ in the `log_likelihood` column (exact mode only), so that `importance_sample(use_cached_log_likelihood=True)` does not need to generate the waveform again. The sampled $\phi_c$ is drawn from the grid distribution interpolated between grid points, so its likelihood is evaluated exactly from the cached mode inner products rather than read off the grid. The cached value matches a direct evaluation when the m-components obtained from `generate_hplus_hcross_m` sum to exactly the waveform from `generate_hplus_hcross`. This is guaranteed by construction for the DFT phase decomposition, so `dingo_pipe` enables caching by default only when the likelihood is not marginalized and the DFT phase decomposition is used. `importance_sample` also checks the cached values against a direct evaluation on 10 samples, and evaluates the likelihood instead if they deviate by more than `cached_log_likelihood_tolerance` (default $10^{-2}$).
-
 num_processes
 : For parallelization of synthetic phase sampling. This is usually the most expensive part of importance sampling, so it is advantageous to perform calculations in parallel.
 
@@ -62,6 +59,8 @@ num_processes
 Once samples are in the right form---including all relevant parameters *and* the log probability---importance sampling is carried out using the `importance_sample()` method. It allows to specify options for using a marginalized likelihood. (Time and phase marginalization are separately supported; see the documentation of {py:class}`dingo.gw.likelihood.StationaryGaussianGWLikelihood`.)
 
 As with the synthetic phase, importance sampling allows for parallelization.
+
+If the synthetic phase uses the exact mode sum with the DFT phase decomposition, it also stores the log likelihood at the drawn $\phi_c$ in the column `log_likelihood_cache`. Since the drawn $\phi_c$ generally lies between grid points, this value is evaluated exactly from the mode inner products rather than read off the grid. `importance_sample()` then uses these values instead of generating the waveforms again, unless a marginalized likelihood is requested.
 
 The target may be defined on different data from the proposal (in `dingo_pipe`, an `importance-sampling-updates` duration or frequency range regenerates the event). `reset_event()` then makes `event_metadata` the event analyzed and keeps the record the samples were drawn under as `importance_sampling_metadata["proposal_event_metadata"]`. The data they were drawn from are not kept; they remain in the sampling-stage file.
 

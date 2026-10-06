@@ -21,6 +21,12 @@ DOMAIN_SETTINGS = {
     "delta_f": 0.5,
 }
 WAVEFORM_GENERATOR = {"approximant": "IMRPhenomD", "f_ref": 20.0}
+# A model whose exact mode sum uses the DFT phase decomposition.
+WAVEFORM_GENERATOR_DFT = {
+    "approximant": "IMRPhenomXPHM",
+    "f_ref": 20.0,
+    "spin_conversion_phase": 0.0,
+}
 
 INTRINSIC_PRIOR = {
     "mass_1": "bilby.core.prior.Constraint(minimum=10.0, maximum=80.0, name='mass_1')",
@@ -47,11 +53,11 @@ EXTRINSIC_PRIOR = {
 }
 
 
-def _metadata():
+def _metadata(waveform_generator=WAVEFORM_GENERATOR):
     return {
         "dataset_settings": {
             "domain": DOMAIN_SETTINGS,
-            "waveform_generator": WAVEFORM_GENERATOR,
+            "waveform_generator": waveform_generator,
             "intrinsic_prior": INTRINSIC_PRIOR,
         },
         "train_settings": {
@@ -76,13 +82,16 @@ def _context():
 
 
 def make_gw_result(
-    n=5, drop_phase=False, drop_psi=False, event_metadata=None, exact_phase=False
+    n=5,
+    drop_phase=False,
+    drop_psi=False,
+    event_metadata=None,
+    waveform_generator=WAVEFORM_GENERATOR,
 ):
     """Build a gw Result with `n` rows drawn from its own prior (so columns/ranges are
     consistent with the waveform generator), plus a synthetic context. The dropped
     columns are also left out of the recorded inference parameters, as for a
-    network trained without them. `exact_phase` switches to a waveform generator
-    the exact phase grid supports (modes, spin_conversion_phase = 0)."""
+    network trained without them."""
     full_prior = build_prior_with_defaults(
         {**INTRINSIC_PRIOR, **get_extrinsic_prior_dict(EXTRINSIC_PRIOR)}
     )
@@ -90,14 +99,7 @@ def make_gw_result(
     samples["log_prob"] = 0.0
     dropped = ["phase"] * drop_phase + ["psi"] * drop_psi
     samples = samples.drop(columns=dropped)
-    settings = _metadata()
-    if exact_phase:
-        # The exact phase grid needs the mode decomposition, which IMRPhenomD lacks.
-        settings["dataset_settings"]["waveform_generator"] = {
-            "approximant": "IMRPhenomXPHM",
-            "f_ref": 20.0,
-            "spin_conversion_phase": 0.0,
-        }
+    settings = _metadata(waveform_generator)
     settings["train_settings"]["data"]["inference_parameters"] = [
         k for k in full_prior if k not in dropped
     ]
@@ -231,28 +233,70 @@ def test_synthetic_phase_adds_phase_column():
     assert not np.array_equal(result.samples["log_prob"].to_numpy(), log_prob_before)
 
 
-def test_proposal_extensions_drop_stale_log_likelihood():
-    # A log likelihood from an earlier importance sampling run does not describe the
-    # redrawn phases, so reusing it as a cache must fail rather than bias the weights.
-    result = make_gw_result(drop_phase=True)
-    result.samples["log_likelihood"] = 0.0
+@pytest.mark.parametrize(
+    "inexact",
+    [{"approximation_22_mode": True}, {"use_dft_phase_decomposition": False}],
+)
+def test_synthetic_phase_caches_only_when_exact(inexact):
+    # The (2, 2) approximation and the individual-mode decomposition do not reproduce
+    # a direct likelihood call, so they cache nothing, and a stale cache is dropped.
+    result = make_gw_result(drop_phase=True, waveform_generator=WAVEFORM_GENERATOR_DFT)
+    result.samples["log_likelihood_cache"] = 0.0
     result.sample_proposal_extensions(
-        synthetic_parameters_kwargs={"n_grid_phase": 16, "approximation_22_mode": True}
+        synthetic_parameters_kwargs={
+            "n_grid_phase": 16,
+            "approximation_22_mode": False,
+            **inexact,
+        }
     )
-    assert "log_likelihood" not in result.samples.columns
-    with pytest.raises(KeyError, match="requires log likelihoods"):
-        result.importance_sample(use_cached_log_likelihood=True)
+    assert "log_likelihood_cache" not in result.samples.columns
+
+
+def test_synthetic_phase_cache_matches_direct_importance_sampling(
+    tmp_path, monkeypatch
+):
+    # In exact mode with the DFT phase decomposition the synthetic phase caches the
+    # log likelihood at the drawn phase. After a save / reload, importance sampling
+    # uses it without evaluating the likelihood, with the same result as a direct
+    # evaluation.
+    result = make_gw_result(drop_phase=True, waveform_generator=WAVEFORM_GENERATOR_DFT)
+    result.sample_proposal_extensions(
+        synthetic_parameters_kwargs={"n_grid_phase": 16, "approximation_22_mode": False}
+    )
+    assert np.all(np.isfinite(result.samples["log_likelihood_cache"]))
+    file_name = str(tmp_path / "result.hdf5")
+    result.to_file(file_name=file_name)
+
+    cached = Result(file_name=file_name)
+
+    def no_evaluation(*args, **kwargs):
+        raise AssertionError("the likelihood was evaluated despite the cache")
+
+    with monkeypatch.context() as m:
+        m.setattr(StationaryGaussianGWLikelihood, "log_likelihood_multi", no_evaluation)
+        cached.importance_sample()
+
+    direct = Result(file_name=file_name)
+    direct.samples = direct.samples.drop(columns="log_likelihood_cache")
+    direct.importance_sample()
+    np.testing.assert_allclose(
+        cached.samples["log_likelihood"], direct.samples["log_likelihood"], atol=1e-6
+    )
+    np.testing.assert_allclose(
+        cached.samples["weights"], direct.samples["weights"], rtol=1e-6
+    )
 
 
 def test_synthetic_phase_psi_adds_both_columns():
     from dingo.gw.inference.steps import SyntheticPhaseFactor, SyntheticPhasePsiFactor
 
-    result = make_gw_result(drop_phase=True, drop_psi=True, exact_phase=True)
+    result = make_gw_result(
+        drop_phase=True, drop_psi=True, waveform_generator=WAVEFORM_GENERATOR_DFT
+    )
     kwargs = {
         "n_grid_phase": 16,
         "n_grid_psi": 8,
         "approximation_22_mode": False,
-        "cache_log_likelihood": True,
     }
     step = result._synthetic_parameters_step(
         kwargs, conditioning=list(result.prior), num_samples=len(result.samples)
@@ -275,20 +319,13 @@ def test_synthetic_phase_psi_adds_both_columns():
     assert not np.array_equal(result.samples["log_prob"].to_numpy(), log_prob_before)
     # The cached log likelihood is the exact one at the drawn (phase, psi), so
     # importance sampling can reuse it.
-    cached = result.samples["log_likelihood"].to_numpy().copy()
-    result.importance_sample(use_cached_log_likelihood=True)
+    cached = result.samples["log_likelihood_cache"].to_numpy().copy()
+    result.importance_sample()
     assert np.allclose(result.samples["log_likelihood"].to_numpy(), cached)
-    # It is exact for the parameters the chain used, which are float32: round the
-    # conditioning the same way before the direct evaluation.
     result._build_likelihood()
     theta = result.samples[
         [k for k, v in result.prior.items() if not isinstance(v, Constraint)]
     ]
-    theta = (
-        theta.astype(np.float32)
-        .astype(np.float64)
-        .assign(phase=theta["phase"], psi=theta["psi"])
-    )
     direct = result.likelihood.log_likelihood_multi(theta)
     assert np.allclose(cached, direct, rtol=1e-10)
 
@@ -305,7 +342,11 @@ def test_phase_recovery_default_serves_both_factors():
     ):
         default = "PhasePsiRecoveryDefault" if drop_psi else "PhaseRecoveryDefault"
         kwargs = IMPORTANCE_SAMPLING_SETTINGS[default]["synthetic_parameters"]
-        result = make_gw_result(drop_phase=True, drop_psi=drop_psi, exact_phase=True)
+        result = make_gw_result(
+            drop_phase=True,
+            drop_psi=drop_psi,
+            waveform_generator=WAVEFORM_GENERATOR_DFT,
+        )
         step = result._synthetic_parameters_step(
             kwargs, conditioning=list(result.prior), num_samples=100
         )

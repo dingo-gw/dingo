@@ -20,11 +20,7 @@ from bilby_pipe.utils import (
 )
 
 from dingo.gw.data.event_dataset import EventDataset
-from dingo.gw.domains import MultibandedFrequencyDomain, build_domain
-from dingo.gw.waveform_generator import (
-    NewInterfaceWaveformGenerator,
-    WaveformGenerator,
-)
+from dingo.gw.domains import MultibandedFrequencyDomain
 from dingo.pipe.default_settings import IMPORTANCE_SAMPLING_SETTINGS
 from dingo.pipe.parser import create_parser
 from dingo.gw.result import Result
@@ -258,53 +254,14 @@ class ImportanceSamplingInput(Input):
             )
             self.result.update_prior(self.prior_dict_updates)
 
-        likelihood_kwargs = dict(
-            time_marginalization_kwargs=self.importance_sampling_settings.get(
-                "time_marginalization"
-            ),
-            phase_marginalization_kwargs=self.importance_sampling_settings.get(
-                "phase_marginalization"
-            ),
-            calibration_marginalization_kwargs=self.calibration_marginalization_kwargs,
-        )
-
         # Calibration parameters and synthetic phase are drawn in one chain, the
         # calibration first, so that the phase is conditioned on it.
         synthetic_parameters_kwargs = None
-        use_cached_log_likelihood = False
         if "synthetic_parameters" in self.importance_sampling_settings:
             synthetic_parameters_kwargs = {
                 **self.importance_sampling_settings["synthetic_parameters"],
                 "num_processes": self.request_cpus,
             }
-            # The synthetic phase can cache the log likelihood at the drawn phase for
-            # importance sampling, unless it uses the (2, 2)-mode approximation,
-            # importance sampling uses a marginalized likelihood, or the cached value
-            # would not be exact.
-            use_cached_log_likelihood = synthetic_parameters_kwargs.get(
-                "cache_log_likelihood", True
-            )
-            # When psi is drawn, SyntheticPhasePsiFactor always uses the exact mode
-            # sum; approximation_22_mode (default True) only applies to phase only.
-            if use_cached_log_likelihood and (
-                (
-                    self.result.psi_prior is None
-                    and synthetic_parameters_kwargs.get("approximation_22_mode", True)
-                )
-                or any(v is not None for v in likelihood_kwargs.values())
-                or not self._synthetic_parameters_modes_exact(
-                    synthetic_parameters_kwargs
-                )
-            ):
-                logger.info(
-                    "Not caching the synthetic phase log likelihood (incompatible "
-                    "with approximation_22_mode, a marginalized likelihood, or the "
-                    "waveform model's mode decomposition)."
-                )
-                use_cached_log_likelihood = False
-            synthetic_parameters_kwargs["cache_log_likelihood"] = (
-                use_cached_log_likelihood
-            )
         calibration_sampling_kwargs = self.importance_sampling_settings.get(
             "calibration_sampling_settings"
         )
@@ -320,36 +277,17 @@ class ImportanceSamplingInput(Input):
 
         self.result.importance_sample(
             num_processes=self.request_cpus,
-            use_cached_log_likelihood=use_cached_log_likelihood,
-            **likelihood_kwargs,
+            time_marginalization_kwargs=self.importance_sampling_settings.get(
+                "time_marginalization"
+            ),
+            phase_marginalization_kwargs=self.importance_sampling_settings.get(
+                "phase_marginalization"
+            ),
+            calibration_marginalization_kwargs=self.calibration_marginalization_kwargs,
         )
 
         self.result.print_summary()
         self.result.to_file(os.path.join(self.result_directory, self.label + ".hdf5"))
-
-    def _synthetic_parameters_modes_exact(
-        self, synthetic_parameters_kwargs: dict
-    ) -> bool:
-        """
-        Whether the cached synthetic phase log likelihood is exact: it is computed
-        from the m-components of the waveform, which sum to exactly the waveform the
-        direct likelihood uses only if the waveform generator uses the DFT phase
-        decomposition.
-        """
-        dataset_settings = self.result.base_metadata["dataset_settings"]
-        wfg_settings = dict(dataset_settings["waveform_generator"])
-        if "use_dft_phase_decomposition" in synthetic_parameters_kwargs:
-            wfg_settings["use_dft_phase_decomposition"] = synthetic_parameters_kwargs[
-                "use_dft_phase_decomposition"
-            ]
-        if wfg_settings.get("new_interface", False):
-            wfg_class = NewInterfaceWaveformGenerator
-        else:
-            wfg_class = WaveformGenerator
-        waveform_generator = wfg_class(
-            domain=build_domain(dataset_settings["domain"]), **wfg_settings
-        )
-        return waveform_generator.uses_dft_phase_decomposition
 
     @property
     def priors(self):

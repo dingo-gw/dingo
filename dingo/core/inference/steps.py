@@ -527,20 +527,16 @@ class SampleTableFactor(Factor):
         Parameters
         ----------
         table : dict
-            The existing samples, one array-like column per parameter. Columns are
-            cast to float32, the chain dtype (network outputs and pins are
-            float32).
+            The existing samples, one array-like column per parameter. Their dtype
+            is kept, so that later steps see exactly the stored values (a caller
+            feeding a network casts to its dtype first).
         log_prob : array-like, optional
-            The stored log probability of each row, cast to float32. If omitted,
-            the chain has no tractable density.
+            The stored log probability of each row. If omitted, the chain has no
+            tractable density.
         """
-        self.table = {
-            k: torch.as_tensor(v, dtype=torch.float32) for k, v in table.items()
-        }
+        self.table = {k: torch.as_tensor(v) for k, v in table.items()}
         self.table_log_prob = (
-            torch.as_tensor(log_prob, dtype=torch.float32)
-            if log_prob is not None
-            else None
+            torch.as_tensor(log_prob) if log_prob is not None else None
         )
         self.parameters = list(self.table)
         self.conditioning: list[str] = []
@@ -628,6 +624,7 @@ class Reparametrization(ABC):
     inputs: list[str]
     conditioning: list[str]
     draws = False
+    annotations: list[str] = []
 
     @property
     def produces(self) -> list[str]:
@@ -870,16 +867,19 @@ class Step(Protocol):
         counts, or is run once (a point mass, a sample table, a one-to-one
         transform).
     produces : list[str]
-        All columns emitted: `parameters`, plus any annotation columns (kept in the
-        output for importance sampling, such as a `TargetCorrection`'s or a cached
-        log likelihood) and side channels (intermediates for later steps, dropped
-        from the output).
+        All columns emitted: `parameters`, plus `annotations` and side channels
+        (intermediates for later steps, dropped from the output).
+    annotations : list[str]
+        Emitted columns beyond `parameters` that are kept in the output for
+        importance sampling, such as a `TargetCorrection`'s or a cached log
+        likelihood.
     """
 
     parameters: list[str]
     conditioning: list[str]
     draws: bool
     produces: list[str]
+    annotations: list[str]
 
     def sample_and_log_prob(
         self,
