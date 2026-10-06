@@ -35,18 +35,15 @@ from bilby.gw.detector import PowerSpectralDensity
 from scipy.interpolate import interp1d
 from scipy.ndimage import grey_opening
 
-from dingo.gw.dataset._multibanded_domain_utils import (
-    build_extreme_prior,
-    print_mismatch_stats,
-)
-from dingo.gw.dataset.generate_dataset import generate_parameters_and_polarizations
-from dingo.gw.domains import (
-    MultibandedFrequencyDomain,
-    UniformFrequencyDomain,
-    build_domain,
-)
+from dingo.gw.dataset._multibanded_domain_utils import (build_extreme_prior,
+                                                        print_mismatch_stats)
+from dingo.gw.dataset.generate_dataset import \
+    generate_parameters_and_polarizations
+from dingo.gw.domains import (MultibandedFrequencyDomain,
+                              UniformFrequencyDomain, build_domain)
 from dingo.gw.gwutils import get_mismatch
-from dingo.gw.waveform_generator import NewInterfaceWaveformGenerator, WaveformGenerator
+from dingo.gw.waveform_generator import (NewInterfaceWaveformGenerator,
+                                          WaveformGenerator)
 
 
 def floor_to_power_of_2(x: float) -> float:
@@ -336,11 +333,11 @@ def _load_asd(
     Narrow spectral lines (violin modes, calibration lines, the 477–483 Hz artefact of
     ``aLIGO_ZERO_DET_high_P_asd.txt``, ...) are sharp features of the *noise*, not
     of the waveform. The problem is since we use the whitened strain to determine nodes,
-    this looks like stucture that cannot be decimated. A grayscale opening
-    clips local maxima leaving monotonic stretches of the ASD untouched. This way the broadband shape
-    of the PSD is still taken into account while the ASD specific spectral lines are not.
-    We do the smoothing in this function rather than hard coding the location
-    of the spectral line in ``aLIGO_ZERO_DET_high_P_asd.txt``since that is ASD-agnostic.
+    this looks like stucture that cannot be decimated. A grayscale opening 
+    clips local maxima leaving monotonic stretches of the ASD untouched. This way the broadband shape 
+    of the PSD is still taken into account while the ASD specific spectral lines are not. 
+    We do the smoothing in this function rather than hard coding the location 
+    of the spectral line in ``aLIGO_ZERO_DET_high_P_asd.txt``since that is ASD-agnostic. 
 
     Parameters
     ----------

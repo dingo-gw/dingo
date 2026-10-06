@@ -264,9 +264,7 @@ def test_wfd_size(wfd_settings: str, binary_prior: BinaryPrior):
 
 @pytest.mark.slow
 @pytest.mark.parametrize("leave_waveforms_on_disk", [False, True])
-def test_precision_dtype_conversion(
-    generate_waveform_dataset_small, leave_waveforms_on_disk
-):
+def test_precision_dtype_conversion(generate_waveform_dataset_small, leave_waveforms_on_disk):
     """
     Test that precision parameter correctly converts dtypes during HDF5 loading.
 
@@ -285,26 +283,26 @@ def test_precision_dtype_conversion(
 
     # Check parameters dtype (should be float32)
     for col in wfd_single.parameters.columns:
-        assert (
-            wfd_single.parameters[col].dtype == np.float32
-        ), f"Parameter {col} should be float32, got {wfd_single.parameters[col].dtype}"
+        assert wfd_single.parameters[col].dtype == np.float32, (
+            f"Parameter {col} should be float32, got {wfd_single.parameters[col].dtype}"
+        )
 
     # Check SVD dtypes (V should be complex64, s should be float32)
-    assert (
-        wfd_single.svd["V"].dtype == np.complex64
-    ), f"SVD V should be complex64, got {wfd_single.svd['V'].dtype}"
-    assert (
-        wfd_single.svd["s"].dtype == np.float32
-    ), f"SVD s should be float32, got {wfd_single.svd['s'].dtype}"
+    assert wfd_single.svd["V"].dtype == np.complex64, (
+        f"SVD V should be complex64, got {wfd_single.svd['V'].dtype}"
+    )
+    assert wfd_single.svd["s"].dtype == np.float32, (
+        f"SVD s should be float32, got {wfd_single.svd['s'].dtype}"
+    )
 
     # Check polarizations dtype via __getitem__ (complex64)
     el = wfd_single[0]
-    assert (
-        el["waveform"]["h_plus"].dtype == np.complex64
-    ), f"h_plus should be complex64, got {el['waveform']['h_plus'].dtype}"
-    assert (
-        el["waveform"]["h_cross"].dtype == np.complex64
-    ), f"h_cross should be complex64, got {el['waveform']['h_cross'].dtype}"
+    assert el["waveform"]["h_plus"].dtype == np.complex64, (
+        f"h_plus should be complex64, got {el['waveform']['h_plus'].dtype}"
+    )
+    assert el["waveform"]["h_cross"].dtype == np.complex64, (
+        f"h_cross should be complex64, got {el['waveform']['h_cross'].dtype}"
+    )
 
     # Load with double precision
     wfd_double = WaveformDataset(
@@ -315,33 +313,31 @@ def test_precision_dtype_conversion(
 
     # Check parameters dtype (should be float64)
     for col in wfd_double.parameters.columns:
-        assert (
-            wfd_double.parameters[col].dtype == np.float64
-        ), f"Parameter {col} should be float64, got {wfd_double.parameters[col].dtype}"
+        assert wfd_double.parameters[col].dtype == np.float64, (
+            f"Parameter {col} should be float64, got {wfd_double.parameters[col].dtype}"
+        )
 
     # Check SVD dtypes (V should be complex128, s should be float64)
-    assert (
-        wfd_double.svd["V"].dtype == np.complex128
-    ), f"SVD V should be complex128, got {wfd_double.svd['V'].dtype}"
-    assert (
-        wfd_double.svd["s"].dtype == np.float64
-    ), f"SVD s should be float64, got {wfd_double.svd['s'].dtype}"
+    assert wfd_double.svd["V"].dtype == np.complex128, (
+        f"SVD V should be complex128, got {wfd_double.svd['V'].dtype}"
+    )
+    assert wfd_double.svd["s"].dtype == np.float64, (
+        f"SVD s should be float64, got {wfd_double.svd['s'].dtype}"
+    )
 
     # Check polarizations dtype via __getitem__ (complex128)
     el = wfd_double[0]
-    assert (
-        el["waveform"]["h_plus"].dtype == np.complex128
-    ), f"h_plus should be complex128, got {el['waveform']['h_plus'].dtype}"
-    assert (
-        el["waveform"]["h_cross"].dtype == np.complex128
-    ), f"h_cross should be complex128, got {el['waveform']['h_cross'].dtype}"
+    assert el["waveform"]["h_plus"].dtype == np.complex128, (
+        f"h_plus should be complex128, got {el['waveform']['h_plus'].dtype}"
+    )
+    assert el["waveform"]["h_cross"].dtype == np.complex128, (
+        f"h_cross should be complex128, got {el['waveform']['h_cross'].dtype}"
+    )
 
 
 @pytest.mark.slow
 @pytest.mark.parametrize("leave_waveforms_on_disk", [False, True])
-def test_no_precision_preserves_original_dtype(
-    generate_waveform_dataset_small, leave_waveforms_on_disk
-):
+def test_no_precision_preserves_original_dtype(generate_waveform_dataset_small, leave_waveforms_on_disk):
     """
     Test that when precision is not specified, original HDF5 dtypes are preserved.
     """
@@ -360,23 +356,23 @@ def test_no_precision_preserves_original_dtype(
 
     # Parameters should be float64 (default numpy/HDF5 float type)
     for col in wfd.parameters.columns:
-        assert (
-            wfd.parameters[col].dtype == np.float64
-        ), f"Parameter {col} should be float64 (original), got {wfd.parameters[col].dtype}"
+        assert wfd.parameters[col].dtype == np.float64, (
+            f"Parameter {col} should be float64 (original), got {wfd.parameters[col].dtype}"
+        )
 
     # SVD should preserve original dtypes
-    assert (
-        wfd.svd["V"].dtype == np.complex128
-    ), f"SVD V should be complex128 (original), got {wfd.svd['V'].dtype}"
-    assert (
-        wfd.svd["s"].dtype == np.float64
-    ), f"SVD s should be float64 (original), got {wfd.svd['s'].dtype}"
+    assert wfd.svd["V"].dtype == np.complex128, (
+        f"SVD V should be complex128 (original), got {wfd.svd['V'].dtype}"
+    )
+    assert wfd.svd["s"].dtype == np.float64, (
+        f"SVD s should be float64 (original), got {wfd.svd['s'].dtype}"
+    )
 
     # Polarizations should be complex128 (original)
     el = wfd[0]
-    assert (
-        el["waveform"]["h_plus"].dtype == np.complex128
-    ), f"h_plus should be complex128 (original), got {el['waveform']['h_plus'].dtype}"
+    assert el["waveform"]["h_plus"].dtype == np.complex128, (
+        f"h_plus should be complex128 (original), got {el['waveform']['h_plus'].dtype}"
+    )
 
 
 @pytest.mark.slow

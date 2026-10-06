@@ -78,7 +78,6 @@ only the paths this test stages/touches are shown)::
 Step 3 packs this whole directory into a read-only ``dingo-heavy.sif``.  Both the
 sandbox and the SIF live inside a TemporaryDirectory and are deleted on exit.
 """
-
 import math
 import os
 import re
@@ -91,9 +90,7 @@ from tests.integration.conftest import APPTAINER_CMD, HAS_APPTAINER, HAS_GPU
 
 INTEGRATION_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.abspath(os.path.join(INTEGRATION_DIR, "..", ".."))
-EFFICIENCY_FLOOR_PCT = (
-    3.0  # loose smoke floor; the scaled-down config is not tuned for high efficiency
-)
+EFFICIENCY_FLOOR_PCT = 3.0  # loose smoke floor; the scaled-down config is not tuned for high efficiency
 
 # Version fed to setuptools_scm so pip install succeeds without a .git directory.
 # ``git archive`` omits .git, so SETUPTOOLS_SCM_PRETEND_VERSION must be set.
@@ -118,7 +115,7 @@ _STAGE_CEILINGS = {
 }
 
 # GW150914 reference values (GWTC-1 medians).
-_GW150914_CHIRP_MASS_TRUTH = 31.2  # Msun, detector-frame
+_GW150914_CHIRP_MASS_TRUTH = 31.2   # Msun, detector-frame
 _GW150914_MASS_RATIO_TRUTH = 0.864
 
 # Loose recovery window for chirp_mass: ±8 Msun of the truth.
@@ -174,7 +171,8 @@ def test_heavy_container_e2e():
         # No %post section is executed, so no user-namespace mapping is needed.
         # ------------------------------------------------------------------
         subprocess.run(
-            [APPTAINER_CMD, "build", "--sandbox", sandbox, "docker://python:3.11"],
+            [APPTAINER_CMD, "build", "--sandbox", sandbox,
+             "docker://python:3.11"],
             check=True,
         )
 
@@ -184,8 +182,7 @@ def test_heavy_container_e2e():
         dingo_src_tar = os.path.join(build_dir, "dingo-src.tar")
         subprocess.run(
             ["git", "archive", "--format=tar", "-o", dingo_src_tar, "HEAD"],
-            cwd=REPO_ROOT,
-            check=True,
+            cwd=REPO_ROOT, check=True,
         )
         dingo_dst = os.path.join(sandbox, "opt", "dingo")
         os.makedirs(dingo_dst, exist_ok=True)
@@ -209,7 +206,7 @@ def test_heavy_container_e2e():
         # Step 2c: set the runscript (replace the docker CMD default).
         runscript_path = os.path.join(sandbox, ".singularity.d", "runscript")
         with open(runscript_path, "w") as fh:
-            fh.write('#!/bin/sh\nexec python3 /opt/pipeline/run_pipeline.py "$@"\n')
+            fh.write("#!/bin/sh\nexec python3 /opt/pipeline/run_pipeline.py \"$@\"\n")
         os.chmod(runscript_path, 0o755)
 
         # ------------------------------------------------------------------
@@ -218,19 +215,10 @@ def test_heavy_container_e2e():
         # driver; pinning to cu128 keeps the wheel within the installed driver.
         # ------------------------------------------------------------------
         subprocess.run(
-            [
-                APPTAINER_CMD,
-                "exec",
-                "--writable",
-                sandbox,
-                "pip3",
-                "install",
-                "--no-cache-dir",
-                "torch",
-                "torchvision",
-                "--index-url",
-                "https://download.pytorch.org/whl/cu128",
-            ],
+            [APPTAINER_CMD, "exec", "--writable", sandbox,
+             "pip3", "install", "--no-cache-dir",
+             "torch", "torchvision",
+             "--index-url", "https://download.pytorch.org/whl/cu128"],
             check=True,
         )
 
@@ -246,18 +234,9 @@ def test_heavy_container_e2e():
             SETUPTOOLS_SCM_PRETEND_VERSION=_DINGO_VERSION,
         )
         subprocess.run(
-            [
-                APPTAINER_CMD,
-                "exec",
-                "--writable",
-                sandbox,
-                "pip3",
-                "install",
-                "--no-cache-dir",
-                "/opt/dingo",
-            ],
-            env=build_env,
-            check=True,
+            [APPTAINER_CMD, "exec", "--writable", sandbox,
+             "pip3", "install", "--no-cache-dir", "/opt/dingo"],
+            env=build_env, check=True,
         )
 
         # ------------------------------------------------------------------
@@ -275,10 +254,7 @@ def test_heavy_container_e2e():
         run_env = dict(os.environ, CUDA_VISIBLE_DEVICES="0")
         proc = subprocess.run(
             [APPTAINER_CMD, "run", "--nv", sif],
-            cwd=build_dir,
-            env=run_env,
-            capture_output=True,
-            text=True,
+            cwd=build_dir, env=run_env, capture_output=True, text=True,
             # Timeout must exceed the sum of all per-stage ceilings so that a
             # pathological slow run is caught by the per-stage ceiling assertions
             # (which report which stage hung) rather than by a bare TimeoutExpired.
@@ -292,9 +268,9 @@ def test_heavy_container_e2e():
     match = re.search(r"Sample efficiency = ([0-9.]+)%", output)
     assert match, f"no 'Sample efficiency' line in output:\n{output}"
     efficiency = float(match.group(1))
-    assert (
-        efficiency >= EFFICIENCY_FLOOR_PCT
-    ), f"sample efficiency {efficiency}% below floor {EFFICIENCY_FLOOR_PCT}%"
+    assert efficiency >= EFFICIENCY_FLOOR_PCT, (
+        f"sample efficiency {efficiency}% below floor {EFFICIENCY_FLOOR_PCT}%"
+    )
 
     # Parse and display per-stage timings.
     stage_times = _parse_stage_times(output)
@@ -316,21 +292,19 @@ def test_heavy_container_e2e():
     assert gw_eff_match, f"no GW150914_EFFICIENCY line in output:\n{output[-3000:]}"
     gw_eff = float(gw_eff_match.group(1))
     print(f"GW150914 sample efficiency: {gw_eff:.2f}%")
-    assert (
-        math.isfinite(gw_eff) and gw_eff > 0.0
-    ), f"GW150914 efficiency {gw_eff}% is not positive-finite"
+    assert math.isfinite(gw_eff) and gw_eff > 0.0, (
+        f"GW150914 efficiency {gw_eff}% is not positive-finite"
+    )
 
     gw_cm_match = re.search(r"GW150914_CHIRP_MASS = ([0-9.]+)", output)
     assert gw_cm_match, f"no GW150914_CHIRP_MASS line in output:\n{output[-3000:]}"
     gw_cm = float(gw_cm_match.group(1))
-    print(
-        f"GW150914 recovered chirp_mass median: {gw_cm:.3f} Msun  (truth ~{_GW150914_CHIRP_MASS_TRUTH})"
-    )
+    print(f"GW150914 recovered chirp_mass median: {gw_cm:.3f} Msun  (truth ~{_GW150914_CHIRP_MASS_TRUTH})")
     assert math.isfinite(gw_cm), f"GW150914 chirp_mass median is not finite: {gw_cm}"
     # Loose smoke guard: must lie within the training prior [20, 40] Msun.
-    assert (
-        20.0 <= gw_cm <= 40.0
-    ), f"GW150914 chirp_mass median {gw_cm:.3f} Msun outside training prior [20, 40]"
+    assert 20.0 <= gw_cm <= 40.0, (
+        f"GW150914 chirp_mass median {gw_cm:.3f} Msun outside training prior [20, 40]"
+    )
     # Loose smoke guard: within ±{_GW150914_CHIRP_MASS_WINDOW} Msun of GWTC-1 median.
     # This is a very broad window — purely a gross-error check, not a precision test.
     assert abs(gw_cm - _GW150914_CHIRP_MASS_TRUTH) <= _GW150914_CHIRP_MASS_WINDOW, (
@@ -341,9 +315,7 @@ def test_heavy_container_e2e():
     gw_mr_match = re.search(r"GW150914_MASS_RATIO = ([0-9.]+)", output)
     assert gw_mr_match, f"no GW150914_MASS_RATIO line in output:\n{output[-3000:]}"
     gw_mr = float(gw_mr_match.group(1))
-    print(
-        f"GW150914 recovered mass_ratio median: {gw_mr:.4f}  (truth ~{_GW150914_MASS_RATIO_TRUTH})"
-    )
+    print(f"GW150914 recovered mass_ratio median: {gw_mr:.4f}  (truth ~{_GW150914_MASS_RATIO_TRUTH})")
     assert math.isfinite(gw_mr), f"GW150914 mass_ratio median is not finite: {gw_mr}"
     # SANITY BOUND ONLY — NOT a recovery guard.
     # mass_ratio is intrinsically poorly constrained with this scaled-down network;
@@ -351,9 +323,9 @@ def test_heavy_container_e2e():
     # [0.5, 1.0] (a tautological bound for an NPE).  The meaningful recovery
     # guard is chirp_mass (±8 Msun window above) — that is what detects gross
     # problems (wrong data, wrong model, unit error).
-    assert (
-        0.5 <= gw_mr <= 1.0
-    ), f"GW150914 mass_ratio median {gw_mr:.4f} outside training prior [0.5, 1.0]"
+    assert 0.5 <= gw_mr <= 1.0, (
+        f"GW150914 mass_ratio median {gw_mr:.4f} outside training prior [0.5, 1.0]"
+    )
 
     gw_rf_match = re.search(r"GW150914_RESULT_FILE = (.+)", output)
     if gw_rf_match:

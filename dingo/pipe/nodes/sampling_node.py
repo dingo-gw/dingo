@@ -21,6 +21,7 @@ class SamplingNode(AnalysisNode):
 
         self.setup_arguments()
 
+
         # Add extra arguments for dingo
         self.arguments.add("label", self.label)
         self.arguments.add("event-data-file", generation_node.event_data_file)
@@ -39,6 +40,7 @@ class SamplingNode(AnalysisNode):
 
         if self.device == "cuda":
             self.extra_lines.append("request_gpus = 1")
+
 
         if self.inputs.transfer_files or self.inputs.osg:
             input_files_to_transfer = [
@@ -93,7 +95,9 @@ class SamplingNode(AnalysisNode):
     @property
     def samples_file(self):
         # TODO: Maybe remove -- not needed.
-        return os.path.join(self.inputs.result_directory, self.label + ".hdf5")
+        return os.path.join(
+            self.inputs.result_directory, self.label + ".hdf5"
+        )
 
     @property
     def result_file(self):

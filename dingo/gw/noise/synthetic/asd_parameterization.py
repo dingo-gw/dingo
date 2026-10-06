@@ -15,9 +15,7 @@ MAX_A, MAX_Q = 12, 1000
 MAXFEV = 5000000
 
 
-def parameterize_asd_dataset(
-    real_dataset, parameterization_settings, num_processes, verbose
-):
+def parameterize_asd_dataset(real_dataset, parameterization_settings, num_processes, verbose):
     """
     Parameterize a dataset of ASDs using a spline fit to the broadband noise and Lorentzians for the spectral features.
 
@@ -41,23 +39,15 @@ def parameterize_asd_dataset(
             with threadpool_limits(limits=1, user_api="blas"):
                 with Pool(processes=num_processes) as pool:
                     parameters_dict[det] = parameterize_asds_parallel(
-                        asds,
-                        domain,
-                        parameterization_settings,
-                        pool=pool,
-                        verbose=verbose,
+                        asds, domain, parameterization_settings, pool=pool, verbose=verbose
                     )
         else:
-            parameters_dict[det] = parameterize_asds_parallel(
-                asds, domain, parameterization_settings
-            )
+            parameters_dict[det] = parameterize_asds_parallel(asds, domain, parameterization_settings)
 
     return parameters_dict
 
 
-def parameterize_asds_parallel(
-    asds, domain, parameterization_settings, pool=None, verbose=False
-):
+def parameterize_asds_parallel(asds, domain, parameterization_settings, pool=None, verbose=False):
     """
     Helper function to be called for parallel ASD parameterization.
 
@@ -76,22 +66,12 @@ def parameterize_asds_parallel(
 
     """
 
-    task_func = partial(
-        parameterize_single_psd,
-        domain=domain,
-        parameterization_settings=parameterization_settings,
-    )
-    psds = asds**2
+    task_func = partial(parameterize_single_psd, domain=domain, parameterization_settings=parameterization_settings)
+    psds = asds ** 2
     if pool is not None:
-        parameters_list = list(
-            tqdm.tqdm(
-                pool.imap(task_func, psds), total=psds.shape[0], disable=not verbose
-            )
-        )
+        parameters_list = list(tqdm.tqdm(pool.imap(task_func, psds), total=psds.shape[0], disable=not verbose))
     else:
-        parameters_list = list(
-            tqdm.tqdm(map(task_func, psds), total=psds.shape[0], disable=not verbose)
-        )
+        parameters_list = list(tqdm.tqdm(map(task_func, psds), total=psds.shape[0], disable=not verbose))
 
     parameters = {
         feature: np.stack([asd_param[feature] for asd_param in parameters_list])

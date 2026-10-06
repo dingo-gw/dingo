@@ -1,5 +1,4 @@
 """Test if asimov.py can correctly choose which DINGO network to use."""
-
 import os
 import copy
 import pytest
@@ -25,7 +24,7 @@ class DummyProduction:
         self.pipeline = self.name = "DINGO"
         self.meta = {
             "available networks": available_networks,
-            "data": {"segment length": 4},
+            "data": {"segment length" : 4},
             "interferometers": ["H1", "L1"],
             "quality": {
                 "minimum frequency": {"H1": 20, "L1": 20},
@@ -90,7 +89,13 @@ def create_test_network_files(test_dir):
     reference_meta = {
         "metadata": {
             "dataset_settings": {
-                "domain": {"base_domain": {"f_min": 10, "f_max": 1024, "delta_f": 0.25}}
+                "domain": {
+                    "base_domain": {
+                        "f_min": 10,
+                        "f_max": 1024,
+                        "delta_f": 0.25
+                    }
+                }
             },
             "train_settings": {
                 "data": {
@@ -99,42 +104,37 @@ def create_test_network_files(test_dir):
                     "domain_update": {},
                     "random_strain_cropping": {"f_min_upper": 20},
                 }
-            },
+            }
         }
     }
 
     valid_modifications = [
         {},
         {
-            "path": [
-                "metadata",
-                "train_settings",
-                "data",
-                "extrinsic_prior",
-                "luminosity_distance",
-            ],
-            "value": "maximum=2000",
-        },
+            "path": ["metadata", "train_settings", "data", "extrinsic_prior", "luminosity_distance"],
+            "value": "maximum=2000"
+        }
     ]
 
     invalid_modifications = [
         {
             "path": ["metadata", "dataset_settings", "domain", "base_domain", "f_min"],
-            "value": 30,
+            "value": 30
         },
         {
             "path": ["metadata", "dataset_settings", "domain", "base_domain", "f_max"],
-            "value": 512,
+            "value": 512
         },
-        {"path": ["metadata", "train_settings", "data", "detectors"], "value": ["H1"]},
+        {
+            "path": ["metadata", "train_settings", "data", "detectors"],
+            "value": ["H1"]
+        }
     ]
 
-    valid_paths = apply_modifications(
-        valid_modifications, reference_meta, test_dir, prefix="valid"
-    )
-    invalid_paths = apply_modifications(
-        invalid_modifications, reference_meta, test_dir, prefix="invalid"
-    )
+    valid_paths = apply_modifications(valid_modifications, reference_meta,
+                                      test_dir, prefix="valid")
+    invalid_paths = apply_modifications(invalid_modifications, reference_meta,
+                                        test_dir, prefix="invalid")
     return valid_paths, invalid_paths
 
 
@@ -151,10 +151,8 @@ def test_valid_networks(valid_and_invalid_paths):
     for path in valid_paths:
         pipe = known_pipelines["dingo"](DummyProduction(available_networks=[path]))
         pipe.before_config()
-        assert (
-            path["model"] == pipe.production.meta["networks"]["model"]
-        ), f"Network {path['model']} should be valid and have 'network' key"
-
+        assert path["model"] == pipe.production.meta["networks"]["model"], \
+            f"Network {path['model']} should be valid and have 'network' key"
 
 @pytest.mark.asimov
 def test_invalid_networks(valid_and_invalid_paths):
@@ -164,7 +162,6 @@ def test_invalid_networks(valid_and_invalid_paths):
         pipe = known_pipelines["dingo"](DummyProduction(available_networks=[path]))
         with pytest.raises(PipelineException):
             pipe.before_config()
-
 
 @pytest.mark.asimov
 def test_network_preference(valid_and_invalid_paths):
