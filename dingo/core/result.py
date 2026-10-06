@@ -212,6 +212,10 @@ class Result(DingoDataset):
         self.sampler_context = self._build_context()
         self._build_domain()
 
+        # A log likelihood cached on the old data does not describe the new data.
+        if self.samples is not None and "log_likelihood_cache" in self.samples:
+            self.samples = self.samples.drop(columns="log_likelihood_cache")
+
     @property
     def num_samples(self):
         if self.samples is not None:
@@ -288,6 +292,11 @@ class Result(DingoDataset):
         likelihood_kwargs : dict
             kwargs that are forwarded to the likelihood constructor. E.g., options for
             marginalization.
+
+        If the samples carry a `log_likelihood_cache` column (the plain log
+        likelihood, stored by a chain step that evaluated it at its draws, e.g. the
+        synthetic phase), it is used instead of evaluating the likelihood, unless
+        likelihood options are given, since these change the likelihood.
         """
 
         if self.samples is None:
@@ -325,15 +334,33 @@ class Result(DingoDataset):
         valid_samples = np.isfinite(log_prior + delta_log_prob_target)
         theta = theta.iloc[valid_samples]
 
-        print(f"Calculating {len(theta)} likelihoods.")
-        t0 = time.time()
-        log_likelihood = self.likelihood.log_likelihood_multi(
-            theta, num_processes=num_processes
-        )
-        print(f"Done. This took {time.time() - t0:.2f} seconds.")
+        # As in _build_likelihood, any settings dict (even {}) changes the likelihood,
+        # so the cached plain log likelihood serves only a plain evaluation.
+        if "log_likelihood_cache" in self.samples and not any(
+            v is not None for v in likelihood_kwargs.values()
+        ):
+            log_likelihood = self.samples["log_likelihood_cache"].to_numpy()[
+                valid_samples
+            ]
+            if not np.all(np.isfinite(log_likelihood)):
+                raise ValueError(
+                    f"{np.sum(~np.isfinite(log_likelihood))} samples within the prior "
+                    f"have no cached log likelihood. Were the samples or the prior "
+                    f"changed after the log likelihoods were cached?"
+                )
+            print(f"Using {len(log_likelihood)} cached log likelihoods.")
+        else:
+            print(f"Calculating {len(theta)} likelihoods.")
+            t0 = time.time()
+            log_likelihood = self.likelihood.log_likelihood_multi(
+                theta, num_processes=num_processes
+            )
+            print(f"Done. This took {time.time() - t0:.2f} seconds.")
 
         self.log_noise_evidence = self.likelihood.log_Zn
         self.samples["log_prior"] = log_prior
+        # Samples outside the prior carry no log likelihood.
+        self.samples["log_likelihood"] = np.nan
         self.samples.loc[valid_samples, "log_likelihood"] = log_likelihood
         self._calculate_evidence()
 

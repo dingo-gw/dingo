@@ -53,6 +53,8 @@ Once samples are in the right form---including all relevant parameters *and* the
 
 As with the synthetic phase, importance sampling allows for parallelization.
 
+If the synthetic phase uses the exact mode sum with the DFT phase decomposition, it also stores the log likelihood at the drawn $\phi_c$ in the column `log_likelihood_cache`. Since the drawn $\phi_c$ generally lies between grid points, this value is evaluated exactly from the mode inner products rather than read off the grid. `importance_sample()` then uses these values instead of generating the waveforms again, unless a marginalized likelihood is requested.
+
 The target may be defined on different data from the proposal (in `dingo_pipe`, an `importance-sampling-updates` duration or frequency range regenerates the event). `reset_event()` then makes `event_metadata` the event analyzed and keeps the record the samples were drawn under as `importance_sampling_metadata["proposal_event_metadata"]`. The data they were drawn from are not kept; they remain in the sampling-stage file.
 
 ## Plotting

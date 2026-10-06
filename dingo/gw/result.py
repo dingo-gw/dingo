@@ -456,6 +456,10 @@ class Result(CoreResult):
             raise ValueError(
                 "Pass calibration_sampling_kwargs and / or synthetic_phase_kwargs."
             )
+        if "log_likelihood_cache" in self.samples:
+            # A cached log likelihood does not describe the redrawn phases or
+            # calibration.
+            self.samples = self.samples.drop(columns="log_likelihood_cache")
 
         param_keys = [k for k, v in self.prior.items() if not isinstance(v, Constraint)]
         theta = self.samples[param_keys]
@@ -491,9 +495,9 @@ class Result(CoreResult):
         )
 
         # Out-of-prior samples get placeholder values 0 (finite, so that their prior
-        # is -inf rather than nan) and log_prob = nan.
+        # is -inf rather than nan), log_prob = nan and no cached log likelihood.
         for k in [c for s in steps for c in s.produces]:
-            column = np.zeros(len(theta))
+            column = np.full(len(theta), np.nan if k == "log_likelihood_cache" else 0.0)
             column[within_prior] = out[k].cpu().numpy()
             self.samples[k] = column
         log_prob_array = np.full(len(theta), np.nan)
@@ -633,12 +637,23 @@ class Result(CoreResult):
                     "use_dft_phase_decomposition"
                 ]
             }
+        approximation_22_mode = synthetic_phase_kwargs.get(
+            "approximation_22_mode", True
+        )
+        # Cache the log likelihood at the drawn phase only where it equals a direct
+        # likelihood call: the exact mode sum with the DFT phase decomposition, whose
+        # m-components sum to exactly the direct waveform. Only the DFT flag is
+        # forwarded as wfg_updates, so the direct waveform is the same model's.
+        cache_log_likelihood = (
+            not approximation_22_mode
+            and self.sampler_context.likelihood(
+                use_base_domain=self.use_base_domain, wfg_updates=wfg_updates
+            ).waveform_generator.uses_dft_phase_decomposition
+        )
         step = SyntheticPhaseFactor(
             conditioning=conditioning,
             n_grid=synthetic_phase_kwargs["n_grid"],
-            approximation_22_mode=synthetic_phase_kwargs.get(
-                "approximation_22_mode", True
-            ),
+            approximation_22_mode=approximation_22_mode,
             uniform_weight=synthetic_phase_kwargs.get("uniform_weight", 0.01),
             # Put a cap on the number of processes to avoid overhead.
             num_processes=min(
@@ -647,6 +662,7 @@ class Result(CoreResult):
             ),
             use_base_domain=self.use_base_domain,
             wfg_updates=wfg_updates,
+            cache_log_likelihood=cache_log_likelihood,
         )
         return step
 
@@ -683,7 +699,8 @@ class Result(CoreResult):
             resampling.
             * The spin angles phi_jl and theta_jn are transformed to account for a
             difference in phase definition.
-            * Some columns are dropped: delta_log_prob_target, log_prob
+            * Some columns are dropped: delta_log_prob_target, log_prob,
+            log_likelihood_cache
 
         Parameters
         ----------
@@ -716,7 +733,10 @@ class Result(CoreResult):
 
         # Remove unwanted columns.
         samples.drop(
-            ["delta_log_prob_target", "log_prob"], axis=1, errors="ignore", inplace=True
+            ["delta_log_prob_target", "log_prob", "log_likelihood_cache"],
+            axis=1,
+            errors="ignore",
+            inplace=True,
         )
         for col in samples.columns:
             if col.endswith("_proxy"):

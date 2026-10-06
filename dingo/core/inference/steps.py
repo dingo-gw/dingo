@@ -161,19 +161,25 @@ class Factor(ABC):
         Whether the factor draws new samples (the default) or is a point mass or
         fixed table that is run once. The chain's sample counts go to the steps
         that draw, one each; an int `num_samples` is the count for the first.
+    annotations : list[str]
+        Columns the factor emits beyond its `parameters` that are kept in the chain
+        output for importance sampling, such as a cached log likelihood. They are part
+        of `produces`; side channels are dropped. Target corrections declare
+        their columns the same way.
     """
 
     parameters: list[str]
     conditioning: list[str]
     draws = True
+    annotations: list[str] = []
 
     @property
     def produces(self) -> list[str]:
-        """The emitted columns: `parameters`, plus any side channels (overridden
-        then). A side channel is an intermediate that later steps may read, such
-        as the detector times a GNPE network recomputes; it is not part of the
-        chain's output."""
-        return self.parameters
+        """The emitted columns: `parameters` and `annotations`, plus any side
+        channels (overridden then). A side channel is an intermediate that later
+        steps may read, such as the detector times a GNPE network recomputes; unlike
+        an annotation, it is not part of the chain's output."""
+        return self.parameters + self.annotations
 
     @abstractmethod
     def sample_and_log_prob(
@@ -521,20 +527,16 @@ class SampleTableFactor(Factor):
         Parameters
         ----------
         table : dict
-            The existing samples, one array-like column per parameter. Columns are
-            cast to float32, the chain dtype (network outputs and pins are
-            float32).
+            The existing samples, one array-like column per parameter. Their dtype
+            is kept, so that later steps see exactly the stored values (a caller
+            feeding a network casts to its dtype first).
         log_prob : array-like, optional
-            The stored log probability of each row, cast to float32. If omitted,
-            the chain has no tractable density.
+            The stored log probability of each row. If omitted, the chain has no
+            tractable density.
         """
-        self.table = {
-            k: torch.as_tensor(v, dtype=torch.float32) for k, v in table.items()
-        }
+        self.table = {k: torch.as_tensor(v) for k, v in table.items()}
         self.table_log_prob = (
-            torch.as_tensor(log_prob, dtype=torch.float32)
-            if log_prob is not None
-            else None
+            torch.as_tensor(log_prob) if log_prob is not None else None
         )
         self.parameters = list(self.table)
         self.conditioning: list[str] = []
@@ -622,6 +624,7 @@ class Reparametrization(ABC):
     inputs: list[str]
     conditioning: list[str]
     draws = False
+    annotations: list[str] = []
 
     @property
     def produces(self) -> list[str]:
@@ -789,6 +792,11 @@ class TargetCorrection(ABC):
     conditioning: list[str]
     draws = False
 
+    @property
+    def annotations(self) -> list[str]:
+        """The emitted annotation columns, which the chain keeps in its output."""
+        return self.produces
+
     @abstractmethod
     def correction(
         self, given: dict[str, torch.Tensor], context: "SamplerContext"
@@ -859,15 +867,19 @@ class Step(Protocol):
         counts, or is run once (a point mass, a sample table, a one-to-one
         transform).
     produces : list[str]
-        All columns emitted: `parameters`, plus any side channels (intermediates
-        for later steps, dropped from the output) or, for a `TargetCorrection`,
-        its annotation column(s), which are kept.
+        All columns emitted: `parameters`, plus `annotations` and side channels
+        (intermediates for later steps, dropped from the output).
+    annotations : list[str]
+        Emitted columns beyond `parameters` that are kept in the output for
+        importance sampling, such as a `TargetCorrection`'s or a cached log
+        likelihood.
     """
 
     parameters: list[str]
     conditioning: list[str]
     draws: bool
     produces: list[str]
+    annotations: list[str]
 
     def sample_and_log_prob(
         self,

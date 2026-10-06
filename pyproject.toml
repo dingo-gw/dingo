@@ -88,7 +88,7 @@ dev = [
     "sphinxcontrib-bibtex",
 ]
 wandb = ["wandb"]
-pyseobnr = ["pyseobnr"]
+pyseobnr = ["pyseobnr>=0.3.7"]
 
 [dependency-groups]
 dev = [
@@ -139,3 +139,8 @@ dingo_train_condor = "dingo.gw.training.train_pipeline_condor:train_condor"
 
 [project.entry-points."asimov.pipelines"]
 dingo = "dingo.asimov.asimov:Dingo"
+
+[tool.uv]
+# pygsl-lite (a pyseobnr dependency, sdist only) calls distutils' spawn with
+# positional arguments, which setuptools 84 made keyword-only.
+build-constraint-dependencies = ["setuptools<84"]
