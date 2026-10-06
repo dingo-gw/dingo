@@ -688,24 +688,22 @@ class Result(CoreResult):
             raise ValueError(
                 "synthetic_parameters_kwargs: n_grid has been renamed to n_grid_phase."
             )
+        # The psi factor is exact-mode only; the phase-only factor defaults to (2, 2).
+        approximation_22_mode = synthetic_parameters_kwargs.get(
+            "approximation_22_mode", self.psi_prior is None
+        )
         # The (phase, psi) grid is exact-mode only; don't silently ignore the setting.
-        if self.psi_prior is not None and synthetic_parameters_kwargs.get(
-            "approximation_22_mode"
-        ):
+        if self.psi_prior is not None and approximation_22_mode:
             raise ValueError(
                 "synthetic_parameters_kwargs: the (phase, psi) grid requires the exact "
                 "mode sum, approximation_22_mode=False."
             )
-        # The psi factor always uses the exact mode sum.
-        exact_mode = self.psi_prior is not None or not synthetic_parameters_kwargs.get(
-            "approximation_22_mode", True
-        )
         # Cache the log likelihood at the drawn phase only where it equals a direct
         # likelihood call: the exact mode sum with the DFT phase decomposition, whose
         # m-components sum to exactly the direct waveform. Only the DFT flag is
         # forwarded as wfg_updates, so the direct waveform is the same model's.
         cache_log_likelihood = (
-            exact_mode
+            not approximation_22_mode
             and self.sampler_context.likelihood(
                 use_base_domain=self.use_base_domain, wfg_updates=wfg_updates
             ).waveform_generator.uses_dft_phase_decomposition
@@ -730,9 +728,7 @@ class Result(CoreResult):
             step = SyntheticPhasePsiFactor(**common)
         else:
             step = SyntheticPhaseFactor(
-                approximation_22_mode=synthetic_parameters_kwargs.get(
-                    "approximation_22_mode", True
-                ),
+                approximation_22_mode=approximation_22_mode,
                 **common,
             )
         return step
