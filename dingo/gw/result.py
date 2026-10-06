@@ -450,13 +450,14 @@ class Result(CoreResult):
             Synthetic phase parameters. Keys:
 
             n_grid_phase : int, optional
-                Number of phase grid points on [0, 2pi). Defaults to the factor's
-                default (5001 for the phase alone, 512 together with psi).
+                Number of phase grid points on [0, 2pi], endpoints included.
+                Defaults to the factor's default (5001 for the phase alone, 512
+                together with psi).
             n_grid_psi : int, optional
-                Number of psi grid points on [0, pi), default 128. Only used if the
-                samples lack psi as well as the phase: then both are drawn from the
-                likelihood on a (phase, psi) grid (exact mode sum only), see
-                `SyntheticPhasePsiFactor`.
+                Number of psi grid points on [0, pi], endpoints included, default
+                128. Only used if the samples lack psi as well as the phase: then
+                both are drawn from the likelihood on a (phase, psi) grid (exact
+                mode sum only), see `SyntheticPhasePsiFactor`.
             approximation_22_mode : bool, default True
                 Assume a (2, 2)-dominated waveform. Otherwise the exact mode sum is
                 used, which requires the waveform generator's

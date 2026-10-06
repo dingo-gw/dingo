@@ -312,6 +312,23 @@ def test_phase_psi_log_prob_replug_matches_sample():
     assert np.allclose(log_prob.numpy(), replug.numpy())
 
 
+def test_phase_psi_conditional_follows_the_drawn_phase():
+    # q(psi | phase) is built at the phase actually drawn, not at a grid point or a
+    # fixed phase: the mock's psi profile changes shape with cos(phase), so an
+    # evaluation at the wrong phase gives a different profile.
+    factor = _psi_factor(n_grid_psi=33)
+    given = _given(4)
+    likelihood, terms, _, _ = factor._phase_profile(given, _MockContext())
+    phase = np.array([0.3, 2.0, 3.4, 5.0])
+    psis, profile = factor._psi_profile(likelihood, terms, phase)
+    log_l = _MockLikelihood.log_l_phase_psi(
+        given["chirp_mass"].numpy()[:, None], phase[:, None], psis[None, :]
+    )
+    expected = np.exp(log_l - log_l.max(axis=-1, keepdims=True))
+    expected += expected.mean(axis=-1, keepdims=True) * factor.uniform_weight
+    assert np.allclose(profile, expected)
+
+
 def test_phase_psi_density_is_normalized():
     # exp(log q(phase, psi)) integrates to 1 over [0, 2pi) x [0, pi) for one sample.
     # q is piecewise constant on the grid cells, so integrate by the midpoint rule.

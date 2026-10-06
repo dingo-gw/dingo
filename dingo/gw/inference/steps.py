@@ -81,7 +81,7 @@ class SyntheticPhaseFactor(Factor):
     `q(phase | theta_rest, d)`, built from the likelihood on a phase grid.
 
     For each incoming sample the factor evaluates `log L` on a grid over
-    `[0, 2 pi)`. A single waveform evaluation per sample suffices, because the
+    `[0, 2 pi]`. A single waveform evaluation per sample suffices, because the
     waveform modes computed at `phase = 0` each transform as `exp(-i m phase)`.
     The grid is exponentiated into a conditional phase distribution, a uniform
     floor (weight `uniform_weight`) keeps it positive everywhere so that
@@ -131,7 +131,7 @@ class SyntheticPhaseFactor(Factor):
             The physical parameters the likelihood needs to generate the waveform
             (everything the chain has produced except `phase`).
         n_grid_phase : int, default 5001
-            Number of phase grid points on `[0, 2 pi)`.
+            Number of phase grid points on `[0, 2 pi]`, endpoints included.
         approximation_22_mode : bool, default False
             Use the (2, 2)-mode approximation instead of the exact mode sum.
         uniform_weight : float, default 0.01
@@ -430,7 +430,6 @@ class SyntheticPhasePsiFactor(Factor):
             # Drop the endpoint psi = pi: psi has period pi, so it repeats the
             # phase-dependent psi = 0 column and would double-count it.
             # A plain numpy logsumexp: scipy's is 2-4x slower on this strided grid.
-            # when the grid size is small
             grid = grid[..., :-1]
             peak = grid.max(axis=-1)
             log_marginal[sl] = peak + np.log(

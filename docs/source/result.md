@@ -46,7 +46,7 @@ n_grid_phase
 : Number of points of the phase grid on which the likelihoods are evaluated (`dingo_pipe` uses 5001 in `PhaseRecoveryDefault`, and 512 in `PhasePsiRecoveryDefault` when $\psi$ is drawn as well).
 
 n_grid_psi
-: Number of $\psi$ grid points on $[0, \pi)$. Only used if the samples lack `psi` as well, see above (128 in `PhasePsiRecoveryDefault`). The grids only shape the proposal, so importance sampling is unbiased for any size, but they should resolve the likelihood peak, whose width in either angle is about 1 / SNR: for very loud events, increase them.
+: Number of $\psi$ grid points on $[0, \pi]$. Only used if the samples lack `psi` as well, see above (128 in `PhasePsiRecoveryDefault`). The grids only shape the proposal, so importance sampling is unbiased for any size, but they should resolve the likelihood peak, whose width in either angle is about 1 / SNR: for very loud events, increase them.
 
 uniform_weight
 : Base probability level to add to ensure mass coverage.
