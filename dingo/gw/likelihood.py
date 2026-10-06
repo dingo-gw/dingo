@@ -378,6 +378,63 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
             :, 0
         ]
 
+    def phase_grid_terms_22(self, theta: dict) -> dict:
+        """
+        Compute, from one waveform evaluation at phase = 0, the two inner products
+        from which `log_likelihood_22_from_terms` evaluates the log likelihood at
+        any phase, assuming a phase shift multiplies the waveform by
+        `exp(2i phase)` (`WaveformGenerator.phase_is_global_factor`).
+
+        Parameters
+        ----------
+        theta: dict
+            BBH parameters. The phase is ignored.
+
+        Returns
+        -------
+        dict
+            d_inner_h: complex, (d, h_0); h_inner_h: float, (h_0, h_0).
+        """
+        mu = self.signal({**theta, "phase": 0.0})["waveform"]
+        d = self.whitened_strains
+        return {
+            "d_inner_h": sum(
+                inner_product_complex(d_ifo, mu_ifo)
+                for d_ifo, mu_ifo in zip(d.values(), mu.values())
+            ),
+            "h_inner_h": sum(inner_product(mu_ifo, mu_ifo) for mu_ifo in mu.values()),
+        }
+
+    def log_likelihood_22_from_terms(
+        self, terms: dict, phases: np.ndarray
+    ) -> np.ndarray:
+        """
+        Evaluate the log likelihood at the given phases from the output of
+        `phase_grid_terms_22`, without a waveform evaluation:
+
+            log L(ph) = log_Zn + Re[(d, h_0) exp(2i ph)] - (h_0, h_0) / 2
+
+        Parameters
+        ----------
+        terms: dict
+            As returned by `phase_grid_terms_22`, optionally stacked along a
+            leading sample axis.
+        phases: np.ndarray
+            (G,) phases, shared by all samples, or (N, G) phases per sample.
+
+        Returns
+        -------
+        np.ndarray
+            (G,) log likelihoods for unstacked terms, else (N, G).
+        """
+        d_inner_h = np.asarray(terms["d_inner_h"])[..., None]
+        h_inner_h = np.asarray(terms["h_inner_h"])[..., None]
+        return (
+            self.log_Zn
+            + (d_inner_h * np.exp(2j * np.asarray(phases))).real
+            - h_inner_h / 2
+        )
+
     def phase_grid_terms(self, theta: dict) -> dict:
         """
         Compute, from one waveform evaluation at phase = 0, the inner products from
@@ -423,10 +480,19 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
             )
 
         if self.waveform_generator.spin_conversion_phase != 0:
+            # For a model whose phase shift is a global factor there is no reason to
+            # fix the convention: say so, since this is the recommended BNS setup.
+            hint = (
+                f" For {self.waveform_generator.approximant_str} the (2, 2) path "
+                f"(approximation_22_mode=True) is exact in this convention, at one "
+                f"waveform evaluation per sample instead of 2 ell_max + 1."
+                if self.waveform_generator.phase_is_global_factor
+                else ""
+            )
             raise ValueError(
                 f"The log likelihood on a phase grid assumes "
                 f"WaveformGenerator.spin_conversion_phase = 0, "
-                f"got {self.waveform_generator.spin_conversion_phase}."
+                f"got {self.waveform_generator.spin_conversion_phase}.{hint}"
             )
 
         d = self.whitened_strains
@@ -737,29 +803,6 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         likelihoods = self.log_Zn + kappa2 - 1 / 2.0 * rho2opt
         # Return the average over calibration envelopes
         return logsumexp(likelihoods) - np.log(len(likelihoods))
-
-    def d_inner_h_complex_multi(
-        self, theta: pd.DataFrame, num_processes: int = 1
-    ) -> np.ndarray:
-        """
-        Calculate the complex inner product (d | h(theta)) between the stored data d
-        and a simulated waveform with given parameters theta. Works with multiprocessing.
-
-        Parameters
-        ----------
-        theta : pd.DataFrame
-            Parameters at which to evaluate h.
-        num_processes : int
-            Number of parallel processes to use.
-
-        Returns
-        -------
-        np.ndarray
-            Complex inner products, one per row of theta.
-        """
-        return apply_func_with_multiprocessing(
-            self.d_inner_h_complex, theta, num_processes
-        )
 
     def d_inner_h_complex(self, theta):
         """

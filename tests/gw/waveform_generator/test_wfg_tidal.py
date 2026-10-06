@@ -155,7 +155,6 @@ def test_tidal_prior_defaults():
         assert 0.0 <= sample[k] <= 5000.0
 
 
-
 def test_mfd_time_origin_grid_independent():
     """Some models (e.g. IMRPhenomXP_NRTidalv3) place the waveform in time based
     on the last frequency they are asked for: without the f_max padding, grids
@@ -185,3 +184,54 @@ def test_mfd_time_origin_grid_independent():
     n = len(h[0])
     err = np.max(np.abs(h[0] - h[1][:n])) / np.max(np.abs(h[0]))
     assert err < 1e-10
+
+
+ALIGNED_PARAMETERS = {
+    "chirp_mass": 30.0,
+    "mass_ratio": 0.8,
+    "chi_1": 0.3,
+    "chi_2": -0.2,
+    "theta_jn": 1.2,
+    "phase": 0.6,
+    "luminosity_distance": 1000.0,
+}
+
+
+@pytest.mark.parametrize(
+    "approximant, spin_conversion_phase, exact",
+    [
+        (APPROXIMANT, None, True),
+        # Bilby's convention is what makes it exact: with a fixed one, a phase shift
+        # leaves the in-plane spins behind and the waveform is not just rescaled.
+        (APPROXIMANT, 0.0, False),
+        # A single (2, |m| = 2) pair is the other half: higher modes break it.
+        ("IMRPhenomXPHM", None, False),
+        # Aligned spins: no in-plane spins to rotate, so the convention is irrelevant.
+        ("IMRPhenomD", 0.0, True),
+        ("IMRPhenomXHM", 0.0, False),
+    ],
+)
+def test_phase_is_global_factor_matches_the_waveform(
+    ufd, approximant, spin_conversion_phase, exact
+):
+    """The declared property and a probe of the waveform itself agree on whether a
+    phase shift multiplies the waveform by exp(2i phase) -- the condition for the
+    (2, 2) synthetic phase, and its cached log likelihood, to be exact."""
+    from dingo.gw.inference.steps import _phase_global_factor_mismatch
+
+    if approximant in ("IMRPhenomD", "IMRPhenomXHM"):
+        parameters = ALIGNED_PARAMETERS
+    elif "NRTidal" in approximant:
+        parameters = BNS_PARAMETERS
+    else:
+        parameters = {
+            **{k: v for k, v in BNS_PARAMETERS.items() if not k.startswith("lambda")},
+            "chirp_mass": 30.0,
+        }
+    wf_gen = WaveformGenerator(
+        approximant, ufd, F_REF, spin_conversion_phase=spin_conversion_phase
+    )
+    assert wf_gen.phase_is_global_factor is exact
+
+    mismatch = _phase_global_factor_mismatch(wf_gen, parameters)
+    assert bool(mismatch < 1e-12) is exact, f"probe mismatch {mismatch:.2e}"

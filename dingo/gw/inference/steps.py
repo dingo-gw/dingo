@@ -75,6 +75,26 @@ def _floored_density(log_density, uniform_weight):
     return density + density.mean(axis=-1, keepdims=True) * uniform_weight
 
 
+def _phase_global_factor_mismatch(waveform_generator, theta, delta=0.9):
+    """Mismatch of `h(theta, delta)` against `h(theta, 0) exp(2i delta)`: zero to
+    round-off iff a phase shift multiplies the waveform by `exp(2i phase)`, which is
+    what makes the (2, 2) synthetic phase exact. The tilts and inclination are set to
+    a generic precessing configuration, since at aligned spins the comparison cannot
+    tell the spin conventions apart and would pass for any model with a single
+    (2, |m| = 2) pair."""
+    from dingo.gw.gwutils import get_mismatch
+
+    theta = {k: float(v) for k, v in theta.items()}
+    generic = {"theta_jn": 1.0, "tilt_1": 1.0, "tilt_2": 0.7, "phi_jl": 0.4}
+    theta.update({k: v for k, v in generic.items() if k in theta})
+    h0 = waveform_generator.generate_hplus_hcross({**theta, "phase": 0.0})
+    h1 = waveform_generator.generate_hplus_hcross({**theta, "phase": delta})
+    return max(
+        get_mismatch(h1[pol], h0[pol] * np.exp(2j * delta), waveform_generator.domain)
+        for pol in ("h_plus", "h_cross")
+    )
+
+
 class SyntheticPhaseFactor(Factor):
     """
     Reconstruct the coalescence phase for a phase-marginalized network: the factor
@@ -98,7 +118,7 @@ class SyntheticPhaseFactor(Factor):
     exact mode, while `Result.sample_proposal_extensions` defaults to the (2, 2)
     approximation when the key is omitted.
 
-    With `cache_log_likelihood=True` (exact mode only) the factor also emits the log
+    With `cache_log_likelihood=True` the factor also emits the log
     likelihood at the drawn phase as the annotation column `log_likelihood_cache`, so
     that importance sampling need not evaluate the waveform again. The phase is drawn
     from the grid distribution *interpolated* between grid points, so the drawn phase
@@ -147,8 +167,11 @@ class SyntheticPhaseFactor(Factor):
             `SamplerContext.likelihood`).
         cache_log_likelihood : bool, default False
             Also emit the log likelihood at the drawn phase as the column
-            `log_likelihood_cache`, for reuse by importance sampling. Requires the
-            exact mode and the DFT phase decomposition.
+            `log_likelihood_cache`, for reuse by importance sampling. Requires a path
+            whose phase dependence is exact: the exact mode sum with the DFT phase
+            decomposition, or the (2, 2) path for a model whose phase shift is a
+            global `exp(2i phase)` factor (`WaveformGenerator.phase_is_global_factor`,
+            verified on the waveform before the first draw).
         """
         self.parameters = ["phase"]
         self.conditioning = list(conditioning)
@@ -174,15 +197,38 @@ class SyntheticPhaseFactor(Factor):
         logger.info(f"Estimating synthetic phase for {n} samples.")
         t0 = time.time()
         if self.cache_log_likelihood:
-            # The cache matches a direct likelihood call only with the DFT decomposition.
+            # The cached value equals a direct likelihood call only where the phase
+            # dependence is exact: the mode sum via the DFT decomposition, or the
+            # (2, 2) path for a model whose phase shift is a global exp(2i phase)
+            # factor. The model's declared property decides, a probe verifies it.
             waveform_generator = context.likelihood(
                 use_base_domain=self.use_base_domain, wfg_updates=self.wfg_updates
             ).waveform_generator
-            if not waveform_generator.uses_dft_phase_decomposition:
+            if not self.approximation_22_mode:
+                if not waveform_generator.uses_dft_phase_decomposition:
+                    raise ValueError(
+                        "cache_log_likelihood requires the DFT phase decomposition, "
+                        f"which {waveform_generator.approximant_str} does not use here."
+                    )
+            elif not waveform_generator.phase_is_global_factor:
                 raise ValueError(
-                    "cache_log_likelihood requires the DFT phase decomposition, which "
-                    f"{waveform_generator.approximant_str} does not use here."
+                    "cache_log_likelihood with approximation_22_mode requires a phase "
+                    "shift to be a global exp(2i phase) factor, which "
+                    f"{waveform_generator.approximant_str} is not with "
+                    f"spin_conversion_phase = {waveform_generator.spin_conversion_phase}."
                 )
+            elif n:
+                mismatch = _phase_global_factor_mismatch(
+                    waveform_generator, {k: v[0] for k, v in given.items()}
+                )
+                # A NaN waveform fails the probe like any other disagreement.
+                if not mismatch <= 1e-10:
+                    raise ValueError(
+                        f"{waveform_generator.approximant_str} is listed as having a "
+                        f"global exp(2i phase) factor, but a phase shift changes the "
+                        f"waveform by a mismatch of {mismatch:.1e}; refusing to cache "
+                        f"the (2, 2) log likelihood."
+                    )
         phases, phase_posterior, terms = self._phase_profile(given, context)
         new_phase, log_prob = interpolated_sample_and_log_prob_multi(
             phases, phase_posterior, self.num_processes
@@ -193,9 +239,14 @@ class SyntheticPhaseFactor(Factor):
             likelihood = context.likelihood(
                 use_base_domain=self.use_base_domain, wfg_updates=self.wfg_updates
             )
-            log_likelihood = likelihood.log_likelihood_from_phase_grid_terms(
-                terms, new_phase[:, None], _to_numpy(given["psi"])[:, None]
-            )[:, 0, 0]
+            if self.approximation_22_mode:
+                log_likelihood = likelihood.log_likelihood_22_from_terms(
+                    terms, new_phase[:, None]
+                )[:, 0]
+            else:
+                log_likelihood = likelihood.log_likelihood_from_phase_grid_terms(
+                    terms, new_phase[:, None], _to_numpy(given["psi"])[:, None]
+                )[:, 0, 0]
             samples["log_likelihood_cache"] = torch.as_tensor(
                 log_likelihood, device=device
             )
@@ -235,14 +286,18 @@ class SyntheticPhaseFactor(Factor):
             use_base_domain=self.use_base_domain, wfg_updates=self.wfg_updates
         )
         phases = np.linspace(0, 2 * np.pi, self.n_grid_phase)
-        terms = None
         if self.approximation_22_mode:
-            # Assume the waveform is (2, 2)-dominated (transforms as exp(2i phase)), so the
-            # phase-dependent log-posterior is Re[(d | h(phase=0)) exp(2i phase)].
-            theta = theta.copy()
-            theta["phase"] = 0.0
-            d_inner_h = likelihood.d_inner_h_complex_multi(theta, self.num_processes)
-            phase_log_posterior = np.outer(d_inner_h, np.exp(2j * phases)).real
+            # Assume a phase shift multiplies the waveform by exp(2i phase), so that
+            # log L(phase) = log_Zn + Re[(d | h_0) exp(2i phase)] - (h_0 | h_0) / 2.
+            # Exact for the models WaveformGenerator.phase_is_global_factor lists.
+            terms_per_sample = apply_func_with_multiprocessing(
+                likelihood.phase_grid_terms_22, theta, self.num_processes
+            )
+            terms = {
+                k: np.array([t[k] for t in terms_per_sample])
+                for k in ("d_inner_h", "h_inner_h")
+            }
+            phase_log_posterior = likelihood.log_likelihood_22_from_terms(terms, phases)
         else:
             # Exact: each mode m contributes exp(-i m phase); needs spin_conversion_phase=0.
             # One waveform evaluation per sample gives the mode terms, which are

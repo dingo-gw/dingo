@@ -700,14 +700,16 @@ class Result(CoreResult):
                 "mode sum, approximation_22_mode=False."
             )
         # Cache the log likelihood at the drawn phase only where it equals a direct
-        # likelihood call: the exact mode sum with the DFT phase decomposition, whose
-        # m-components sum to exactly the direct waveform. Only the DFT flag is
-        # forwarded as wfg_updates, so the direct waveform is the same model's.
+        # likelihood call: the exact mode sum with the DFT phase decomposition, or
+        # the (2, 2) path for a model whose phase shift is a global exp(2i phase)
+        # factor. The factor probes the waveform before using it.
+        waveform_generator = self.sampler_context.likelihood(
+            use_base_domain=self.use_base_domain, wfg_updates=wfg_updates
+        ).waveform_generator
         cache_log_likelihood = (
-            not approximation_22_mode
-            and self.sampler_context.likelihood(
-                use_base_domain=self.use_base_domain, wfg_updates=wfg_updates
-            ).waveform_generator.uses_dft_phase_decomposition
+            waveform_generator.phase_is_global_factor
+            if approximation_22_mode
+            else waveform_generator.uses_dft_phase_decomposition
         )
         common = dict(
             conditioning=conditioning,

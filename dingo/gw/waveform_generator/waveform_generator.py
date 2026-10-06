@@ -40,6 +40,41 @@ DEFAULT_ELL_MAX = {
     "NRSur7dq4": 4,
 }
 
+# Approximants whose co-precessing content is a single (2, |m| = 2) pair, so that a
+# phase shift multiplies the waveform by exp(2i phase) and the (2, 2) synthetic
+# phase is exact. The precessing ones need Bilby's spin convention
+# (spin_conversion_phase = None), where a phase shift also rotates the in-plane
+# spins; the aligned-spin ones have no in-plane spins, so any convention works.
+# WaveformGenerator.phase_is_global_factor reads these, and
+# probe_phase_global_factor() checks the property on the waveform itself.
+PRECESSING_22_APPROXIMANTS = frozenset(
+    {
+        "IMRPhenomPv2",
+        "IMRPhenomPv2_NRTidal",
+        "IMRPhenomPv2_NRTidalv2",
+        "IMRPhenomPv3",
+        "IMRPhenomXP",
+        "IMRPhenomXP_NRTidalv2",
+        "IMRPhenomXP_NRTidalv3",
+    }
+)
+ALIGNED_22_APPROXIMANTS = frozenset(
+    {
+        "IMRPhenomD",
+        "IMRPhenomD_NRTidal",
+        "IMRPhenomD_NRTidalv2",
+        "IMRPhenomNSBH",
+        "IMRPhenomXAS",
+        "IMRPhenomXAS_NRTidalv2",
+        "IMRPhenomXAS_NRTidalv3",
+        "SEOBNRv4_ROM",
+        "SEOBNRv4_ROM_NRTidal",
+        "SEOBNRv4_ROM_NRTidalv2",
+        "SEOBNRv4T_surrogate",
+        "TaylorF2",
+    }
+)
+
 
 class WaveformGenerator:
     """Generate polarizations using LALSimulation routines in the specified domain for a
@@ -170,8 +205,41 @@ class WaveformGenerator:
         generate_hplus_hcross; the individual-mode paths differ from it slightly."""
         return bool(
             self.use_dft_phase_decomposition
+            # With spin_conversion_phase=None the m-decomposition is unavailable
+            # altogether (generate_hplus_hcross_m raises), so neither the grid nor
+            # the exact mode sum built on it can be used.
+            and self.spin_conversion_phase is not None
             and LS.SimInspiralImplementedFDApproximants(self.approximant)
             and (self.mode_list is not None or self.approximant_str in DEFAULT_ELL_MAX)
+        )
+
+    def _check_phase_shifts_at_fixed_spins(self):
+        """The m-decomposition describes phase shifts at fixed spins, which is only
+        what the model does when `spin_conversion_phase` is fixed."""
+        if self.spin_conversion_phase is None:
+            raise ValueError(
+                "generate_hplus_hcross_m() decomposes the waveform into components "
+                "that transform as exp(-i m phase) at fixed spins, but with "
+                "spin_conversion_phase = None a phase shift also rotates the in-plane "
+                "spins, so shifting the components does not reproduce the model's "
+                "phase dependence. Set a fixed spin_conversion_phase, or use the "
+                "(2, 2) synthetic phase, which is exact in this convention for "
+                "approximants with only a co-precessing (2, |m| = 2) pair."
+            )
+
+    @property
+    def phase_is_global_factor(self) -> bool:
+        """Whether a phase shift multiplies the waveform by `exp(2i phase)`, so that
+        the (2, 2) synthetic phase is exact and its log likelihood can be cached.
+        True for the approximants listed above: for the precessing ones only in
+        Bilby's spin convention (`spin_conversion_phase = None`), where the phase
+        also rotates the in-plane spins, and for the aligned-spin ones in any
+        convention. `probe_phase_global_factor` checks the property directly."""
+        if self.approximant_str in ALIGNED_22_APPROXIMANTS:
+            return True
+        return (
+            self.approximant_str in PRECESSING_22_APPROXIMANTS
+            and self.spin_conversion_phase is None
         )
 
     @property
@@ -861,6 +929,7 @@ class WaveformGenerator:
         elif not isinstance(list(parameters.values())[0], float):
             raise ValueError("parameters dictionary must contain floats", parameters)
 
+        self._check_phase_shifts_at_fixed_spins()
         if (
             self.use_dft_phase_decomposition
             and self.mode_list is None
@@ -1072,15 +1141,7 @@ class WaveformGenerator:
                 f"domain and frame as one of the approximants should just be a matter of "
                 f"adding the approximant number (here: {self.approximant}) to the "
                 f"corresponding if statement. However, when doing this please make sure "
-                f"to test that this works as intended! Ideally, add some unit tests. "
-                f"Note: if LALSimulation does not implement SimInspiralChooseFDModes "
-                f"for this approximant (e.g. matter models such as the NRTidal "
-                f"family), this route cannot work at all; use the DFT phase "
-                f"decomposition instead (use_dft_phase_decomposition=True, with a "
-                f"mode_list or DEFAULT_ELL_MAX entry to size its grid), or the "
-                f"(2, 2) synthetic phase, which is exact for approximants with only "
-                f"a co-precessing (2, |m|=2) pair in Bilby's spin convention "
-                f"(spin_conversion_phase=None)."
+                f"to test that this works as intended! Ideally, add some unit tests."
             )
 
     def generate_TD_waveform(self, parameters_lal: Tuple) -> Dict[str, np.ndarray]:
@@ -1181,7 +1242,9 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
     def uses_dft_phase_decomposition(self) -> bool:
         """See WaveformGenerator.uses_dft_phase_decomposition."""
         return (
-            self.use_dft_phase_decomposition and self.approximant_str == "SEOBNRv5PHM"
+            self.use_dft_phase_decomposition
+            and self.spin_conversion_phase is not None
+            and self.approximant_str == "SEOBNRv5PHM"
         )
 
     def _convert_parameters(
@@ -1414,6 +1477,7 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
             raise ValueError("parameters should be a dictionary, but got", parameters)
         elif not isinstance(list(parameters.values())[0], float):
             raise ValueError("parameters dictionary must contain floats", parameters)
+        self._check_phase_shifts_at_fixed_spins()
 
         generator = new_interface_get_waveform_generator(self.approximant_str)
         if isinstance(self.domain, UniformFrequencyDomain):
@@ -1543,15 +1607,7 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
                 f"domain and frame as one of the approximants should just be a matter of "
                 f"adding the approximant number (here: {self.approximant}) to the "
                 f"corresponding if statement. However, when doing this please make sure "
-                f"to test that this works as intended! Ideally, add some unit tests. "
-                f"Note: if LALSimulation does not implement SimInspiralChooseFDModes "
-                f"for this approximant (e.g. matter models such as the NRTidal "
-                f"family), this route cannot work at all; use the DFT phase "
-                f"decomposition instead (use_dft_phase_decomposition=True, with a "
-                f"mode_list or DEFAULT_ELL_MAX entry to size its grid), or the "
-                f"(2, 2) synthetic phase, which is exact for approximants with only "
-                f"a co-precessing (2, |m|=2) pair in Bilby's spin convention "
-                f"(spin_conversion_phase=None)."
+                f"to test that this works as intended! Ideally, add some unit tests."
             )
 
     def generate_TD_modes_L0(self, parameters):

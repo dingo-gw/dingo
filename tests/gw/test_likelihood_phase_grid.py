@@ -312,3 +312,78 @@ def test_phase_psi_algebra_matches_brute_force():
             }
             brute[i, j] = log_Zn + overlap(d, mu).real - 0.5 * overlap(mu, mu).real
     np.testing.assert_allclose(fast, brute, rtol=1e-10, atol=1e-10)
+
+
+def test_terms_22_reproduce_direct_likelihood():
+    """The (2, 2) terms evaluate to the direct log likelihood at any phase, for a
+    model whose phase shift is a global exp(2i phase) factor. This is what lets
+    importance sampling reuse the value cached by the synthetic phase on the
+    (2, 2) path, which is the only exact route for the NRTidal family (LALSimulation
+    implements no frequency-domain modes for it)."""
+    domain = UniformFrequencyDomain(f_min=20.0, f_max=512.0, delta_f=1 / 4.0)
+    rng = np.random.default_rng(42)
+    waveform, asds = {}, {}
+    for ifo in ["H1", "L1"]:
+        d = (rng.normal(size=len(domain)) + 1j * rng.normal(size=len(domain))) * 1e-23
+        waveform[ifo] = np.where(domain.frequency_mask, d, 0.0)
+        asds[ifo] = np.where(domain.frequency_mask, 1e-23, 1.0)
+    theta = {
+        **THETA,
+        "mass_1": 1.6,
+        "mass_2": 1.3,
+        "lambda_1": 400.0,
+        "lambda_2": 600.0,
+        "luminosity_distance": 100.0,
+    }
+    likelihood = StationaryGaussianGWLikelihood(
+        wfg_kwargs={
+            "approximant": "IMRPhenomXP_NRTidalv3",
+            "f_ref": 20.0,
+            # Bilby's convention: a phase shift then also rotates the in-plane
+            # spins, which is what makes the (2, 2) dependence exact.
+            "spin_conversion_phase": None,
+        },
+        wfg_domain=domain,
+        data_domain=domain,
+        event_data={"waveform": waveform, "asds": asds},
+        t_ref=1126259462.4,
+    )
+    assert likelihood.waveform_generator.phase_is_global_factor
+
+    phases = np.array([0.37, 2.9, 5.81])
+    terms = likelihood.phase_grid_terms_22(theta)
+    from_terms = likelihood.log_likelihood_22_from_terms(terms, phases)
+    direct = [likelihood.log_likelihood({**theta, "phase": p}) for p in phases]
+    np.testing.assert_allclose(from_terms, direct, rtol=1e-9)
+
+    # Stacked along a leading sample axis, as the synthetic phase evaluates them.
+    stacked = {k: np.array([v, v]) for k, v in terms.items()}
+    at_drawn = likelihood.log_likelihood_22_from_terms(stacked, phases[:2, None])
+    assert at_drawn.shape == (2, 1)
+    np.testing.assert_allclose(at_drawn[:, 0], direct[:2], rtol=1e-9)
+
+
+def test_phase_grid_raise_points_at_the_exact_22_path():
+    """With a spin convention the mode sum cannot use, the error says so -- and for a
+    model whose phase shift is a global factor it also says that the (2, 2) path is
+    exact there, which is the cheaper way out rather than fixing the convention."""
+    domain = UniformFrequencyDomain(f_min=20.0, f_max=512.0, delta_f=1.0)
+    event_data = {
+        "waveform": {ifo: np.zeros(len(domain), dtype=complex) for ifo in ["H1"]},
+        "asds": {ifo: np.ones(len(domain)) for ifo in ["H1"]},
+    }
+    for approximant, hinted in (("IMRPhenomXP", True), ("IMRPhenomXPHM", False)):
+        likelihood = StationaryGaussianGWLikelihood(
+            wfg_kwargs={
+                "approximant": approximant,
+                "f_ref": 20.0,
+                "spin_conversion_phase": None,
+            },
+            wfg_domain=domain,
+            data_domain=domain,
+            event_data=event_data,
+            t_ref=1126259462.4,
+        )
+        with pytest.raises(ValueError, match="spin_conversion_phase = 0") as excinfo:
+            likelihood.phase_grid_terms(THETA)
+        assert ("approximation_22_mode" in str(excinfo.value)) is hinted
