@@ -153,3 +153,35 @@ def test_tidal_prior_defaults():
     sample = prior.sample()
     for k in ("lambda_1", "lambda_2"):
         assert 0.0 <= sample[k] <= 5000.0
+
+
+
+def test_mfd_time_origin_grid_independent():
+    """Some models (e.g. IMRPhenomXP_NRTidalv3) place the waveform in time based
+    on the last frequency they are asked for: without the f_max padding, grids
+    ending at 255 and 300 Hz disagree by a 64 ms time shift for this
+    configuration. With the padding, evaluations on differently truncated grids
+    must agree."""
+
+    def single_band(f_end):
+        return MultibandedFrequencyDomain(
+            nodes=[20.0, f_end],
+            delta_f_initial=1.0,
+            base_domain={
+                "type": "UniformFrequencyDomain",
+                "f_min": 20.0,
+                "f_max": 2048.0,
+                "delta_f": 1.0,
+            },
+        )
+
+    bns = {**BNS_PARAMETERS, "chirp_mass": 1.1975}
+    h = []
+    for f_end in (256.0, 301.0):
+        wf_gen = WaveformGenerator(
+            APPROXIMANT, single_band(f_end), F_REF, spin_conversion_phase=0.0
+        )
+        h.append(wf_gen.generate_hplus_hcross(bns)["h_plus"])
+    n = len(h[0])
+    err = np.max(np.abs(h[0] - h[1][:n])) / np.max(np.abs(h[0]))
+    assert err < 1e-10
