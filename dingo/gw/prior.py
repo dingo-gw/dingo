@@ -121,6 +121,8 @@ default_intrinsic_dict = {
     "tilt_2": "bilby.core.prior.Sine(minimum=0.0, maximum=np.pi, name='tilt_2')",
     "phi_12": 'bilby.core.prior.Uniform(minimum=0.0, maximum=2*np.pi, boundary="periodic", name="phi_12")',
     "phi_jl": 'bilby.core.prior.Uniform(minimum=0.0, maximum=2*np.pi, boundary="periodic", name="phi_jl")',
+    "lambda_1": "bilby.core.prior.Uniform(minimum=0.0, maximum=5000.0, name='lambda_1')",
+    "lambda_2": "bilby.core.prior.Uniform(minimum=0.0, maximum=5000.0, name='lambda_2')",
     "geocent_time": 0.0,
 }
 
