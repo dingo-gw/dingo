@@ -497,8 +497,12 @@ class WaveformGenerator:
         ecc_params = (0.0, 0.0, 0.0)  # longAscNodes, eccentricity, meanPerAno
         # for BNS/NSBH: insert tidal deformability
         if "lambda_1" in p or "lambda_2" in p:
-            if lal_params is None:
-                lal_params = lal.CreateDict()
+            # Copy so tidal entries do not leak into self.lal_params across calls.
+            lal_params = (
+                lal.CreateDict()
+                if lal_params is None
+                else lal.DictDuplicate(lal_params)
+            )
             lalsim_SimInspiralWaveformParamsInsertTidalLambda1(
                 lal_params, p.get("lambda_1", 0)
             )
@@ -1010,7 +1014,15 @@ class WaveformGenerator:
                 f"domain and frame as one of the approximants should just be a matter of "
                 f"adding the approximant number (here: {self.approximant}) to the "
                 f"corresponding if statement. However, when doing this please make sure "
-                f"to test that this works as intended! Ideally, add some unit tests."
+                f"to test that this works as intended! Ideally, add some unit tests. "
+                f"Note: if LALSimulation does not implement SimInspiralChooseFDModes "
+                f"for this approximant (e.g. matter models such as the NRTidal "
+                f"family), this route cannot work at all; use the DFT phase "
+                f"decomposition instead (use_dft_phase_decomposition=True, with a "
+                f"mode_list or DEFAULT_ELL_MAX entry to size its grid), or the "
+                f"(2, 2) synthetic phase, which is exact for approximants with only "
+                f"a co-precessing (2, |m|=2) pair in Bilby's spin convention "
+                f"(spin_conversion_phase=None)."
             )
 
     def generate_TD_modes_L0(self, parameters):
@@ -1049,7 +1061,15 @@ class WaveformGenerator:
                 f"domain and frame as one of the approximants should just be a matter of "
                 f"adding the approximant number (here: {self.approximant}) to the "
                 f"corresponding if statement. However, when doing this please make sure "
-                f"to test that this works as intended! Ideally, add some unit tests."
+                f"to test that this works as intended! Ideally, add some unit tests. "
+                f"Note: if LALSimulation does not implement SimInspiralChooseFDModes "
+                f"for this approximant (e.g. matter models such as the NRTidal "
+                f"family), this route cannot work at all; use the DFT phase "
+                f"decomposition instead (use_dft_phase_decomposition=True, with a "
+                f"mode_list or DEFAULT_ELL_MAX entry to size its grid), or the "
+                f"(2, 2) synthetic phase, which is exact for approximants with only "
+                f"a co-precessing (2, |m|=2) pair in Bilby's spin convention "
+                f"(spin_conversion_phase=None)."
             )
 
     def generate_TD_waveform(self, parameters_lal: Tuple) -> Dict[str, np.ndarray]:
@@ -1512,7 +1532,15 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
                 f"domain and frame as one of the approximants should just be a matter of "
                 f"adding the approximant number (here: {self.approximant}) to the "
                 f"corresponding if statement. However, when doing this please make sure "
-                f"to test that this works as intended! Ideally, add some unit tests."
+                f"to test that this works as intended! Ideally, add some unit tests. "
+                f"Note: if LALSimulation does not implement SimInspiralChooseFDModes "
+                f"for this approximant (e.g. matter models such as the NRTidal "
+                f"family), this route cannot work at all; use the DFT phase "
+                f"decomposition instead (use_dft_phase_decomposition=True, with a "
+                f"mode_list or DEFAULT_ELL_MAX entry to size its grid), or the "
+                f"(2, 2) synthetic phase, which is exact for approximants with only "
+                f"a co-precessing (2, |m|=2) pair in Bilby's spin convention "
+                f"(spin_conversion_phase=None)."
             )
 
     def generate_TD_modes_L0(self, parameters):
