@@ -24,10 +24,11 @@ def test_interpolated_log_prob_normalizes_uniform_distribution():
     np.testing.assert_allclose(log_prob, -np.log(WIDTH), atol=1e-10)
 
 
-def test_interpolated_sample_and_log_prob_in_range_and_consistent():
-    np.random.seed(0)
-    sample, log_prob = interpolated_sample_and_log_prob(SAMPLE_POINTS, UNIFORM_VALUES)
-    assert 0.0 <= sample <= WIDTH
+def test_interpolated_sample_and_log_prob_inverts_the_cdf():
+    sample, log_prob = interpolated_sample_and_log_prob(
+        SAMPLE_POINTS, UNIFORM_VALUES, 0.3
+    )
+    np.testing.assert_allclose(sample, 0.3 * WIDTH)
     # Both calls build the same Interped from the same data, so the returned log_prob
     # equals interpolated_log_prob at the drawn sample to floating-point precision.
     np.testing.assert_allclose(
@@ -51,7 +52,6 @@ def test_interpolated_log_prob_multi_matches_single():
 
 
 def test_interpolated_sample_and_log_prob_multi_shapes():
-    np.random.seed(0)
     batch_values = np.stack([UNIFORM_VALUES] * 4)
     samples, log_probs = interpolated_sample_and_log_prob_multi(
         SAMPLE_POINTS, batch_values, num_processes=1
