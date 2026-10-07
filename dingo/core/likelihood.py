@@ -1,8 +1,7 @@
-from multiprocessing import Pool
-
 import numpy as np
 import pandas as pd
-from threadpoolctl import threadpool_limits
+
+from dingo.core.multiprocessing import apply_func_with_multiprocessing
 
 
 class Likelihood(object):
@@ -14,7 +13,7 @@ class Likelihood(object):
     ) -> np.ndarray:
         """
         Calculate the log likelihood at multiple points in parameter space. Works with
-        multiprocessing.
+        multiprocessing, reproducibly (see `apply_func_with_multiprocessing`).
 
         This wraps the log_likelihood() method.
 
@@ -29,17 +28,6 @@ class Likelihood(object):
         -------
         np.array of log likelihoods
         """
-        with threadpool_limits(limits=1, user_api="blas"):
-
-            # Generator object for theta rows. For idx this yields row idx of
-            # theta dataframe, converted to dict, ready to be passed to
-            # self.log_likelihood.
-            theta_generator = (d[1].to_dict() for d in theta.iterrows())
-
-            if num_processes > 1:
-                with Pool(processes=num_processes) as pool:
-                    log_likelihood = pool.map(self.log_likelihood, theta_generator)
-            else:
-                log_likelihood = list(map(self.log_likelihood, theta_generator))
-
-        return np.array(log_likelihood)
+        return apply_func_with_multiprocessing(
+            self.log_likelihood, theta, num_processes
+        )

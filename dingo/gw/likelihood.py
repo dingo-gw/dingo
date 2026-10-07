@@ -1,5 +1,4 @@
 from collections import defaultdict
-from multiprocessing import Pool
 from typing import Optional
 
 import numpy as np
@@ -7,9 +6,9 @@ import pandas as pd
 from scipy.fft import fft
 from scipy.special import logsumexp
 from bilby.gw.utils import ln_i0
-from threadpoolctl import threadpool_limits
 
 from dingo.core.likelihood import Likelihood
+from dingo.core.multiprocessing import apply_func_with_multiprocessing
 from dingo.gw.injection import GWSignal
 from dingo.gw.transforms import (
     DecimateWaveformsAndASDS,
@@ -742,18 +741,9 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         np.ndarray
             Complex inner products, one per row of theta.
         """
-        with threadpool_limits(limits=1, user_api="blas"):
-            theta_generator = (d[1].to_dict() for d in theta.iterrows())
-
-            if num_processes > 1:
-                # Workers are not re-seeded: under fork they copy one random
-                # stream, under spawn they start unseeded (#408).
-                with Pool(processes=num_processes) as pool:
-                    results = pool.map(self.d_inner_h_complex, theta_generator)
-            else:
-                results = list(map(self.d_inner_h_complex, theta_generator))
-
-        return np.array(results)
+        return apply_func_with_multiprocessing(
+            self.d_inner_h_complex, theta, num_processes
+        )
 
     def d_inner_h_complex(self, theta):
         """
