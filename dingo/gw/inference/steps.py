@@ -429,7 +429,8 @@ class SyntheticPhasePsiFactor(Factor):
             )
             # Drop the endpoint psi = pi: psi has period pi, so it repeats the
             # phase-dependent psi = 0 column and would double-count it.
-            # A plain numpy logsumexp: scipy's is 2-4x slower on this strided grid.
+            # A plain numpy logsumexp: scipy's is 2-4x slower on this strided grid
+            # when the grid size is small.
             grid = grid[..., :-1]
             peak = grid.max(axis=-1)
             log_marginal[sl] = peak + np.log(
