@@ -376,3 +376,35 @@ def test_MaskDataForFrequencyRangeUpdate(request, setup):
         mask = np.repeat(mask[np.newaxis, :], axis=0, repeats=batch_size)
     assert np.all([np.all(v[mask] == 0.0) for v in out["waveform"].values()])
     assert np.all([np.all(v[mask] == 1.0) for v in out["asds"].values()])
+
+
+def test_DecimateWaveformsAndASDS_infinite_asd(cropping_setup_mfd):
+    """Bins with an entirely inf ASD give zero strain (not NaN); partial bins are kept."""
+    from dingo.gw.transforms import DecimateWaveformsAndASDS
+
+    domain, _ = cropping_setup_mfd
+    f = domain.base_domain.sample_frequencies
+    strain = np.random.default_rng(0).normal(size=len(f)) + 0j
+    asd = np.where(f > 512.0, np.inf, 1e-23)
+    transform = DecimateWaveformsAndASDS(domain, decimation_mode="whitened")
+    out = transform({"waveform": {"H1": strain}, "asds": {"H1": asd}})
+    ref = transform(
+        {"waveform": {"H1": strain}, "asds": {"H1": np.full_like(asd, 1e-23)}}
+    )
+
+    waveform, below = out["waveform"]["H1"], domain() < 500.0
+    beyond = np.isinf(out["asds"]["H1"])
+    assert beyond.any() and not np.isnan(waveform).any()
+    assert np.all(waveform[beyond] == 0)
+    # Bins straddling the cutoff are kept with an unbiased strain (the average over the
+    # covered base bins) but a biased effective ASD, too high by 1 / coverage. (The
+    # unwhitened mode drops these bins instead.)
+    covered = f <= 512.0
+    coverage = domain.decimate(covered.astype(float))
+    partial = (coverage > 0) & (coverage < 1)
+    assert partial.any()
+    np.testing.assert_allclose(
+        waveform[partial], (domain.decimate(strain * covered) / coverage)[partial]
+    )
+    np.testing.assert_allclose(out["asds"]["H1"][partial], 1e-23 / coverage[partial])
+    np.testing.assert_allclose(waveform[below], ref["waveform"]["H1"][below])
