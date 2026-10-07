@@ -73,8 +73,8 @@ def heterodyne_polarizations(
     settings: dict,
     chirp_mass_proxy_offset: float = 0.0,
 ) -> Dict[str, np.ndarray]:
-    """Heterodyne generated waveforms as the network input is, when the dataset
-    settings request `phase_heterodyning` under `compression` (DINGO-BNS).
+    """Heterodyne the generated waveforms used as network input when the dataset
+    settings specify `phase_heterodyning` under `compression` (DINGO-BNS).
 
     A chirp-mass-conditioned network sees data heterodyned at the *proxy*, which
     differs from the true chirp mass by up to the width of the GNPE kernel; the
