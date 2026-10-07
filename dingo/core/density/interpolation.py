@@ -1,11 +1,10 @@
 from functools import partial
-from multiprocessing import Pool
-from itertools import starmap
 
+import bilby
 import numpy as np
-from bilby.core.utils import random
 from scipy.stats import rv_histogram
-from threadpoolctl import threadpool_limits
+
+from dingo.core.multiprocessing import apply_func_with_multiprocessing
 
 
 def interpolated_sample_and_log_prob_multi(
@@ -14,7 +13,9 @@ def interpolated_sample_and_log_prob_multi(
     """
     Given a distribution discretized on a grid, return a sample and the log prob from an
     interpolated distribution, the piecewise-constant density of
-    `_cell_mean_histogram`. Works with multiprocessing.
+    `_cell_mean_histogram`. Works with multiprocessing. The uniform variates for the
+    inverse-CDF draws are drawn here, from bilby's generator, so the samples are the
+    same for any num_processes.
 
     Parameters
     ----------
@@ -30,21 +31,16 @@ def interpolated_sample_and_log_prob_multi(
     -------
     (np.ndarray, np.ndarray) : sample and log_prob arrays, each of length B
     """
-    with threadpool_limits(limits=1, user_api="blas"):
-        data_generator = iter(values)
-        task_fun = partial(interpolated_sample_and_log_prob, sample_points)
-        if num_processes > 1:
-            # Workers are not re-seeded: under fork they copy one random stream,
-            # under spawn they start unseeded (#408).
-            with Pool(processes=num_processes) as pool:
-                result_list = pool.map(task_fun, data_generator)
-        else:
-            result_list = list(map(task_fun, data_generator))
-    sample, log_prob = np.array(result_list).T
+    uniforms = bilby.core.utils.random.rng.uniform(size=len(values))
+    sample, log_prob = apply_func_with_multiprocessing(
+        partial(interpolated_sample_and_log_prob, sample_points),
+        (values, uniforms),
+        num_processes,
+    ).T
     return sample, log_prob
 
 
-def interpolated_sample_and_log_prob(sample_points, values):
+def interpolated_sample_and_log_prob(sample_points, values, uniform):
     """
     Given a distribution discretized on a grid, return a sample and the log prob from an
     interpolated distribution, the piecewise-constant density of
@@ -57,13 +53,15 @@ def interpolated_sample_and_log_prob(sample_points, values):
     values : np.ndarray
         y values for samples. The distribution does not have to be initially
         normalized, although the final log_prob will be.
+    uniform : float
+        Uniform variate on [0, 1], mapped to the sample by the inverse CDF.
 
     Returns
     -------
     (float, float) : sample and log_prob
     """
     dist = _cell_mean_histogram(sample_points, values)
-    sample = dist.rvs(random_state=random.rng)
+    sample = dist.ppf(uniform)
     return sample, dist.logpdf(sample)
 
 
@@ -104,15 +102,11 @@ def interpolated_log_prob_multi(
     -------
     (np.ndarray, np.ndarray) : sample and log_prob arrays, each of length B
     """
-    with threadpool_limits(limits=1, user_api="blas"):
-        data_generator = zip(iter(values), iter(evaluation_points))
-        task_fun = partial(interpolated_log_prob, sample_points)
-        if num_processes > 1:
-            with Pool(processes=num_processes) as pool:
-                result_list = pool.starmap(task_fun, data_generator)
-        else:
-            result_list = list(starmap(task_fun, data_generator))
-    return np.array(result_list)
+    return apply_func_with_multiprocessing(
+        partial(interpolated_log_prob, sample_points),
+        (values, evaluation_points),
+        num_processes,
+    )
 
 
 def interpolated_log_prob(sample_points, values, evaluation_point):
