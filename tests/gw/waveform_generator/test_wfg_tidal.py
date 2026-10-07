@@ -77,8 +77,7 @@ def test_tidal_modes_raise(ufd):
     """Without an explicit mode_list, mode-separated generation must fail with an
     informative error: the DFT path cannot size its grid (deliberately no
     DEFAULT_ELL_MAX entry) and falls back to the individual-mode path, for which
-    LALSimulation implements no FD modes; the message points at the DFT path and
-    co_rotate_spins."""
+    LALSimulation implements no FD modes; the message points at the DFT path."""
     wf_gen = WaveformGenerator(APPROXIMANT, ufd, F_REF, spin_conversion_phase=0.0)
     with pytest.warns(UserWarning, match="Falling back to the individual-mode"):
         with pytest.raises(NotImplementedError, match="use_dft_phase_decomposition"):
@@ -89,8 +88,8 @@ def test_tidal_mode_decomposition(ufd):
     """With an explicit mode_list, generate_hplus_hcross_m runs through the DFT
     phase decomposition (ell_max=2) and reproduces direct generation at an
     off-grid phase shift to round-off. (There is deliberately no DEFAULT_ELL_MAX
-    entry: co_rotate_spins is the recommended synthetic-phase route, so the mode
-    decomposition is opt-in.)"""
+    entry: for these models the (2, 2) synthetic phase is exact in Bilby's spin
+    convention, so the mode decomposition is opt-in.)"""
     wf_gen = WaveformGenerator(
         APPROXIMANT,
         ufd,
@@ -138,27 +137,6 @@ def test_tidal_22_approximation_mismatch(ufd):
             assert mm_dft < 1e-13
 
 
-def test_co_rotating_phase_probe(ufd):
-    """The co_rotate_spins probe: for IMRPhenomXP_NRTidalv3 (single co-precessing
-    (2, +-2) pair) a physical-convention phase shift is a global exp(2i delta)
-    factor to round-off, so the exact one-waveform-call synthetic phase applies;
-    for a higher-mode model (IMRPhenomXPHM) the probe must fail, triggering the
-    fallback."""
-    from dingo.gw.result import _co_rotating_phase_mismatch
-
-    wf_gen = WaveformGenerator(APPROXIMANT, ufd, F_REF, spin_conversion_phase=0.0)
-    assert _co_rotating_phase_mismatch(wf_gen, BNS_PARAMETERS) < 1e-12
-
-    bbh = {
-        **{k: v for k, v in BNS_PARAMETERS.items() if not k.startswith("lambda")},
-        "chirp_mass": 30.0,
-    }
-    wf_gen_hm = WaveformGenerator(
-        "IMRPhenomXPHM", ufd, F_REF, spin_conversion_phase=0.0
-    )
-    assert _co_rotating_phase_mismatch(wf_gen_hm, bbh) > 1e-4
-
-
 def test_tidal_lal_params_not_mutated(ufd):
     """Tidal insertion must not leak into the generator's shared mode-array dict."""
     wf_gen = WaveformGenerator(
@@ -175,3 +153,85 @@ def test_tidal_prior_defaults():
     sample = prior.sample()
     for k in ("lambda_1", "lambda_2"):
         assert 0.0 <= sample[k] <= 5000.0
+
+
+def test_mfd_time_origin_grid_independent():
+    """Some models (e.g. IMRPhenomXP_NRTidalv3) place the waveform in time based
+    on the last frequency they are asked for: without the f_max padding, grids
+    ending at 255 and 300 Hz disagree by a 64 ms time shift for this
+    configuration. With the padding, evaluations on differently truncated grids
+    must agree."""
+
+    def single_band(f_end):
+        return MultibandedFrequencyDomain(
+            nodes=[20.0, f_end],
+            delta_f_initial=1.0,
+            base_domain={
+                "type": "UniformFrequencyDomain",
+                "f_min": 20.0,
+                "f_max": 2048.0,
+                "delta_f": 1.0,
+            },
+        )
+
+    bns = {**BNS_PARAMETERS, "chirp_mass": 1.1975}
+    h = []
+    for f_end in (256.0, 301.0):
+        wf_gen = WaveformGenerator(
+            APPROXIMANT, single_band(f_end), F_REF, spin_conversion_phase=0.0
+        )
+        h.append(wf_gen.generate_hplus_hcross(bns)["h_plus"])
+    n = len(h[0])
+    err = np.max(np.abs(h[0] - h[1][:n])) / np.max(np.abs(h[0]))
+    assert err < 1e-10
+
+
+ALIGNED_PARAMETERS = {
+    "chirp_mass": 30.0,
+    "mass_ratio": 0.8,
+    "chi_1": 0.3,
+    "chi_2": -0.2,
+    "theta_jn": 1.2,
+    "phase": 0.6,
+    "luminosity_distance": 1000.0,
+}
+
+
+@pytest.mark.parametrize(
+    "approximant, spin_conversion_phase, exact",
+    [
+        (APPROXIMANT, None, True),
+        # Bilby's convention is what makes it exact: with a fixed one, a phase shift
+        # leaves the in-plane spins behind and the waveform is not just rescaled.
+        (APPROXIMANT, 0.0, False),
+        # A single (2, |m| = 2) pair is the other half: higher modes break it.
+        ("IMRPhenomXPHM", None, False),
+        # Aligned spins: no in-plane spins to rotate, so the convention is irrelevant.
+        ("IMRPhenomD", 0.0, True),
+        ("IMRPhenomXHM", 0.0, False),
+    ],
+)
+def test_phase_is_global_factor_matches_the_waveform(
+    ufd, approximant, spin_conversion_phase, exact
+):
+    """The declared property and a probe of the waveform itself agree on whether a
+    phase shift multiplies the waveform by exp(2i phase) -- the condition for the
+    (2, 2) synthetic phase, and its cached log likelihood, to be exact."""
+    from dingo.gw.inference.steps import _phase_global_factor_mismatch
+
+    if approximant in ("IMRPhenomD", "IMRPhenomXHM"):
+        parameters = ALIGNED_PARAMETERS
+    elif "NRTidal" in approximant:
+        parameters = BNS_PARAMETERS
+    else:
+        parameters = {
+            **{k: v for k, v in BNS_PARAMETERS.items() if not k.startswith("lambda")},
+            "chirp_mass": 30.0,
+        }
+    wf_gen = WaveformGenerator(
+        approximant, ufd, F_REF, spin_conversion_phase=spin_conversion_phase
+    )
+    assert wf_gen.phase_is_global_factor is exact
+
+    mismatch = _phase_global_factor_mismatch(wf_gen, parameters)
+    assert bool(mismatch < 1e-12) is exact, f"probe mismatch {mismatch:.2e}"

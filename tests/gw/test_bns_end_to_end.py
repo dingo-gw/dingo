@@ -55,7 +55,7 @@ domain:
 waveform_generator:
   approximant: APPROXIMANT
   f_ref: 40.0
-  spin_conversion_phase: 0.0
+  spin_conversion_phase: null
 intrinsic_prior:
   mass_1: bilby.core.prior.Constraint(minimum=1.0, maximum=2.5)
   mass_2: bilby.core.prior.Constraint(minimum=1.0, maximum=2.5)
@@ -343,10 +343,19 @@ def test_inference_and_importance_sampling_on_injection(trained_bns_model):
     assert (samples["ra"] == theta["ra"]).all()
     assert "phase" not in samples  # phase-marginalized network
 
-    result.sample_synthetic_phase(
-        {"co_rotate_spins": True, "n_grid": 101, "uniform_weight": 0.01}
+    result.sample_proposal_extensions(
+        synthetic_phase_kwargs={
+            "approximation_22_mode": True,
+            "n_grid": 101,
+            "uniform_weight": 0.01,
+        }
     )
     result.importance_sample(num_processes=1)
+    # Exact for these single-pair models in Bilby's convention, hence cached for every
+    # sample inside the prior.
+    inside = np.isfinite(result.samples["log_prior"])
+    assert inside.any()
+    assert np.isfinite(result.samples.loc[inside, "log_likelihood_cache"]).all()
     assert np.isfinite(result.samples["weights"]).all()
     assert result.samples["weights"].sum() > 0
     assert np.isfinite(result.log_evidence)

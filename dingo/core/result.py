@@ -212,6 +212,10 @@ class Result(DingoDataset):
         self.sampler_context = self._build_context()
         self._build_domain()
 
+        # A log likelihood cached on the old data does not describe the new data.
+        if self.samples is not None and "log_likelihood_cache" in self.samples:
+            self.samples = self.samples.drop(columns="log_likelihood_cache")
+
     @property
     def num_samples(self):
         if self.samples is not None:
@@ -288,6 +292,11 @@ class Result(DingoDataset):
         likelihood_kwargs : dict
             kwargs that are forwarded to the likelihood constructor. E.g., options for
             marginalization.
+
+        If the samples carry a `log_likelihood_cache` column (the plain log
+        likelihood, stored by a chain step that evaluated it at its draws, e.g. the
+        synthetic phase), it is used instead of evaluating the likelihood, unless
+        likelihood options are given, since these change the likelihood.
         """
 
         if self.samples is None:
@@ -308,15 +317,8 @@ class Result(DingoDataset):
             delta_log_prob_target = 0.0
 
         # Calculate the (un-normalized) target density as prior times likelihood,
-        # evaluated at the same sample points. The prior must be evaluated only for the
-        # non-fixed (delta) parameters.
-        param_keys_non_fixed = [
-            k
-            for k, v in self.prior.items()
-            if not isinstance(v, (Constraint, DeltaFunction))
-        ]
-        theta_non_fixed = self.samples[param_keys_non_fixed]
-        log_prior = self.prior.ln_prob(theta_non_fixed, axis=0)
+        # evaluated at the same sample points.
+        log_prior = self._log_prior()
 
         # select parameters in self.samples (required as log_prob and potentially gnpe
         # proxies are also stored in self.samples, but are not needed for the likelihood.
@@ -332,17 +334,58 @@ class Result(DingoDataset):
         valid_samples = np.isfinite(log_prior + delta_log_prob_target)
         theta = theta.iloc[valid_samples]
 
-        print(f"Calculating {len(theta)} likelihoods.")
-        t0 = time.time()
-        log_likelihood = self.likelihood.log_likelihood_multi(
-            theta, num_processes=num_processes
-        )
-        print(f"Done. This took {time.time() - t0:.2f} seconds.")
+        # As in _build_likelihood, any settings dict (even {}) changes the likelihood,
+        # so the cached plain log likelihood serves only a plain evaluation.
+        if "log_likelihood_cache" in self.samples and not any(
+            v is not None for v in likelihood_kwargs.values()
+        ):
+            log_likelihood = self.samples["log_likelihood_cache"].to_numpy()[
+                valid_samples
+            ]
+            if not np.all(np.isfinite(log_likelihood)):
+                raise ValueError(
+                    f"{np.sum(~np.isfinite(log_likelihood))} samples within the prior "
+                    f"have no cached log likelihood. Were the samples or the prior "
+                    f"changed after the log likelihoods were cached?"
+                )
+            print(f"Using {len(log_likelihood)} cached log likelihoods.")
+        else:
+            print(f"Calculating {len(theta)} likelihoods.")
+            t0 = time.time()
+            log_likelihood = self.likelihood.log_likelihood_multi(
+                theta, num_processes=num_processes
+            )
+            print(f"Done. This took {time.time() - t0:.2f} seconds.")
 
         self.log_noise_evidence = self.likelihood.log_Zn
         self.samples["log_prior"] = log_prior
+        # Samples outside the prior carry no log likelihood.
+        self.samples["log_likelihood"] = np.nan
         self.samples.loc[valid_samples, "log_likelihood"] = log_likelihood
         self._calculate_evidence()
+
+    def _log_prior(self) -> np.ndarray:
+        """
+        Evaluate the log prior of the samples, which is -inf outside the prior.
+
+        The prior density is evaluated only for the non-fixed parameters:
+        DeltaFunction priors return ln_prob = +inf at the peak, which makes bilby's
+        check_ln_prob skip the constraints and return +inf for every sample, and RA
+        corrections (trigger_time vs model ref_time) can shift fixed parameters by
+        tiny amounts, making their ln_prob = -inf. The constraints are then evaluated
+        separately, on all (fixed and non-fixed) parameters.
+        """
+        param_keys_non_fixed = [
+            k
+            for k, v in self.prior.items()
+            if not isinstance(v, (Constraint, DeltaFunction))
+        ]
+        log_prior = self.prior.ln_prob(self.samples[param_keys_non_fixed], axis=0)
+        # Pass a plain dict: bilby's evaluate_constraints mishandles a DataFrame
+        # (DataFrame.values is a property, not a method).
+        param_keys = [k for k, v in self.prior.items() if not isinstance(v, Constraint)]
+        constraints = self.prior.evaluate_constraints(dict(self.samples[param_keys]))
+        return np.where(constraints == 0, -np.inf, log_prior)
 
     def _calculate_evidence(self):
         """Calculate the Bayesian log evidence and sample weights.

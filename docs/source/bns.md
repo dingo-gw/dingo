@@ -113,9 +113,13 @@ Tidal approximants such as `IMRPhenomXP_NRTidalv3` run through the standard LAL
 tidal deformabilities `lambda_1` and `lambda_2` are inserted into the LAL parameter
 dictionary whenever present, and they are ordinary inference parameters, listed with
 the others (see the [example](example_bns.md)). The network is phase marginalized, so
-the phase is reconstructed synthetically before importance sampling; for these models
-the synthetic phase should use `co_rotate_spins: true`, and the
-[synthetic phase](result.md#synthetic-phase) section explains why.
+the phase is reconstructed synthetically before importance sampling. For these models,
+train with `spin_conversion_phase: null` (Bilby's convention): a phase shift is then a
+global factor $e^{2i\phi_c}$, so the synthetic phase with `approximation_22_mode: true`
+is exact, and importance sampling reuses its log likelihood. A network trained with
+`spin_conversion_phase: 0.0` gets an approximate proposal instead; importance sampling
+stays unbiased, at a lower efficiency. See the
+[synthetic phase](result.md#synthetic-phase) section.
 
 ```{eval-rst}
 .. footbibliography::

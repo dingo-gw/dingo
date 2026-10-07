@@ -1,29 +1,57 @@
 """CI unit tests for SyntheticPhaseFactor (and a GWSamplerContext helper), using a mock
 context / likelihood so no waveform models or LAL calls are needed. End-to-end parity
-against Result.sample_synthetic_phase is covered by the model-based harness."""
+against Result.sample_proposal_extensions is covered by the model-based harness."""
+
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
 import torch
 from bilby.core.utils import random as bilby_random
 
+from dingo.gw.domains import UniformFrequencyDomain
 from dingo.gw.inference.context import GWSamplerContext
 from dingo.gw.inference.steps import SyntheticPhaseFactor
+from dingo.gw.likelihood import StationaryGaussianGWLikelihood
 
 
 class _MockLikelihood:
-    """Exposes the two methods the factor uses, deterministic in `chirp_mass`."""
+    """Exposes the methods the factor uses, deterministic in `chirp_mass`."""
 
-    def __init__(self):
+    def __init__(self, uses_dft_phase_decomposition=True, phase_is_global_factor=True):
         self.phase_grid = None
+        self.waveform_generator = SimpleNamespace(
+            uses_dft_phase_decomposition=uses_dft_phase_decomposition,
+            phase_is_global_factor=phase_is_global_factor,
+            spin_conversion_phase=0.0,
+            approximant_str="mock",
+        )
 
-    def d_inner_h_complex_multi(self, theta, num_processes=1):
-        # (2, 2)-approx path: one complex overlap (d | h) per row.
-        return np.array([complex(cm, 0.5) for cm in theta["chirp_mass"].to_numpy()])
+    def phase_grid_terms_22(self, theta):
+        # (2, 2) path: the overlap (d | h_0) and the norm (h_0 | h_0) of one row.
+        return {
+            "d_inner_h": complex(theta["chirp_mass"], 0.5),
+            "h_inner_h": 2.0 * float(theta["chirp_mass"]),
+        }
 
-    def log_likelihood_phase_grid(self, theta):
-        # exact path: a (n_grid,) log-likelihood per row (theta is a row dict).
-        return np.cos(self.phase_grid) * float(theta["chirp_mass"])
+    def phase_grid_terms(self, theta):
+        # exact path: a single m = 1 mode with (d | mu_1) = chirp_mass, so that
+        # log L(phase) = chirp_mass * cos(phase).
+        return {
+            "m_vals": np.array([1]),
+            "kappa2_modes": np.array([complex(theta["chirp_mass"])]),
+            "rho2opt_const": 0.0,
+            "deltas": np.array([], dtype=int),
+            "rho2opt_crossterms": np.array([], dtype=complex),
+        }
+
+    log_Zn = 0.0
+    log_likelihood_from_phase_grid_terms = (
+        StationaryGaussianGWLikelihood.log_likelihood_from_phase_grid_terms
+    )
+    log_likelihood_22_from_terms = (
+        StationaryGaussianGWLikelihood.log_likelihood_22_from_terms
+    )
 
 
 class _MockContext:
@@ -61,10 +89,11 @@ def test_profile_approx_matches_formula():
         uniform_weight=weight,
     )
     given = _given(n)
-    phases, profile = factor._phase_profile(given, _MockContext())
+    phases, profile, _ = factor._phase_profile(given, _MockContext())
 
-    kappa = np.array([complex(cm, 0.5) for cm in given["chirp_mass"].numpy()])
-    log_posterior = np.outer(kappa, np.exp(2j * phases)).real
+    cm = given["chirp_mass"].numpy()
+    kappa = np.array([complex(c, 0.5) for c in cm])
+    log_posterior = np.outer(kappa, np.exp(2j * phases)).real - cm[:, None]
     expected = np.exp(log_posterior - log_posterior.max(axis=1, keepdims=True))
     expected += expected.mean(axis=1, keepdims=True) * weight
 
@@ -79,7 +108,7 @@ def test_profile_exact_mode_runs():
     factor = SyntheticPhaseFactor(
         conditioning=["chirp_mass"], n_grid=n_grid, approximation_22_mode=False
     )
-    phases, profile = factor._phase_profile(_given(n), _MockContext())
+    phases, profile, _ = factor._phase_profile(_given(n), _MockContext())
     assert phases.shape == (n_grid,)
     assert profile.shape == (n, n_grid)
     assert (profile > 0).all()
@@ -111,72 +140,6 @@ def test_log_prob_replug_matches_sample():
     block, log_prob = factor.sample_and_log_prob(1, context, given)
     log_prob_replug = factor.log_prob({"phase": block["phase"]}, context, given)
     assert np.allclose(log_prob.numpy(), log_prob_replug.numpy())
-
-
-def test_chain_with_co_rotation():
-    """The co_rotate_spins chain [table, factor(22-mode), reparam(to_network)]:
-    the composed proposal density is the stored table log-prob plus the phase
-    log-prob plus the rotation Jacobian, only the spin angles are rotated, and
-    the reparam's inverse restores the table's values."""
-    from dingo.core.inference.composer import ChainComposer
-    from dingo.core.inference.steps import SampleTableFactor
-    from dingo.gw.inference.steps import SpinConventionReparam
-
-    class _Context(_MockContext):
-        device = None
-        model_metadata = {
-            "dataset_settings": {
-                "waveform_generator": {
-                    "approximant": "IMRPhenomXPHM",
-                    "f_ref": 20.0,
-                    "spin_conversion_phase": 0.0,
-                }
-            }
-        }
-
-    rng = np.random.default_rng(5)
-    n = 8
-    table_dict = {
-        "chirp_mass": rng.uniform(20.0, 40.0, n),
-        "mass_ratio": rng.uniform(0.5, 1.0, n),
-        "theta_jn": rng.uniform(0.3, np.pi - 0.3, n),
-        "phi_jl": rng.uniform(0.0, 2 * np.pi, n),
-        "a_1": rng.uniform(0.1, 0.9, n),
-        "a_2": rng.uniform(0.1, 0.9, n),
-        "tilt_1": rng.uniform(0.3, np.pi - 0.3, n),
-        "tilt_2": rng.uniform(0.3, np.pi - 0.3, n),
-        "phi_12": rng.uniform(0.0, 2 * np.pi, n),
-    }
-    stored_log_prob = rng.normal(size=n)
-    table = SampleTableFactor(table_dict, log_prob=stored_log_prob)
-    factor = SyntheticPhaseFactor(
-        conditioning=list(table_dict), approximation_22_mode=True, n_grid=101
-    )
-    reparam = SpinConventionReparam(direction="to_network")
-    chain = ChainComposer([table, factor, reparam])
-    _seed(7)
-    out, log_prob = chain.sample_and_log_prob(1, _Context())
-
-    # Only the spin angles rotate with the drawn phase.
-    assert not np.allclose(out["theta_jn"].numpy(), table_dict["theta_jn"], atol=1e-4)
-    assert np.allclose(out["chirp_mass"].numpy(), table_dict["chirp_mass"], atol=1e-4)
-
-    # Composed density: stored + phase log-prob (deterministic replug on the
-    # pre-rotation conditioning) + the rotation Jacobian.
-    given = {k: torch.as_tensor(v, dtype=torch.float32) for k, v in table_dict.items()}
-    log_prob_phase = factor.log_prob({"phase": out["phase"]}, _Context(), given)
-    log_det = reparam._log_det(given["theta_jn"], out["theta_jn"])
-    expected = stored_log_prob + log_prob_phase.numpy() - log_det.numpy()
-    assert np.allclose(log_prob.numpy(), expected, atol=1e-4)
-
-    # The inverse restores the table's spin angles from the rotated ones.
-    conditioning = {k: given[k] for k in reparam.conditioning if k != "phase"}
-    conditioning["phase"] = out["phase"]
-    back = reparam.inverse(
-        {k: out[k] for k in reparam.parameters}, _Context(), conditioning
-    )
-    for k in reparam.parameters:
-        assert np.allclose(back[k].numpy(), table_dict[k], atol=1e-4)
 
 
 def test_factor_builds_likelihood_from_context():
@@ -216,3 +179,104 @@ def test_factor_builds_likelihood_from_context():
         "use_base_domain": False,
         "wfg_updates": {"use_dft_phase_decomposition": False},
     }
+
+
+def test_cached_log_likelihood_at_drawn_phase():
+    # With cache_log_likelihood, the factor also emits log L at the drawn (off-grid)
+    # phase, evaluated from the terms rather than read off the grid; the phase draw
+    # and its log q are unchanged.
+    n = 6
+    kwargs = dict(conditioning=["chirp_mass"], n_grid=33, approximation_22_mode=False)
+    context, given = _MockContext(), _given(n)
+    _seed(2)
+    block, log_prob = SyntheticPhaseFactor(**kwargs).sample_and_log_prob(
+        1, context, given
+    )
+    factor = SyntheticPhaseFactor(**kwargs, cache_log_likelihood=True)
+    assert factor.produces == ["phase", "log_likelihood_cache"]
+    _seed(2)
+    block_cached, log_prob_cached = factor.sample_and_log_prob(1, context, given)
+
+    phase = block_cached["phase"].numpy()
+    assert np.array_equal(phase, block["phase"].numpy())
+    assert np.array_equal(log_prob_cached.numpy(), log_prob.numpy())
+    expected = np.cos(phase) * given["chirp_mass"].numpy()
+    assert block_cached["log_likelihood_cache"].dtype == torch.float64
+    assert np.allclose(block_cached["log_likelihood_cache"].numpy(), expected)
+
+
+def test_cached_log_likelihood_is_chain_output():
+    from dingo.core.inference.composer import ChainComposer
+    from dingo.core.inference.steps import SampleTableFactor
+
+    table = SampleTableFactor({"chirp_mass": np.linspace(20.0, 40.0, 4)})
+    factor = SyntheticPhaseFactor(
+        conditioning=["chirp_mass"],
+        n_grid=33,
+        approximation_22_mode=False,
+        cache_log_likelihood=True,
+    )
+    _seed(3)
+    context = _MockContext()
+    context.device = None
+    out, _ = ChainComposer([table, factor]).sample_and_log_prob(1, context)
+    assert set(out) == {"chirp_mass", "phase", "log_likelihood_cache"}
+
+
+def test_cached_log_likelihood_requires_dft_phase_decomposition():
+    # Without the DFT decomposition the m-components do not sum to exactly the
+    # waveform of a direct likelihood call, so caching raises rather than bias IS.
+    class _NoDFTContext(_MockContext):
+        def likelihood(self, **kwargs):
+            return _MockLikelihood(uses_dft_phase_decomposition=False)
+
+    factor = SyntheticPhaseFactor(
+        conditioning=["chirp_mass"],
+        n_grid=33,
+        approximation_22_mode=False,
+        cache_log_likelihood=True,
+    )
+    with pytest.raises(ValueError, match="DFT phase decomposition"):
+        factor.sample_and_log_prob(1, _NoDFTContext(), _given())
+
+
+def test_cached_log_likelihood_requires_an_exact_22_path():
+    # The (2, 2) likelihood equals a direct call only if a phase shift multiplies the
+    # waveform by exp(2i phase); otherwise caching raises rather than bias IS.
+    class _NoGlobalFactorContext(_MockContext):
+        def likelihood(self, **kwargs):
+            return _MockLikelihood(phase_is_global_factor=False)
+
+    factor = SyntheticPhaseFactor(
+        conditioning=["chirp_mass"],
+        n_grid=33,
+        approximation_22_mode=True,
+        cache_log_likelihood=True,
+    )
+    with pytest.raises(ValueError, match="global exp"):
+        factor.sample_and_log_prob(1, _NoGlobalFactorContext(), _given())
+
+
+def test_cached_log_likelihood_refuses_a_nan_probe():
+    # A model listed as having a global exp(2i phase) factor but whose waveform comes
+    # back NaN must fail the probe, not slip through the "mismatch > tolerance" test.
+    class _NaNContext(_MockContext):
+        def likelihood(self, **kwargs):
+            likelihood = _MockLikelihood()
+            likelihood.waveform_generator.domain = UniformFrequencyDomain(
+                20.0, 27.0, 1.0
+            )
+            likelihood.waveform_generator.generate_hplus_hcross = lambda theta: {
+                "h_plus": np.full(8, np.nan, dtype=complex),
+                "h_cross": np.full(8, np.nan, dtype=complex),
+            }
+            return likelihood
+
+    factor = SyntheticPhaseFactor(
+        conditioning=["chirp_mass"],
+        n_grid=33,
+        approximation_22_mode=True,
+        cache_log_likelihood=True,
+    )
+    with pytest.raises(ValueError, match="refusing to cache"):
+        factor.sample_and_log_prob(1, _NaNContext(), _given())

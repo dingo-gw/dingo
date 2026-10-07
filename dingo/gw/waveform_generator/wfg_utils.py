@@ -95,8 +95,9 @@ def td_modes_to_fd_modes(hlm_td, domain):
     delta_t = 0.5 / domain.f_max
     f_nyquist = domain.f_max  # use f_max as f_nyquist
     chirplen = int(2 * f_nyquist / delta_f)
-    # sample frequencies, -f_max,...,-f_min,...0,...,f_min,...,f_max
-    freqs = np.concatenate((-domain()[::-1], domain()[1:]), axis=0)
+    # sample frequencies, -f_max,...,-f_min,...0,...,f_min,...,f_max. In float64, since
+    # the time-shift phase below would otherwise be computed in single precision.
+    freqs = np.concatenate((-domain()[::-1], domain()[1:]), axis=0).astype(float)
     # For even chirplength, we get chirplen + 1 output frequencies. However, the f_max
     # and -f_max bins are redundant, so we have chirplen unique bins.
     assert len(freqs) == chirplen + 1

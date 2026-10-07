@@ -40,6 +40,41 @@ DEFAULT_ELL_MAX = {
     "NRSur7dq4": 4,
 }
 
+# Approximants whose co-precessing content is a single (2, |m| = 2) pair, so that a
+# phase shift multiplies the waveform by exp(2i phase) and the (2, 2) synthetic
+# phase is exact. The precessing ones need Bilby's spin convention
+# (spin_conversion_phase = None), where a phase shift also rotates the in-plane
+# spins; the aligned-spin ones have no in-plane spins, so any convention works.
+# WaveformGenerator.phase_is_global_factor reads these, and
+# probe_phase_global_factor() checks the property on the waveform itself.
+PRECESSING_22_APPROXIMANTS = frozenset(
+    {
+        "IMRPhenomPv2",
+        "IMRPhenomPv2_NRTidal",
+        "IMRPhenomPv2_NRTidalv2",
+        "IMRPhenomPv3",
+        "IMRPhenomXP",
+        "IMRPhenomXP_NRTidalv2",
+        "IMRPhenomXP_NRTidalv3",
+    }
+)
+ALIGNED_22_APPROXIMANTS = frozenset(
+    {
+        "IMRPhenomD",
+        "IMRPhenomD_NRTidal",
+        "IMRPhenomD_NRTidalv2",
+        "IMRPhenomNSBH",
+        "IMRPhenomXAS",
+        "IMRPhenomXAS_NRTidalv2",
+        "IMRPhenomXAS_NRTidalv3",
+        "SEOBNRv4_ROM",
+        "SEOBNRv4_ROM_NRTidal",
+        "SEOBNRv4_ROM_NRTidalv2",
+        "SEOBNRv4T_surrogate",
+        "TaylorF2",
+    }
+)
+
 
 class WaveformGenerator:
     """Generate polarizations using LALSimulation routines in the specified domain for a
@@ -162,6 +197,50 @@ class WaveformGenerator:
     @property
     def full_domain(self):
         return self._domain
+
+    @property
+    def uses_dft_phase_decomposition(self) -> bool:
+        """Whether generate_hplus_hcross_m obtains the m-components by DFT inversion
+        of the polarizations on a phase grid. They then sum to exactly the output of
+        generate_hplus_hcross; the individual-mode paths differ from it slightly."""
+        return bool(
+            self.use_dft_phase_decomposition
+            # With spin_conversion_phase=None the m-decomposition is unavailable
+            # altogether (generate_hplus_hcross_m raises), so neither the grid nor
+            # the exact mode sum built on it can be used.
+            and self.spin_conversion_phase is not None
+            and LS.SimInspiralImplementedFDApproximants(self.approximant)
+            and (self.mode_list is not None or self.approximant_str in DEFAULT_ELL_MAX)
+        )
+
+    def _check_phase_shifts_at_fixed_spins(self):
+        """The m-decomposition describes phase shifts at fixed spins, which is only
+        what the model does when `spin_conversion_phase` is fixed."""
+        if self.spin_conversion_phase is None:
+            raise ValueError(
+                "generate_hplus_hcross_m() decomposes the waveform into components "
+                "that transform as exp(-i m phase) at fixed spins, but with "
+                "spin_conversion_phase = None a phase shift also rotates the in-plane "
+                "spins, so shifting the components does not reproduce the model's "
+                "phase dependence. Set a fixed spin_conversion_phase, or use the "
+                "(2, 2) synthetic phase, which is exact in this convention for "
+                "approximants with only a co-precessing (2, |m| = 2) pair."
+            )
+
+    @property
+    def phase_is_global_factor(self) -> bool:
+        """Whether a phase shift multiplies the waveform by `exp(2i phase)`, so that
+        the (2, 2) synthetic phase is exact and its log likelihood can be cached.
+        True for the approximants listed above: for the precessing ones only in
+        Bilby's spin convention (`spin_conversion_phase = None`), where the phase
+        also rotates the in-plane spins, and for the aligned-spin ones in any
+        convention. `probe_phase_global_factor` checks the property directly."""
+        if self.approximant_str in ALIGNED_22_APPROXIMANTS:
+            return True
+        return (
+            self.approximant_str in PRECESSING_22_APPROXIMANTS
+            and self.spin_conversion_phase is None
+        )
 
     @property
     def spin_conversion_phase(self):
@@ -554,10 +633,20 @@ class WaveformGenerator:
             lal_parameter_tuple = (phase, *masses, *spins_cartesian, f_ref, r, iota)
             lal_parameter_tuple = tuple(float(p) for p in lal_parameter_tuple)
             # create lal object for frequency array
-            frequency_array = lal.CreateREAL8Vector(
-                len(self.domain()[self.domain.min_idx :])
-            )
-            frequency_array.data = self.domain()[self.domain.min_idx :]
+            frequencies = self.domain()[self.domain.min_idx :]
+            f_pad = getattr(self.domain, "base_domain", self.domain).f_max
+            if frequencies[-1] < f_pad:
+                # Some models (e.g. IMRPhenomXP_NRTidalv3) place the waveform in
+                # time based on the last frequency they are asked for, so a
+                # request that stops before the merger returns a waveform
+                # shifted by an amount that depends on where the request ends.
+                # Asking for one extra frequency at the base domain's f_max
+                # makes the result independent of the band structure and
+                # consistent with SimInspiralFD; the extra sample is dropped in
+                # generate_FD_waveform.
+                frequencies = np.append(frequencies, f_pad)
+            frequency_array = lal.CreateREAL8Vector(len(frequencies))
+            frequency_array.data = frequencies
             lal_parameter_tuple = (
                 *lal_parameter_tuple,
                 lal_params,
@@ -756,9 +845,11 @@ class WaveformGenerator:
                 h_plus[: len(hp.data.data)] = hp.data.data
                 h_cross[: len(hc.data.data)] = hc.data.data
 
-            # Undo the time shift done in SimInspiralFD to the waveform
+            # Undo the time shift done in SimInspiralFD to the waveform. The domain's
+            # frequencies are float32, so compute the phase in float64: in single
+            # precision it is off by several ns in time.
             dt = 1 / hp.deltaF + (hp.epoch.gpsSeconds + hp.epoch.gpsNanoSeconds * 1e-9)
-            time_shift = np.exp(-1j * 2 * np.pi * dt * frequency_array)
+            time_shift = np.exp(-1j * 2 * np.pi * dt * frequency_array.astype(float))
             h_plus *= time_shift
             h_cross *= time_shift
             return {"h_plus": h_plus, "h_cross": h_cross}
@@ -767,8 +858,9 @@ class WaveformGenerator:
             frequency_array = self.domain()[self.domain.min_idx :]
             h_plus = np.zeros_like(frequency_array, dtype=complex)
             h_cross = np.zeros_like(frequency_array, dtype=complex)
-            h_plus[:] = hp.data.data[:]
-            h_cross[:] = hc.data.data[:]
+            # The request may have been padded to f_max (see _convert_parameters).
+            h_plus[:] = hp.data.data[: len(frequency_array)]
+            h_cross[:] = hc.data.data[: len(frequency_array)]
             return {"h_plus": h_plus, "h_cross": h_cross}
 
         else:
@@ -841,9 +933,9 @@ class WaveformGenerator:
         elif not isinstance(list(parameters.values())[0], float):
             raise ValueError("parameters dictionary must contain floats", parameters)
 
-        use_dft = self.use_dft_phase_decomposition
+        self._check_phase_shifts_at_fixed_spins()
         if (
-            use_dft
+            self.use_dft_phase_decomposition
             and self.mode_list is None
             and self.approximant_str not in DEFAULT_ELL_MAX
         ):
@@ -855,22 +947,10 @@ class WaveformGenerator:
                 f"DEFAULT_ELL_MAX entry). Falling back to the individual-mode "
                 f"path."
             )
-            use_dft = False
-        if use_dft and self.spin_conversion_phase is None:
-            # The DFT inverts waveforms that differ only by a shift of the phase.
-            # With spin_conversion_phase=None a phase shift also rotates the
-            # in-plane spins, so the grid points would differ in the spins too
-            # and the recovered m-components would be wrong.
-            warnings.warn(
-                "use_dft_phase_decomposition requires a fixed "
-                "spin_conversion_phase; with None, a phase shift also rotates "
-                "the in-plane spins. Falling back to the individual-mode path."
-            )
-            use_dft = False
 
         if isinstance(self.domain, UniformFrequencyDomain):
             # Generate FD modes in for frequencies [-f_max, ..., 0, ..., f_max].
-            if LS.SimInspiralImplementedFDApproximants(self.approximant) and use_dft:
+            if self.uses_dft_phase_decomposition:
                 # DFT approach: evaluate the summed FD polarizations on a grid
                 # of N phase offsets starting at the reference phase, then recover
                 # the m-components by inverting the grid with a DFT.
@@ -918,7 +998,7 @@ class WaveformGenerator:
                     h["h_cross"] = h["h_cross"][: len(self.domain)]
 
         elif isinstance(self.domain, MultibandedFrequencyDomain):
-            if LS.SimInspiralImplementedFDApproximants(self.approximant) and use_dft:
+            if self.uses_dft_phase_decomposition:
                 # DFT approach, as in the UniformFrequencyDomain branch above. The
                 # polarizations are evaluated at the MFD frequencies, as in
                 # generate_hplus_hcross, so the m-components sum to exactly that
@@ -1023,9 +1103,10 @@ class WaveformGenerator:
                 f"for this approximant (e.g. matter models such as the NRTidal "
                 f"family), this route cannot work at all; use the DFT phase "
                 f"decomposition instead (use_dft_phase_decomposition=True, with a "
-                f"mode_list or DEFAULT_ELL_MAX entry to size its grid), or "
-                f"co_rotate_spins for synthetic phase with an approximant that has "
-                f"only a co-precessing (2, |m|=2) pair."
+                f"mode_list or DEFAULT_ELL_MAX entry to size its grid), or the "
+                f"(2, 2) synthetic phase, which is exact for approximants with only "
+                f"a co-precessing (2, |m|=2) pair in Bilby's spin convention "
+                f"(spin_conversion_phase=None)."
             )
 
     def generate_TD_modes_L0(self, parameters):
@@ -1160,6 +1241,15 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
         else:
             self._use_base_domain = False
             self._domain_transform = None
+
+    @property
+    def uses_dft_phase_decomposition(self) -> bool:
+        """See WaveformGenerator.uses_dft_phase_decomposition."""
+        return (
+            self.use_dft_phase_decomposition
+            and self.spin_conversion_phase is not None
+            and self.approximant_str == "SEOBNRv5PHM"
+        )
 
     def _convert_parameters(
         self,
@@ -1318,9 +1408,10 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
             h_plus = hp.value
             h_cross = hc.value
 
-        # Undo the time shift done in SimInspiralFD to the waveform
+        # Undo the time shift done in SimInspiralFD to the waveform, in float64 (see
+        # WaveformGenerator.generate_FD_waveform).
         dt = 1 / hp.df.value + hp.epoch.value
-        time_shift = np.exp(-1j * 2 * np.pi * dt * frequency_array)
+        time_shift = np.exp(-1j * 2 * np.pi * dt * frequency_array.astype(float))
         h_plus *= time_shift
         h_cross *= time_shift
         pol_dict = {"h_plus": h_plus, "h_cross": h_cross}
@@ -1390,6 +1481,7 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
             raise ValueError("parameters should be a dictionary, but got", parameters)
         elif not isinstance(list(parameters.values())[0], float):
             raise ValueError("parameters dictionary must contain floats", parameters)
+        self._check_phase_shifts_at_fixed_spins()
 
         generator = new_interface_get_waveform_generator(self.approximant_str)
         if isinstance(self.domain, UniformFrequencyDomain):
@@ -1406,10 +1498,7 @@ class NewInterfaceWaveformGenerator(WaveformGenerator):
                 self.approximant_str == "SEOBNRv5PHM"
                 or self.approximant_str == "SEOBNRv5HM"
             ):
-                if (
-                    self.use_dft_phase_decomposition
-                    and self.approximant_str == "SEOBNRv5PHM"
-                ):
+                if self.uses_dft_phase_decomposition:
                     # Optimized path: the EOB dynamics are solved once, then
                     # the cached co-precessing modes are projected onto the
                     # polarizations at each of N equally-spaced phi_c values, and

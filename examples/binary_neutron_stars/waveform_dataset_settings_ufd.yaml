@@ -17,7 +17,7 @@ domain:
 waveform_generator:
   approximant: IMRPhenomXP_NRTidalv3
   f_ref: 100.0
-  spin_conversion_phase: 0.0  # Required for a phase-marginalized network.
+  spin_conversion_phase: null  # Bilby's convention: makes the (2, 2) synthetic phase exact.
 
 intrinsic_prior:
   mass_1: bilby.core.prior.Constraint(minimum=1.0, maximum=3.2)

@@ -47,6 +47,26 @@ def _to_numpy(v) -> np.ndarray:
     return np.asarray(v)
 
 
+def _phase_global_factor_mismatch(waveform_generator, theta, delta=0.9):
+    """Mismatch of `h(theta, delta)` against `h(theta, 0) exp(2i delta)`: zero to
+    round-off iff a phase shift multiplies the waveform by `exp(2i phase)`, which is
+    what makes the (2, 2) synthetic phase exact. The tilts and inclination are set to
+    a generic precessing configuration, since at aligned spins the comparison cannot
+    tell the spin conventions apart and would pass for any model with a single
+    (2, |m| = 2) pair."""
+    from dingo.gw.gwutils import get_mismatch
+
+    theta = {k: float(v) for k, v in theta.items()}
+    generic = {"theta_jn": 1.0, "tilt_1": 1.0, "tilt_2": 0.7, "phi_jl": 0.4}
+    theta.update({k: v for k, v in generic.items() if k in theta})
+    h0 = waveform_generator.generate_hplus_hcross({**theta, "phase": 0.0})
+    h1 = waveform_generator.generate_hplus_hcross({**theta, "phase": delta})
+    return max(
+        get_mismatch(h1[pol], h0[pol] * np.exp(2j * delta), waveform_generator.domain)
+        for pol in ("h_plus", "h_cross")
+    )
+
+
 class SyntheticPhaseFactor(Factor):
     """
     Reconstruct the coalescence phase for a phase-marginalized network: the factor
@@ -67,21 +87,22 @@ class SyntheticPhaseFactor(Factor):
     `(d | h(phase=0))`. With `False` the modes are summed exactly, which requires
     the waveform generator's `spin_conversion_phase = 0`. The entry points differ
     on the default: this factor and `dingo_pipe`'s `PhaseRecoveryDefault` use the
-    exact mode, while `Result.sample_synthetic_phase` defaults to the (2, 2)
+    exact mode, while `Result.sample_proposal_extensions` defaults to the (2, 2)
     approximation when the key is omitted.
 
-    The choice trades speed for accuracy. The approximation is
-    accurate for weakly precessing signals -- its error grows with in-plane spin
-    and with inclination away from face-on/off, where precession mixes the
-    m-components. For approximants with only a co-precessing (2, |m| = 2)
-    pair, `co_rotate_spins` removes this error at the same cost:
-    the reconstruction is then exact even for precessing signals.
-
-    This works because the (2, 2) profile is exact in the physical spin
-    convention, where the phase co-rotates the in-plane spins:
-    `Result.sample_synthetic_phase` follows this factor with a
-    `SpinConventionReparam(direction="to_network")` step. Unlike the exact mode
-    sum, that route does not need a fixed spin-conversion phase.
+    With `cache_log_likelihood=True` the factor also emits the log
+    likelihood at the drawn phase as the annotation column `log_likelihood_cache`, so
+    that importance sampling need not evaluate the waveform again. The phase is drawn
+    from the grid distribution *interpolated* between grid points, so the drawn phase
+    generally lies between them and its likelihood is not one of the grid values.
+    Rather, it is evaluated exactly at the drawn phase from the same mode inner
+    products that produced the grid (a cheap sum over modes, no waveform call).
+    Snapping the draws to the grid points instead would make the phase proposal
+    discrete, inconsistent with the continuous interpolated density returned as the
+    log probability, and interpolating the grid of log likelihoods would only be
+    approximate. The value equals a direct likelihood call only if the m-components
+    sum exactly to the direct waveform, as with the DFT phase decomposition;
+    `Result._synthetic_phase_step` enables caching only then.
     """
 
     def __init__(
@@ -93,6 +114,7 @@ class SyntheticPhaseFactor(Factor):
         num_processes: int = 1,
         use_base_domain: bool = False,
         wfg_updates: Optional[dict] = None,
+        cache_log_likelihood: bool = False,
     ):
         """
         Parameters
@@ -115,6 +137,13 @@ class SyntheticPhaseFactor(Factor):
             Overrides for the waveform generator settings stored with the network,
             e.g. `use_dft_phase_decomposition` (passed on to
             `SamplerContext.likelihood`).
+        cache_log_likelihood : bool, default False
+            Also emit the log likelihood at the drawn phase as the column
+            `log_likelihood_cache`, for reuse by importance sampling. Requires a path
+            whose phase dependence is exact: the exact mode sum with the DFT phase
+            decomposition, or the (2, 2) path for a model whose phase shift is a
+            global `exp(2i phase)` factor (`WaveformGenerator.phase_is_global_factor`,
+            verified on the waveform before the first draw).
         """
         self.parameters = ["phase"]
         self.conditioning = list(conditioning)
@@ -124,6 +153,8 @@ class SyntheticPhaseFactor(Factor):
         self.num_processes = num_processes
         self.use_base_domain = use_base_domain
         self.wfg_updates = wfg_updates
+        self.cache_log_likelihood = cache_log_likelihood
+        self.annotations = ["log_likelihood_cache"] if cache_log_likelihood else []
 
     def sample_and_log_prob(self, num_samples, context, given=None):
         """Draw one phase per `theta_rest` row (`num_samples` must be 1); return the phases
@@ -137,21 +168,66 @@ class SyntheticPhaseFactor(Factor):
         n = len(reference)
         logger.info(f"Estimating synthetic phase for {n} samples.")
         t0 = time.time()
-        phases, phase_posterior = self._phase_profile(given, context)
+        if self.cache_log_likelihood:
+            # The cached value equals a direct likelihood call only where the phase
+            # dependence is exact: the mode sum via the DFT decomposition, or the
+            # (2, 2) path for a model whose phase shift is a global exp(2i phase)
+            # factor. The model's declared property decides, a probe verifies it.
+            waveform_generator = context.likelihood(
+                use_base_domain=self.use_base_domain, wfg_updates=self.wfg_updates
+            ).waveform_generator
+            if not self.approximation_22_mode:
+                if not waveform_generator.uses_dft_phase_decomposition:
+                    raise ValueError(
+                        "cache_log_likelihood requires the DFT phase decomposition, "
+                        f"which {waveform_generator.approximant_str} does not use here."
+                    )
+            elif not waveform_generator.phase_is_global_factor:
+                raise ValueError(
+                    "cache_log_likelihood with approximation_22_mode requires a phase "
+                    "shift to be a global exp(2i phase) factor, which "
+                    f"{waveform_generator.approximant_str} is not with "
+                    f"spin_conversion_phase = {waveform_generator.spin_conversion_phase}."
+                )
+            elif n:
+                mismatch = _phase_global_factor_mismatch(
+                    waveform_generator, {k: v[0] for k, v in given.items()}
+                )
+                # A NaN waveform fails the probe like any other disagreement.
+                if not mismatch <= 1e-10:
+                    raise ValueError(
+                        f"{waveform_generator.approximant_str} is listed as having a "
+                        f"global exp(2i phase) factor, but a phase shift changes the "
+                        f"waveform by a mismatch of {mismatch:.1e}; refusing to cache "
+                        f"the (2, 2) log likelihood."
+                    )
+        phases, phase_posterior, terms = self._phase_profile(given, context)
         new_phase, log_prob = interpolated_sample_and_log_prob_multi(
             phases, phase_posterior, self.num_processes
         )
+        samples = {"phase": torch.as_tensor(new_phase, device=device)}
+        if self.cache_log_likelihood:
+            # Exact log likelihood at the drawn (off-grid) phase, see class docstring.
+            likelihood = context.likelihood(
+                use_base_domain=self.use_base_domain, wfg_updates=self.wfg_updates
+            )
+            evaluate = (
+                likelihood.log_likelihood_22_from_terms
+                if self.approximation_22_mode
+                else likelihood.log_likelihood_from_phase_grid_terms
+            )
+            log_likelihood = evaluate(terms, new_phase[:, None])[:, 0]
+            samples["log_likelihood_cache"] = torch.as_tensor(
+                log_likelihood, device=device
+            )
         logger.info(f"Done. This took {time.time() - t0:.2f} s.")
-        return (
-            {"phase": torch.as_tensor(new_phase, device=device)},
-            torch.as_tensor(log_prob, device=device),
-        )
+        return samples, torch.as_tensor(log_prob, device=device)
 
     def log_prob(self, theta_i, context, given=None):
         """Evaluate `log q(phase | theta_rest, d)` at the given phases (re-plug / IS)."""
         reference = next(iter(given.values()))
         device = reference.device if torch.is_tensor(reference) else None
-        phases, phase_posterior = self._phase_profile(given, context)
+        phases, phase_posterior, _ = self._phase_profile(given, context)
         log_prob = interpolated_log_prob_multi(
             phases, phase_posterior, _to_numpy(theta_i["phase"]), self.num_processes
         )
@@ -167,31 +243,49 @@ class SyntheticPhaseFactor(Factor):
             "approximation_22_mode": self.approximation_22_mode,
             "uniform_weight": self.uniform_weight,
             "use_base_domain": self.use_base_domain,
+            "cache_log_likelihood": self.cache_log_likelihood,
         }
 
     def _phase_profile(self, given, context):
         """The phase grid and the mass-covered (un-normalized) phase distribution, one row
         per sample: evaluate `log L` on the grid, exponentiate (shifted by the per-row
-        max), and add the uniform floor."""
+        max), and add the uniform floor. Also returns the stacked mode terms of the
+        likelihood in exact mode (else `None`)."""
         theta = pd.DataFrame({k: _to_numpy(v) for k, v in given.items()})
         likelihood = context.likelihood(
             use_base_domain=self.use_base_domain, wfg_updates=self.wfg_updates
         )
         phases = np.linspace(0, 2 * np.pi, self.n_grid)
         if self.approximation_22_mode:
-            # Assume the waveform is (2, 2)-dominated (transforms as exp(2i phase)), so the
-            # phase-dependent log-posterior is Re[(d | h(phase=0)) exp(2i phase)].
-            theta = theta.copy()
-            theta["phase"] = 0.0
-            d_inner_h = likelihood.d_inner_h_complex_multi(theta, self.num_processes)
-            phase_log_posterior = np.outer(d_inner_h, np.exp(2j * phases)).real
+            # Assume a phase shift multiplies the waveform by exp(2i phase), so that
+            # log L(phase) = log_Zn + Re[(d | h_0) exp(2i phase)] - (h_0 | h_0) / 2.
+            # Exact for the models WaveformGenerator.phase_is_global_factor lists.
+            terms_per_sample = apply_func_with_multiprocessing(
+                likelihood.phase_grid_terms_22, theta, self.num_processes
+            )
+            terms = {
+                k: np.array([t[k] for t in terms_per_sample])
+                for k in ("d_inner_h", "h_inner_h")
+            }
+            phase_log_posterior = likelihood.log_likelihood_22_from_terms(terms, phases)
         else:
             # Exact: each mode m contributes exp(-i m phase); needs spin_conversion_phase=0.
-            likelihood.phase_grid = phases
-            phase_log_posterior = apply_func_with_multiprocessing(
-                likelihood.log_likelihood_phase_grid,
-                theta,
-                num_processes=self.num_processes,
+            # One waveform evaluation per sample gives the mode terms, which are
+            # stacked and evaluated on the grid for all samples at once.
+            terms_per_sample = apply_func_with_multiprocessing(
+                likelihood.phase_grid_terms, theta, self.num_processes
+            )
+            terms = {
+                # The mode orders are the same for every sample.
+                "m_vals": terms_per_sample[0]["m_vals"],
+                "deltas": terms_per_sample[0]["deltas"],
+                **{
+                    k: np.array([t[k] for t in terms_per_sample])
+                    for k in ("kappa2_modes", "rho2opt_crossterms", "rho2opt_const")
+                },
+            }
+            phase_log_posterior = likelihood.log_likelihood_from_phase_grid_terms(
+                terms, phases
             )
         phase_posterior = np.exp(
             phase_log_posterior - np.amax(phase_log_posterior, axis=1, keepdims=True)
@@ -200,7 +294,7 @@ class SyntheticPhaseFactor(Factor):
         phase_posterior += (
             phase_posterior.mean(axis=-1, keepdims=True) * self.uniform_weight
         )
-        return phases, phase_posterior
+        return phases, phase_posterior, terms
 
 
 def _build_gnpe_transforms(model: BasePosteriorModel):
@@ -371,7 +465,7 @@ class GNPEFlowFactor(Factor):
     @property
     def produces(self) -> list[str]:
         """Emitted columns: the inference block plus the recomputed detector times."""
-        return self.parameters + self.gnpe_parameters
+        return super().produces + self.gnpe_parameters
 
     def sample_and_log_prob(self, num_samples, context, given=None):
         """Draw `num_samples` parameter sets per proxy row (the draws for a row are
@@ -548,29 +642,15 @@ class SpinConventionReparam(Reparametrization):
     coordinates: it rotates the line of sight rigidly about the orbital angular
     momentum, preserving the spherical measure `sin(theta_jn) dtheta dphi`, so
     `log_det = log sin(theta_jn) - log sin(theta_jn')`.
-
-    With `direction="to_network"` the step runs the other way, relabeling
-    physical-convention columns into the model's. The synthetic phase's
-    `co_rotate_spins` uses this after drawing a phase in the physical
-    convention, folding the implied spin rotation back into the model's angles.
     """
 
-    def __init__(self, num_processes: int = 1, direction: str = "to_physical"):
+    def __init__(self, num_processes: int = 1):
         """
         Parameters
         ----------
         num_processes : int, default 1
             Parallel processes for the per-sample LAL spin conversion.
-        direction : str, default "to_physical"
-            Which way `forward` maps: "to_physical" relabels model-convention
-            columns to the physical (Bilby) convention, "to_network" the reverse.
-            `inverse` runs the opposite way.
         """
-        if direction not in ("to_physical", "to_network"):
-            raise ValueError(
-                f"direction must be 'to_physical' or 'to_network', got {direction}."
-            )
-        self.direction = direction
         self.parameters = ["theta_jn", "phi_jl"]
         # The bijection overwrites theta_jn / phi_jl in place; the remaining
         # columns (phase, masses, tilts, ...) are read-only conditioning.
@@ -636,19 +716,12 @@ class SpinConventionReparam(Reparametrization):
             samples, f_ref, None, sc_phase, num_processes=self.num_processes
         )
 
-    def _convert(self, theta: pd.DataFrame, model_metadata: dict, invert: bool):
-        """Run the relabel in the step's `direction` (or its opposite, for the
-        reverse fold)."""
-        if (self.direction == "to_physical") != invert:
-            return self.to_physical(theta, model_metadata)
-        return self.to_network(theta, model_metadata)
-
     def forward(self, given, context):
         # The conversion runs in double; the outputs return in the input dtype
         # and device.
         reference = given["theta_jn"]
         theta = pd.DataFrame({k: _to_numpy(v) for k, v in given.items()})
-        converted = self._convert(theta, context.model_metadata, invert=False)
+        converted = self.to_physical(theta, context.model_metadata)
         return {
             k: torch.as_tensor(converted[k].to_numpy()).to(
                 dtype=reference.dtype, device=reference.device
@@ -657,28 +730,25 @@ class SpinConventionReparam(Reparametrization):
         }
 
     def inverse(self, params, context, given=None):
-        # The reverse direction also needs the invariant conditioning (phase,
-        # masses, tilts), which the reverse fold supplies as `given`.
+        # The physical -> network direction also needs the invariant
+        # conditioning (phase, masses, tilts), which the reverse fold supplies
+        # as `given`.
         if given is None:
             raise ValueError(
                 "The spin-convention inverse needs the conditioning block "
                 "(phase, masses, tilts); pass it as `given`, or convert "
-                "DataFrames with to_network()/to_physical()."
+                "DataFrames with to_network()."
             )
         reference = params["theta_jn"]
         rows = {**given, **params}
         theta = pd.DataFrame({k: _to_numpy(v) for k, v in rows.items()})
-        converted = self._convert(theta, context.model_metadata, invert=True)
+        converted = self.to_network(theta, context.model_metadata)
         return {
             k: torch.as_tensor(converted[k].to_numpy()).to(
                 dtype=reference.dtype, device=reference.device
             )
             for k in self.parameters
         }
-
-    def describe(self) -> dict:
-        """The default descriptor, plus the map's direction."""
-        return {**super().describe(), "direction": self.direction}
 
 
 class GNPEKernelCorrection(TargetCorrection):

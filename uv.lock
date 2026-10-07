@@ -10,6 +10,9 @@ resolution-markers = [
     "python_full_version < '3.11' and sys_platform != 'linux'",
 ]
 
+[manifest]
+build-constraints = [{ name = "setuptools", specifier = "<84" }]
+
 [[package]]
 name = "alabaster"
 version = "1.0.0"
@@ -959,7 +962,7 @@ requires-dist = [
     { name = "pandas-stubs", marker = "extra == 'dev'", specifier = ">=2.3.3.251219" },
     { name = "pycbc" },
     { name = "pycondor" },
-    { name = "pyseobnr", marker = "extra == 'pyseobnr'" },
+    { name = "pyseobnr", marker = "extra == 'pyseobnr'", specifier = ">=0.3.7" },
     { name = "pytest", marker = "extra == 'dev'" },
     { name = "pyyaml" },
     { name = "requests" },
@@ -3481,13 +3484,13 @@ wheels = [
 
 [[package]]
 name = "pygsl-lite"
-version = "0.1.7"
+version = "0.1.8"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "numpy", version = "2.3.5", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/01/a3/757758cd134416ed52d9bfbff6ea32006af5c2f6e4408173129ed1e16591/pygsl_lite-0.1.7.tar.gz", hash = "sha256:556d1c99fd50b23c12a103415bef421a8ecd0ce5e510d7d0587c1e4ba14ca0c5", size = 293193, upload-time = "2024-10-16T10:31:30.601Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/09/c9/a9271d39c86d28d8bfacec831e416e42eb6d154f03605429631c4c08138b/pygsl_lite-0.1.8.tar.gz", hash = "sha256:3213755c71da61e9629551e088530130d28e27048cd5f3ba48deb8165e6df6de", size = 118168, upload-time = "2026-01-28T09:07:40.99Z" }
 
 [[package]]
 name = "pyjwt"
@@ -3525,7 +3528,7 @@ wheels = [
 
 [[package]]
 name = "pyseobnr"
-version = "0.3.5"
+version = "0.3.7"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "h5py" },
@@ -3540,7 +3543,7 @@ dependencies = [
     { name = "scipy", version = "1.16.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "scri" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/e9/14/add9f7201e79f39075e2de1cc13a800556e3627695fe0d1b9fabad8f3d50/pyseobnr-0.3.5.tar.gz", hash = "sha256:cdc92d40739e26535c6d5718f50dce09be80319845f07f3e5396761a0d4f105a", size = 1187001, upload-time = "2025-06-02T14:23:13.098Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/dc/ed/7d5b6587f73aa04ffb494bc1a946cbccb9ea659767455606efc89b261525/pyseobnr-0.3.7.tar.gz", hash = "sha256:a3125f4b7ba680bb0f0c64f6fc644e1ccb663805d78052b40803f30fd6bbb581", size = 1223976, upload-time = "2026-09-21T06:43:01.448Z" }
 
 [[package]]
 name = "pytest"

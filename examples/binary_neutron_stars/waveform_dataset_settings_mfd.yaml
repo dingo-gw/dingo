@@ -25,7 +25,7 @@ domain:
 waveform_generator:
   approximant: IMRPhenomXP_NRTidalv3
   f_ref: 100.0
-  spin_conversion_phase: 0.0
+  spin_conversion_phase: null
 intrinsic_prior:
   mass_1: bilby.core.prior.Constraint(minimum=1.0, maximum=3.2)
   mass_2: bilby.core.prior.Constraint(minimum=1.0, maximum=2.0)

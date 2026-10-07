@@ -1,5 +1,4 @@
 from collections import defaultdict
-from multiprocessing import Pool
 from typing import Optional
 
 import numpy as np
@@ -7,7 +6,6 @@ import pandas as pd
 from scipy.fft import fft
 from scipy.special import logsumexp
 from bilby.gw.utils import ln_i0
-from threadpoolctl import threadpool_limits
 
 from dingo.core.likelihood import Likelihood
 from dingo.gw.injection import GWSignal
@@ -372,6 +370,88 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         return log_likelihoods
 
     def _log_likelihood_phase_grid_mode_decomposed(self, theta, phases=None):
+        if phases is None:
+            phases = self.phase_grid
+        terms = self.phase_grid_terms(theta)
+        return self.log_likelihood_from_phase_grid_terms(terms, phases)
+
+    def phase_grid_terms_22(self, theta: dict) -> dict:
+        """
+        Compute, from one waveform evaluation at phase = 0, the two inner products
+        from which `log_likelihood_22_from_terms` evaluates the log likelihood at
+        any phase, assuming a phase shift multiplies the waveform by
+        `exp(2i phase)` (`WaveformGenerator.phase_is_global_factor`).
+
+        Parameters
+        ----------
+        theta: dict
+            BBH parameters. The phase is ignored.
+
+        Returns
+        -------
+        dict
+            d_inner_h: complex, (d, h_0); h_inner_h: float, (h_0, h_0).
+        """
+        mu = self.signal({**theta, "phase": 0.0})["waveform"]
+        d = self.whitened_strains
+        return {
+            "d_inner_h": sum(
+                inner_product_complex(d_ifo, mu_ifo)
+                for d_ifo, mu_ifo in zip(d.values(), mu.values())
+            ),
+            "h_inner_h": sum(inner_product(mu_ifo, mu_ifo) for mu_ifo in mu.values()),
+        }
+
+    def log_likelihood_22_from_terms(
+        self, terms: dict, phases: np.ndarray
+    ) -> np.ndarray:
+        """
+        Evaluate the log likelihood at the given phases from the output of
+        `phase_grid_terms_22`, without a waveform evaluation:
+
+            log L(ph) = log_Zn + Re[(d, h_0) exp(2i ph)] - (h_0, h_0) / 2
+
+        Parameters
+        ----------
+        terms: dict
+            As returned by `phase_grid_terms_22`, optionally stacked along a
+            leading sample axis.
+        phases: np.ndarray
+            (G,) phases, shared by all samples, or (N, G) phases per sample.
+
+        Returns
+        -------
+        np.ndarray
+            (G,) log likelihoods for unstacked terms, else (N, G).
+        """
+        d_inner_h = np.asarray(terms["d_inner_h"])[..., None]
+        h_inner_h = np.asarray(terms["h_inner_h"])[..., None]
+        return (
+            self.log_Zn
+            + (d_inner_h * np.exp(2j * np.asarray(phases))).real
+            - h_inner_h / 2
+        )
+
+    def phase_grid_terms(self, theta: dict) -> dict:
+        """
+        Compute, from a single waveform evaluation at phase = 0, the inner products
+        from which the log likelihood follows at any phase, see
+        `log_likelihood_from_phase_grid_terms`.
+
+        Parameters
+        ----------
+        theta: dict
+            BBH parameters. A phase entry is ignored.
+
+        Returns
+        -------
+        dict
+            m_vals: (M,) the m-components of the signal;
+            kappa2_modes: (M,) complex, (d, mu_m) per component;
+            rho2opt_const: float, sum_m (mu_m, mu_m);
+            deltas: (P,) the distinct mode differences n - m, for m < n;
+            rho2opt_crossterms: (P,) complex, sum of 2 (mu_m, mu_n) per difference.
+        """
         # TODO: Implement for time marginalization
         if self.return_aux_snr:
             raise NotImplementedError
@@ -386,15 +466,22 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
             )
 
         if self.waveform_generator.spin_conversion_phase != 0:
+            # For a model whose phase shift is a global factor there is no reason to
+            # fix the convention: say so, since this is the recommended BNS setup.
+            hint = (
+                f" For {self.waveform_generator.approximant_str} the (2, 2) path "
+                f"(approximation_22_mode=True) is exact in this convention, at one "
+                f"waveform evaluation per sample instead of 2 ell_max + 1."
+                if self.waveform_generator.phase_is_global_factor
+                else ""
+            )
             raise ValueError(
                 f"The log likelihood on a phase grid assumes "
                 f"WaveformGenerator.spin_conversion_phase = 0, "
-                f"got {self.waveform_generator.spin_conversion_phase}."
+                f"got {self.waveform_generator.spin_conversion_phase}.{hint}"
             )
 
         d = self.whitened_strains
-        if phases is None:
-            phases = self.phase_grid
 
         # Step 1: Compute signal for phase = 0, separated into the m-contributions from
         # the individual modes.
@@ -457,53 +544,64 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
                 ]
             )
 
-        # Vectorised evaluation over the phase grid. Per phase ph:
-        #   rho2opt(ph) = rho2opt_const
-        #       + sum_{(m,n)} (crossterm_{m,n} * exp(-i*(n-m)*ph)).real
-        #   kappa2(ph)  = sum_m (kappa2_modes[m] * exp(-i*m*ph)).real
-        #
         # The cross terms only depend on the mode difference delta = n - m, so we
-        # accumulate them by delta before touching the grid. For m in -4..4 this
-        # collapses 36 pairs onto 8 distinct deltas, i.e. a 4.5x smaller
-        # exponential matrix for identical arithmetic.
-        phases_arr = np.asarray(phases)
-
+        # accumulate them by delta. For m in -4..4 this collapses 36 pairs onto 8
+        # distinct deltas, i.e. a 4.5x smaller exponential matrix in the evaluation.
         crossterms_by_delta = defaultdict(complex)
         for (m, n), c in rho2opt_crossterms.items():
             crossterms_by_delta[n - m] += c
-        deltas = np.array(sorted(crossterms_by_delta))
-        cs = np.array([crossterms_by_delta[delta] for delta in deltas])
-        rho2opt = rho2opt_const + (
-            cs[:, None] * np.exp(-1j * deltas[:, None] * phases_arr[None, :])
-        ).real.sum(axis=0)
+        deltas = sorted(crossterms_by_delta)
 
-        m_arr = np.array(m_vals)
-        k_arr = np.array([kappa2_modes[m] for m in m_vals])
+        return {
+            "m_vals": np.array(m_vals),
+            "kappa2_modes": np.array([kappa2_modes[m] for m in m_vals]),
+            "rho2opt_const": rho2opt_const,
+            "deltas": np.array(deltas),
+            "rho2opt_crossterms": np.array(
+                [crossterms_by_delta[delta] for delta in deltas]
+            ),
+        }
+
+    def log_likelihood_from_phase_grid_terms(
+        self, terms: dict, phases: np.ndarray
+    ) -> np.ndarray:
+        """
+        Evaluate the log likelihood at the given phases from the terms computed by
+        `phase_grid_terms`, without a waveform evaluation. Per phase ph:
+
+            rho2opt(ph) = rho2opt_const
+                + sum_delta (crossterm_delta * exp(-i * delta * ph)).real
+            kappa2(ph)  = sum_m (kappa2_modes[m] * exp(-i * m * ph)).real
+            log L(ph)   = log_Zn + kappa2(ph) - rho2opt(ph) / 2
+
+        The terms of several samples can be evaluated at once by stacking
+        `kappa2_modes`, `rho2opt_crossterms` and `rho2opt_const` along a leading
+        batch dimension N (the mode orders `m_vals` and `deltas` are shared).
+
+        Parameters
+        ----------
+        terms: dict
+            As returned by `phase_grid_terms`, optionally stacked.
+        phases: np.ndarray
+            (G,) phases, shared by all samples, or (N, G) phases per sample.
+
+        Returns
+        -------
+        np.ndarray
+            (G,) log likelihoods for unstacked terms, else (N, G).
+        """
+        phases = np.asarray(phases)
+        # Phasors exp(-i * order * ph) of shape (..., orders, G), contracted with the
+        # coefficients of shape (..., 1, orders).
         kappa2 = (
-            k_arr[:, None] * np.exp(-1j * m_arr[:, None] * phases_arr[None, :])
-        ).real.sum(axis=0)
-
-        log_likelihoods = self.log_Zn + kappa2 - 0.5 * rho2opt
-
-            # # comment out for cross check:
-            # mu = sum_contributions_m(pol_m, phase_shift=phase)
-            # rho2opt_ref = sum([inner_product(mu_ifo, mu_ifo) for mu_ifo in mu.values()])
-            # kappa2_ref = sum(
-            #     [
-            #         inner_product(d_ifo, mu_ifo)
-            #         for d_ifo, mu_ifo in zip(d.values(), mu.values())
-            #     ]
-            # )
-            # assert rho2opt - rho2opt_ref < 1e-10
-            # assert kappa2 - kappa2_ref < 1e-10
-
-        # # Test that this works:
-        # idx = len(phases) // 3
-        # phase = phases[idx]
-        # log_likelihood_ref = self.log_likelihood({**theta, "phase": phase})
-        # print(log_likelihoods[idx] - log_likelihood_ref)
-
-        return log_likelihoods
+            terms["kappa2_modes"][..., None, :]
+            @ np.exp(-1j * terms["m_vals"][:, None] * phases[..., None, :])
+        )[..., 0, :].real
+        rho2opt = np.asarray(terms["rho2opt_const"])[..., None] + (
+            terms["rho2opt_crossterms"][..., None, :]
+            @ np.exp(-1j * terms["deltas"][:, None] * phases[..., None, :])
+        )[..., 0, :].real
+        return self.log_Zn + kappa2 - 0.5 * rho2opt
 
     def _log_likelihood_phase_marginalized(self, theta):
         """
@@ -688,38 +786,6 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         likelihoods = self.log_Zn + kappa2 - 1 / 2.0 * rho2opt
         # Return the average over calibration envelopes
         return logsumexp(likelihoods) - np.log(len(likelihoods))
-
-    def d_inner_h_complex_multi(
-        self, theta: pd.DataFrame, num_processes: int = 1
-    ) -> np.ndarray:
-        """
-        Calculate the complex inner product (d | h(theta)) between the stored data d
-        and a simulated waveform with given parameters theta. Works with multiprocessing.
-
-        Parameters
-        ----------
-        theta : pd.DataFrame
-            Parameters at which to evaluate h.
-        num_processes : int
-            Number of parallel processes to use.
-
-        Returns
-        -------
-        np.ndarray
-            Complex inner products, one per row of theta.
-        """
-        with threadpool_limits(limits=1, user_api="blas"):
-            theta_generator = (d[1].to_dict() for d in theta.iterrows())
-
-            if num_processes > 1:
-                # Workers are not re-seeded: under fork they copy one random
-                # stream, under spawn they start unseeded (#408).
-                with Pool(processes=num_processes) as pool:
-                    results = pool.map(self.d_inner_h_complex, theta_generator)
-            else:
-                results = list(map(self.d_inner_h_complex, theta_generator))
-
-        return np.array(results)
 
     def d_inner_h_complex(self, theta):
         """

@@ -22,13 +22,13 @@ Density recovery can also be achieved using an unconditional density estimator f
 
 It is often challenging for Dingo to learn to model the `phase` parameter $\phi_c$. For this reason, we usually marginalize over it in training by excluding it from the list of `inference_parameters`. The phase is, however, required for importance sampling unless using also a phase-marginalized likelihood (which is approximate except under special circumstances).
 
-The Dingo `gw.Result` class includes a method `sample_synthetic_phase()` which produces a $\phi_c$ sample from a $\phi_c$-marginalized sample. It does so by evaluating the likelihood on a $\phi_c$-grid and then sampling from the associated 1D distribution. The `log_prob` value for the sample is also corrected to reflect the sampled $\phi_c$. Speed is ensured by caching waveform modes and evaluating the polarizations for different $\phi_c$. For further details, see the Supplemental Material of {cite:p}`Dax:2022pxd`.
+The Dingo `gw.Result` class includes a method `sample_proposal_extensions()` which, given `synthetic_phase_kwargs`, produces a $\phi_c$ sample from a $\phi_c$-marginalized sample. It does so by evaluating the likelihood on a $\phi_c$-grid and then sampling from the associated 1D distribution. The `log_prob` value for the sample is also corrected to reflect the sampled $\phi_c$. Speed is ensured by caching waveform modes and evaluating the polarizations for different $\phi_c$. For further details, see the Supplemental Material of {cite:p}`Dax:2022pxd`.
 
 This method should be run *after* recovering the density, since in particular it applies a correction to the density.
 
 ### Configuration
 
-The method `sample_synthetic_phase()` takes a kwargs argument. An example configuration is
+The `synthetic_phase_kwargs` argument of `sample_proposal_extensions()` is a dict. An example configuration is
 ```yaml
 approximation_22_mode: false
 n_grid: 5001
@@ -36,10 +36,7 @@ uniform_weight: 0.01
 num_processes: 100
 ```
 approximation_22_mode
-: Whether to make the approximation that only the $(l, m) = (2, 2)$ mode is present, i.e., waveforms transform as $\exp(2 i \phi_c)$. This simplifies computations since it does not require caching of waveform modes. It is faster than the exact mode sum and accurate for weakly precessing signals.
-
-co_rotate_spins
-: Draw the phase in the physical spin convention, where a phase shift co-rotates the in-plane spins, and fold the implied rotation into the `theta_jn` / `phi_jl` columns (their values change along with the added `phase`). For approximants whose co-precessing-frame content is a single $(2, |m| = 2)$ pair (e.g. IMRPhenomPv2, IMRPhenomXP, IMRPhenomXP_NRTidalv3) this is *exact* at the cost of `approximation_22_mode`. Overrides `approximation_22_mode`.
+: Whether to assume that a phase shift multiplies the waveform by $\exp(2 i \phi_c)$, which holds exactly when only the $(l, m) = (2, \pm 2)$ modes are present. This simplifies computations since it does not require caching of waveform modes. It is *exact*, not an approximation, for approximants whose co-precessing content is a single $(2, \pm 2)$ pair: IMRPhenomPv2, IMRPhenomXP and their NRTidal variants in Bilby's spin convention (`spin_conversion_phase: null`, where a phase shift also rotates the in-plane spins), and aligned-spin $(2, 2)$-only models such as IMRPhenomD in any convention. Elsewhere it is an approximation whose error grows with in-plane spin and with inclination away from face-on.
 
 n_grid
 : Specifies the phase grid on which the likelihoods are evaluated.
@@ -50,13 +47,15 @@ uniform_weight
 num_processes
 : For parallelization of synthetic phase sampling. This is usually the most expensive part of importance sampling, so it is advantageous to perform calculations in parallel.
 
-Which of the phase options to use depends on the mode content of the approximant. `co_rotate_spins: true` draws the phase in the physical spin convention, where a phase shift co-rotates the in-plane spins, so the waveform transforms as a global $e^{2i\phi}$ factor, and rotates `theta_jn` / `phi_jl` accordingly. For a model whose co-precessing-frame content is a single $(2, \pm 2)$ pair this is exact at a single waveform evaluation per sample; a two-waveform probe verifies the property at runtime and falls back to the exact mode sum otherwise. The plain `approximation_22_mode: true` shortcut has the same cost but is approximate for precessing signals: precession mixes the inertial-frame $m$-components, placing a spurious phase peak at $\phi + \pi$. The exact mode sum (`approximation_22_mode: false`) costs $2\ell_{\max}+1 = 5$ evaluations per sample. For NRTidal models, which have no frequency-domain modes in LALSimulation, it requires the DFT phase decomposition with an explicit `mode_list: [[2, 2], [2, -2]]` in the waveform-generator settings.
+Which of the phase options to use depends on the approximant and on the spin convention the network was trained in. For a model whose co-precessing-frame content is a single $(2, \pm 2)$ pair, trained with `spin_conversion_phase: null` (Bilby's convention), a phase shift multiplies the waveform by a global $e^{2i\phi}$ factor, so `approximation_22_mode: true` is exact at a single waveform evaluation per sample, and its log likelihood is cached for importance sampling. With a fixed `spin_conversion_phase` it is approximate for precessing signals: precession mixes the inertial-frame $m$-components, placing a spurious phase peak at $\phi + \pi$. The exact mode sum (`approximation_22_mode: false`) costs $2\ell_{\max}+1$ evaluations per sample (5 for $\ell_{\max} = 2$) and needs a fixed `spin_conversion_phase`. For NRTidal models, which have no frequency-domain modes in LALSimulation, it requires the DFT phase decomposition with an explicit `mode_list: [[2, 2], [2, -2]]` in the waveform-generator settings.
 
 ## Importance sampling
 
 Once samples are in the right form---including all relevant parameters *and* the log probability---importance sampling is carried out using the `importance_sample()` method. It allows to specify options for using a marginalized likelihood. (Time and phase marginalization are separately supported; see the documentation of {py:class}`dingo.gw.likelihood.StationaryGaussianGWLikelihood`.)
 
 As with the synthetic phase, importance sampling allows for parallelization.
+
+Where the phase dependence is exact, the synthetic phase also stores the log likelihood at the drawn $\phi_c$ in the column `log_likelihood_cache`: either from the exact mode sum with the DFT phase decomposition, or from the $(2, 2)$ path for the models listed under `approximation_22_mode` above (the only exact route for the NRTidal family, for which LALSimulation implements no frequency-domain modes). The factor probes the waveform before caching, and refuses if a phase shift turns out not to be a global factor. Since the drawn $\phi_c$ generally lies between grid points, this value is evaluated exactly from the mode inner products rather than read off the grid. `importance_sample()` then uses these values instead of generating the waveforms again, unless a marginalized likelihood is requested.
 
 The target may be defined on different data from the proposal (in `dingo_pipe`, an `importance-sampling-updates` duration or frequency range regenerates the event). `reset_event()` then makes `event_metadata` the event analyzed and keeps the record the samples were drawn under as `importance_sampling_metadata["proposal_event_metadata"]`. The data they were drawn from are not kept; they remain in the sampling-stage file.
 

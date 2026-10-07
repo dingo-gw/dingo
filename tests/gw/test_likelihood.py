@@ -277,16 +277,6 @@ def test_d_inner_h_complex_returns_complex(likelihood_and_theta):
     assert np.isscalar(result) or isinstance(result, (complex, np.complexfloating))
 
 
-def test_d_inner_h_complex_multi_returns_complex_array(likelihood_and_theta):
-    likelihood, theta = likelihood_and_theta
-    theta_df = pd.DataFrame([theta, theta])
-    result = likelihood.d_inner_h_complex_multi(theta_df)
-    assert isinstance(result, np.ndarray)
-    assert result.shape == (2,)
-    assert np.iscomplexobj(result)
-    assert np.isclose(result[0], likelihood.d_inner_h_complex(theta))
-
-
 def test_phase_marginalized_aux_snr_is_phase_maximized(domain, event_data):
     """Under phase marginalization the auxiliary SNR is the phase-maximized
     matched-filter statistic |<d, h_c>| / sqrt(<h, h>), not the marginalized
