@@ -146,7 +146,7 @@ fixed-context-parameters = {chirp_mass_proxy: 1.19786, ra: 3.44616, dec: -0.4080
 # fixed-context-parameters = {ra: 3.44616, dec: -0.408084}
 
 importance-sample = true
-importance-sampling-settings = {synthetic_phase: {approximation_22_mode: true, n_grid: 5001, uniform_weight: 0.01}}
+importance-sampling-settings = {synthetic_parameters: {approximation_22_mode: true, n_grid_phase: 5001, uniform_weight: 0.01}}
 
 ################################################################################
 ## Data generation arguments

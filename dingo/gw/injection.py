@@ -242,12 +242,11 @@ class GWSignal(object):
     # namely storing ASDs from numpy arrays, from ASDDatasets, loading from files,
     # etc. For now this functionality is partially implemented here.
 
-    def signal_m(self, theta):
+    def signal_m(self, theta, psis):
         """
-        Compute the GW signal for parameters theta. Same as self.signal(theta) method,
-        but it does not sum the contributions of the individual modes, and instead
-        returns a dict {m: pol_m for m in [-l_max,...,0,...,l_max]} where each
-        contribution pol_m transforms as exp(-1j * m * phase_shift) under phase shifts.
+        Compute the GW signal for parameters theta, like self.signal(theta), but
+        without summing the contributions of the individual modes: each contribution
+        transforms as exp(-1j * m * phase_shift) under phase shifts.
 
         Step 1: Generate polarizations
         Step 2: Project polarizations onto detectors;
@@ -258,17 +257,15 @@ class GWSignal(object):
         theta: dict
             Signal parameters. Includes intrinsic parameters to be passed to waveform
             generator, and extrinsic parameters for detector projection.
+        psis: sequence of float
+            Polarization angles at which to project the modes; theta["psi"] is
+            ignored. The waveform is generated once and projected once per angle.
 
         Returns
         -------
         dict
-            keys:
-                waveform:
-                    GW strain signal for each detector, with individual contributions
-                    {m: pol_m for m in [-l_max,...,0,...,l_max]}
-                extrinsic_parameters: {}
-                parameters: waveform parameters
-                asd (if set): amplitude spectral density for each detector
+            {m: {ifo: strain}} for m in [-l_max, ..., l_max], where strain has shape
+            (len(psis), n_freq), one row per angle in psis.
         """
         theta_intrinsic, theta_extrinsic = split_off_extrinsic_parameters(theta)
         theta_intrinsic = {k: float(v) for k, v in theta_intrinsic.items()}
@@ -285,18 +282,22 @@ class GWSignal(object):
         }
 
         # Step 2: project m-contributions to h_plus and h_cross onto detectors
-        sample_out = {}
+        out = {}
         for m, pol in pol_m.items():
-            sample = {
-                "parameters": theta_intrinsic,
-                "extrinsic_parameters": theta_extrinsic,
-                "waveform": pol,
+            projected = []
+            for psi in psis:
+                sample = {
+                    "parameters": theta_intrinsic,
+                    "extrinsic_parameters": {**theta_extrinsic, "psi": psi},
+                    "waveform": pol,
+                }
+                if self.asd is not None:
+                    sample["asds"] = self.asd
+                projected.append(self.projection_transforms(sample)["waveform"])
+            out[m] = {
+                ifo: np.stack([p[ifo] for p in projected]) for ifo in projected[0]
             }
-            if self.asd is not None:
-                sample["asds"] = self.asd
-            sample_out[m] = self.projection_transforms(sample)
-
-        return sample_out
+        return out
 
     @property
     def asd(self):

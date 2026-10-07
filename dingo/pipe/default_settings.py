@@ -38,9 +38,19 @@ DENSITY_RECOVERY_SETTINGS = {
 
 IMPORTANCE_SAMPLING_SETTINGS = {
     "PhaseRecoveryDefault": {
-        "synthetic_phase": {
+        "synthetic_parameters": {
             "approximation_22_mode": False,
-            "n_grid": 5001,
+            "n_grid_phase": 5001,
+            "uniform_weight": 0.01,
+        },
+    },
+    # For networks that infer neither phase nor psi: both are drawn from the
+    # likelihood on a (phase, psi) grid.
+    "PhasePsiRecoveryDefault": {
+        "synthetic_parameters": {
+            "approximation_22_mode": False,
+            "n_grid_phase": 512,
+            "n_grid_psi": 128,
             "uniform_weight": 0.01,
         },
     },
