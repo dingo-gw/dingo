@@ -160,7 +160,7 @@ class DecimateWaveformsAndASDS(object):
                     k: self.multibanded_frequency_domain.decimate(v)
                     for k, v in whitened_waveforms.items()
                 }
-                with np.errstate(divide="ignore"):
+                with np.errstate(divide="ignore", invalid="ignore"):
                     asds_dec = {
                         k: 1 / self.multibanded_frequency_domain.decimate(1 / v)
                         for k, v in sample["asds"].items()
