@@ -253,16 +253,13 @@ NSBH_PARAMETERS = {
 
 @pytest.mark.parametrize(
     "approximant, parameters, exact",
+    # The SEOBNR ROMs are left out: they need LAL data files that CI does not have.
     [
-        ("SEOBNRv5_ROM", ALIGNED_PARAMETERS, True),
-        ("SEOBNRv5_ROM_NRTidalv3", BNS_ALIGNED_PARAMETERS, True),
-        ("SEOBNRv4_ROM_NRTidalv2", BNS_ALIGNED_PARAMETERS, True),
-        ("SEOBNRv4_ROM_NRTidalv2_NSBH", NSBH_PARAMETERS, True),
         ("IMRPhenomNSBH", NSBH_PARAMETERS, True),
         ("IMRPhenomXAS_NRTidalv3", BNS_ALIGNED_PARAMETERS, True),
         ("IMRPhenomD_NRTidalv2", BNS_ALIGNED_PARAMETERS, True),
         # Higher modes: generates, but a phase shift is not a global factor.
-        ("SEOBNRv5HM_ROM", ALIGNED_PARAMETERS, False),
+        ("IMRPhenomXHM", ALIGNED_PARAMETERS, False),
     ],
 )
 def test_aligned_models_generate_and_match_their_exactness_flag(
@@ -270,9 +267,7 @@ def test_aligned_models_generate_and_match_their_exactness_flag(
 ):
     """Matter and aligned-spin models run through the generator and agree with what
     `phase_is_global_factor` says about them: a finite, non-trivial waveform, and a
-    probe of the waveform that confirms (or denies) the global exp(2i phase) factor.
-    The SEOBNRv5 ROMs reach LALSimulation only because the generator no longer treats
-    every "SEOBNRv5" name as gwsignal-only."""
+    probe of the waveform that confirms (or denies) the global exp(2i phase) factor."""
     from dingo.gw.inference.steps import _phase_global_factor_mismatch
 
     wf_gen = WaveformGenerator(approximant, ufd, F_REF, spin_conversion_phase=0.0)
