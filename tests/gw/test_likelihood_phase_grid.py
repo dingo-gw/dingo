@@ -314,12 +314,9 @@ def test_phase_psi_algebra_matches_brute_force():
     np.testing.assert_allclose(fast, brute, rtol=1e-10, atol=1e-10)
 
 
-def test_terms_22_reproduce_direct_likelihood():
-    """The (2, 2) terms evaluate to the direct log likelihood at any phase, for a
-    model whose phase shift is a global exp(2i phase) factor. This is what lets
-    importance sampling reuse the value cached by the synthetic phase on the
-    (2, 2) path, which is the only exact route for the NRTidal family (LALSimulation
-    implements no frequency-domain modes for it)."""
+def _bns_likelihood_22():
+    """A BNS likelihood whose phase shift is a global exp(2i phase) factor, and a
+    precessing parameter point for it."""
     domain = UniformFrequencyDomain(f_min=20.0, f_max=512.0, delta_f=1 / 4.0)
     rng = np.random.default_rng(42)
     waveform, asds = {}, {}
@@ -349,7 +346,16 @@ def test_terms_22_reproduce_direct_likelihood():
         t_ref=1126259462.4,
     )
     assert likelihood.waveform_generator.phase_is_global_factor
+    return likelihood, theta
 
+
+def test_terms_22_reproduce_direct_likelihood():
+    """The (2, 2) terms evaluate to the direct log likelihood at any phase, for a
+    model whose phase shift is a global exp(2i phase) factor. This is what lets
+    importance sampling reuse the value cached by the synthetic phase on the
+    (2, 2) path, which is the only exact route for the NRTidal family (LALSimulation
+    implements no frequency-domain modes for it)."""
+    likelihood, theta = _bns_likelihood_22()
     phases = np.array([0.37, 2.9, 5.81])
     terms = likelihood.phase_grid_terms_22(theta)
     from_terms = likelihood.log_likelihood_22_from_terms(terms, phases)
@@ -361,6 +367,34 @@ def test_terms_22_reproduce_direct_likelihood():
     at_drawn = likelihood.log_likelihood_22_from_terms(stacked, phases[:2, None])
     assert at_drawn.shape == (2, 1)
     np.testing.assert_allclose(at_drawn[:, 0], direct[:2], rtol=1e-9)
+
+
+def test_phase_psi_terms_22_reproduce_direct_likelihood():
+    """The (2, 2) terms at the two basis angles give the direct log likelihood at
+    any (phase, psi), from one waveform evaluation, and at the sample's own psi the
+    same terms as `phase_grid_terms_22`. This is what the (phase, psi) factor's
+    (2, 2) path and its cached log likelihood rest on."""
+    likelihood, theta = _bns_likelihood_22()
+    terms = likelihood.phase_psi_terms_22(theta)
+    assert terms["d_inner_h"].shape == (2,) and terms["h_inner_h"].shape == (2, 2)
+
+    phases = np.array([0.37, 2.9, 5.81])
+    psis = np.array([0.2, 1.1, 2.75])
+    at_psi = likelihood.terms_22_at_psi(terms, psis[:, None])
+    from_terms = likelihood.log_likelihood_22_from_terms(
+        {k: v[:, 0] for k, v in at_psi.items()}, phases[:, None]
+    )[:, 0]
+    direct = [
+        likelihood.log_likelihood({**theta, "phase": phase, "psi": psi})
+        for phase, psi in zip(phases, psis)
+    ]
+    np.testing.assert_allclose(from_terms, direct, rtol=1e-9)
+    assert np.ptp(direct) > 1.0  # the check is not dominated by log_Zn
+
+    own = likelihood.terms_22_at_psi(terms, np.array([theta["psi"]]))
+    expected = likelihood.phase_grid_terms_22(theta)
+    for k in ("d_inner_h", "h_inner_h"):
+        np.testing.assert_allclose(own[k][0], expected[k], rtol=1e-12)
 
 
 def test_phase_grid_raise_points_at_the_exact_22_path():

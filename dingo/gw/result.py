@@ -452,18 +452,19 @@ class Result(CoreResult):
             n_grid_phase : int, optional
                 Number of phase grid points on [0, 2pi], endpoints included.
                 Defaults to the factor's default (5001 for the phase alone, 512
-                together with psi).
+                together with psi). Not used together with psi in
+                approximation_22_mode, where the phase is drawn exactly.
             n_grid_psi : int, optional
                 Number of psi grid points on [0, pi], endpoints included, default
                 128. Only used if the samples lack psi as well as the phase: then
-                both are drawn from the likelihood on a (phase, psi) grid (exact
-                mode sum only), see `SyntheticPhasePsiFactor`.
-            approximation_22_mode : bool, default True
+                both are drawn from the likelihood, see `SyntheticPhasePsiFactor`.
+            approximation_22_mode : bool, optional
                 Assume a (2, 2)-dominated waveform. Otherwise the exact mode sum is
                 used, which requires the waveform generator's
-                spin_conversion_phase = 0. Not available together with psi: the
-                (phase, psi) grid always uses the exact mode sum, so omit it or
-                set it False there (True raises a ValueError).
+                spin_conversion_phase = 0. Defaults to True for the phase alone.
+                Together with psi it defaults to True where the (2, 2) path is
+                exact (`WaveformGenerator.phase_is_global_factor`), as for BNS
+                networks in Bilby's spin convention, and to False otherwise.
             uniform_weight : float, default 0.01
                 Weight of the uniform floor added to the phase distribution for
                 mass coverage.
@@ -627,7 +628,7 @@ class Result(CoreResult):
         approximate). It applies to samples in the full parameter space except the
         phase. If the samples lack psi as
         well, the step is a `SyntheticPhasePsiFactor`, which draws both angles from
-        the likelihood on a (phase, psi) grid.
+        the likelihood.
 
         Parameters
         ----------
@@ -689,23 +690,19 @@ class Result(CoreResult):
             raise ValueError(
                 "synthetic_parameters_kwargs: n_grid has been renamed to n_grid_phase."
             )
-        # The psi factor is exact-mode only; the phase-only factor defaults to (2, 2).
+        waveform_generator = self.sampler_context.likelihood(
+            use_base_domain=self.use_base_domain, wfg_updates=wfg_updates
+        ).waveform_generator
+        # The phase-only factor defaults to (2, 2). The psi factor takes it where it
+        # is exact, and the mode sum otherwise.
         approximation_22_mode = synthetic_parameters_kwargs.get(
-            "approximation_22_mode", self.psi_prior is None
+            "approximation_22_mode",
+            self.psi_prior is None or waveform_generator.phase_is_global_factor,
         )
-        # The (phase, psi) grid is exact-mode only; don't silently ignore the setting.
-        if self.psi_prior is not None and approximation_22_mode:
-            raise ValueError(
-                "synthetic_parameters_kwargs: the (phase, psi) grid requires the exact "
-                "mode sum, approximation_22_mode=False."
-            )
         # Cache the log likelihood at the drawn phase only where it equals a direct
         # likelihood call: the exact mode sum with the DFT phase decomposition, or
         # the (2, 2) path for a model whose phase shift is a global exp(2i phase)
         # factor. The factor probes the waveform before using it.
-        waveform_generator = self.sampler_context.likelihood(
-            use_base_domain=self.use_base_domain, wfg_updates=wfg_updates
-        ).waveform_generator
         cache_log_likelihood = (
             waveform_generator.phase_is_global_factor
             if approximation_22_mode
@@ -728,7 +725,9 @@ class Result(CoreResult):
         if self.psi_prior is not None:
             if "n_grid_psi" in synthetic_parameters_kwargs:
                 common["n_grid_psi"] = synthetic_parameters_kwargs["n_grid_psi"]
-            step = SyntheticPhasePsiFactor(**common)
+            step = SyntheticPhasePsiFactor(
+                approximation_22_mode=approximation_22_mode, **common
+            )
         else:
             step = SyntheticPhaseFactor(
                 approximation_22_mode=approximation_22_mode,

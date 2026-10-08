@@ -45,10 +45,11 @@ IMPORTANCE_SAMPLING_SETTINGS = {
         },
     },
     # For networks that infer neither phase nor psi: both are drawn from the
-    # likelihood on a (phase, psi) grid.
+    # likelihood. approximation_22_mode is left to Result, which takes the (2, 2)
+    # path where it is exact (WaveformGenerator.phase_is_global_factor, e.g. BNS
+    # networks in Bilby's spin convention) and the exact mode sum otherwise.
     "PhasePsiRecoveryDefault": {
         "synthetic_parameters": {
-            "approximation_22_mode": False,
             "n_grid_phase": 512,
             "n_grid_psi": 128,
             "uniform_weight": 0.01,

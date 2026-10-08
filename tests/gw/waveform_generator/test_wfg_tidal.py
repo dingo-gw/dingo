@@ -235,3 +235,51 @@ def test_phase_is_global_factor_matches_the_waveform(
 
     mismatch = _phase_global_factor_mismatch(wf_gen, parameters)
     assert bool(mismatch < 1e-12) is exact, f"probe mismatch {mismatch:.2e}"
+
+
+BNS_ALIGNED_PARAMETERS = {
+    **{k: v for k, v in BNS_PARAMETERS.items() if k not in ("tilt_1", "tilt_2")},
+    "tilt_1": 0.0,
+    "tilt_2": 0.0,
+}
+NSBH_PARAMETERS = {
+    **BNS_ALIGNED_PARAMETERS,
+    "chirp_mass": 2.8,
+    "mass_ratio": 0.2,
+    "lambda_1": 0.0,
+    "lambda_2": 500.0,
+}
+
+
+@pytest.mark.parametrize(
+    "approximant, parameters, exact",
+    [
+        ("SEOBNRv5_ROM", ALIGNED_PARAMETERS, True),
+        ("SEOBNRv5_ROM_NRTidalv3", BNS_ALIGNED_PARAMETERS, True),
+        ("SEOBNRv4_ROM_NRTidalv2", BNS_ALIGNED_PARAMETERS, True),
+        ("SEOBNRv4_ROM_NRTidalv2_NSBH", NSBH_PARAMETERS, True),
+        ("IMRPhenomNSBH", NSBH_PARAMETERS, True),
+        ("IMRPhenomXAS_NRTidalv3", BNS_ALIGNED_PARAMETERS, True),
+        ("IMRPhenomD_NRTidalv2", BNS_ALIGNED_PARAMETERS, True),
+        # Higher modes: generates, but a phase shift is not a global factor.
+        ("SEOBNRv5HM_ROM", ALIGNED_PARAMETERS, False),
+    ],
+)
+def test_aligned_models_generate_and_match_their_exactness_flag(
+    ufd, approximant, parameters, exact
+):
+    """Matter and aligned-spin models run through the generator and agree with what
+    `phase_is_global_factor` says about them: a finite, non-trivial waveform, and a
+    probe of the waveform that confirms (or denies) the global exp(2i phase) factor.
+    The SEOBNRv5 ROMs reach LALSimulation only because the generator no longer treats
+    every "SEOBNRv5" name as gwsignal-only."""
+    from dingo.gw.inference.steps import _phase_global_factor_mismatch
+
+    wf_gen = WaveformGenerator(approximant, ufd, F_REF, spin_conversion_phase=0.0)
+    h = wf_gen.generate_hplus_hcross(parameters)
+    assert np.all(np.isfinite(h["h_plus"])) and np.all(np.isfinite(h["h_cross"]))
+    assert np.max(np.abs(h["h_plus"])) > 0.0
+
+    assert wf_gen.phase_is_global_factor is exact
+    mismatch = _phase_global_factor_mismatch(wf_gen, parameters)
+    assert bool(mismatch < 1e-12) is exact, f"probe mismatch {mismatch:.2e}"

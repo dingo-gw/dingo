@@ -435,6 +435,71 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
             - h_inner_h / 2
         )
 
+    def phase_psi_terms_22(self, theta: dict) -> dict:
+        """
+        Like `phase_grid_terms_22`, but for every polarization angle at once. Since
+        psi enters only through the antenna patterns, the signal at phase = 0 is
+
+            h(psi) = cos(2 psi) h^0 + sin(2 psi) h^1,
+
+        with h^0, h^1 the projections at psi = 0 and psi = pi / 4 of one waveform
+        evaluation. `terms_22_at_psi` combines the returned inner products into those
+        of `phase_grid_terms_22` at any psi.
+
+        Parameters
+        ----------
+        theta: dict
+            BBH parameters. The phase and psi are ignored.
+
+        Returns
+        -------
+        dict
+            d_inner_h: (2,) complex, (d, h^b); h_inner_h: (2, 2) real, Re (h^b, h^c).
+        """
+        # (n_freq, 2) per detector, frequency first as the inner products sum over it.
+        mu = {
+            ifo: h.T
+            for ifo, h in self.signal_psis(
+                {**theta, "phase": 0.0}, (0.0, np.pi / 4)
+            ).items()
+        }
+        d = self.whitened_strains
+        return {
+            "d_inner_h": sum(
+                inner_product_complex(d[ifo][:, None], mu[ifo]) for ifo in mu
+            ),
+            "h_inner_h": sum(
+                inner_product(mu[ifo][:, :, None], mu[ifo][:, None, :]) for ifo in mu
+            ),
+        }
+
+    def terms_22_at_psi(self, terms: dict, psis: np.ndarray) -> dict:
+        """
+        Combine the output of `phase_psi_terms_22` into that of `phase_grid_terms_22`
+        at the given polarization angles, ready for `log_likelihood_22_from_terms`:
+        with weights w = (cos 2 psi, sin 2 psi), (d, h(psi)) = w . d_inner_h and
+        (h(psi), h(psi)) = w . h_inner_h . w.
+
+        Parameters
+        ----------
+        terms: dict
+            As returned by `phase_psi_terms_22`, optionally stacked along a leading
+            sample axis N.
+        psis: np.ndarray
+            (H,) angles, shared by all samples, or (N, H) angles per sample.
+
+        Returns
+        -------
+        dict
+            d_inner_h, h_inner_h of shape (H,), or (N, H) with a sample axis.
+        """
+        psis = np.asarray(psis)
+        w = np.stack([np.cos(2 * psis), np.sin(2 * psis)], axis=-1)
+        return {
+            "d_inner_h": np.einsum("...b,...hb->...h", terms["d_inner_h"], w),
+            "h_inner_h": np.einsum("...bc,...hb,...hc->...h", terms["h_inner_h"], w, w),
+        }
+
     def phase_grid_terms(self, theta: dict) -> dict:
         """
         Compute, from one waveform evaluation at phase = 0, the inner products from

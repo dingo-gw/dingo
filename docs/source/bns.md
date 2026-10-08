@@ -138,6 +138,11 @@ refuses to cache if a phase shift turns out not to be a global factor. The exact
 mode sum (`approximation_22_mode: false`) is not an option for the NRTidal
 family: LALSimulation implements no frequency-domain modes for it, and the DFT
 phase decomposition needs the fixed spin convention that we are avoiding here.
+The same holds for a network that marginalizes $\psi$ as well: with
+`approximation_22_mode: true` both angles are recovered from one waveform
+evaluation per sample, the phase drawn exactly rather than on a grid, and the log
+likelihood is cached in the same way (see [Synthetic phase and polarization
+angle](result.md#synthetic-phase-and-polarization-angle)).
 
 A network trained with `spin_conversion_phase: 0.0` is the other case. There a
 phase shift leaves the in-plane spins behind, so the $(2, 2)$ path is an

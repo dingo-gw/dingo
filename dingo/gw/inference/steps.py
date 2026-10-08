@@ -5,11 +5,14 @@ from __future__ import annotations
 import logging
 import time
 from typing import Optional
+import bilby
+import lalsimulation as LS
 import numpy as np
 import pandas as pd
 import torch
 from astropy.time import Time
 from bilby.gw.detector import InterferometerList
+from bilby.gw.utils import ln_i0
 from torchvision.transforms import Compose
 from dingo.core.density import (
     interpolated_log_prob_multi,
@@ -78,14 +81,20 @@ def _floored_density(log_density, uniform_weight):
 def _phase_global_factor_mismatch(waveform_generator, theta, delta=0.9):
     """Mismatch of `h(theta, delta)` against `h(theta, 0) exp(2i delta)`: zero to
     round-off iff a phase shift multiplies the waveform by `exp(2i phase)`, which is
-    what makes the (2, 2) synthetic phase exact. The tilts and inclination are set to
-    a generic precessing configuration, since at aligned spins the comparison cannot
-    tell the spin conventions apart and would pass for any model with a single
-    (2, |m| = 2) pair."""
+    what makes the (2, 2) synthetic phase exact. The inclination, and for precessing
+    models the tilts, are set to a generic configuration, since at aligned spins the
+    comparison cannot tell the spin conventions apart and would pass for any model
+    with a single (2, |m| = 2) pair."""
     from dingo.gw.gwutils import get_mismatch
 
     theta = {k: float(v) for k, v in theta.items()}
-    generic = {"theta_jn": 1.0, "tilt_1": 1.0, "tilt_2": 0.7, "phi_jl": 0.4}
+    generic = {"theta_jn": 1.0}
+    # In-plane spins only for models that take them; aligned ones reject them.
+    if (
+        LS.SimInspiralGetSpinSupportFromApproximant(waveform_generator.approximant)
+        == LS.SIM_INSPIRAL_PRECESSINGSPIN
+    ):
+        generic.update({"tilt_1": 1.0, "tilt_2": 0.7, "phi_jl": 0.4})
     theta.update({k: v for k, v in generic.items() if k in theta})
     h0 = waveform_generator.generate_hplus_hcross({**theta, "phase": 0.0})
     h1 = waveform_generator.generate_hplus_hcross({**theta, "phase": delta})
@@ -93,6 +102,41 @@ def _phase_global_factor_mismatch(waveform_generator, theta, delta=0.9):
         get_mismatch(h1[pol], h0[pol] * np.exp(2j * delta), waveform_generator.domain)
         for pol in ("h_plus", "h_cross")
     )
+
+
+def _check_cached_log_likelihood_is_exact(
+    waveform_generator, approximation_22_mode, given
+):
+    """Raise unless the log likelihood a synthetic phase factor computes at the drawn
+    angles equals a direct likelihood call: the phase dependence must be exact, as
+    for the mode sum via the DFT decomposition, or the (2, 2) path for a model whose
+    phase shift is a global exp(2i phase) factor. The model's declared property
+    decides, a probe on the first row of `given` verifies it."""
+    if not approximation_22_mode:
+        if not waveform_generator.uses_dft_phase_decomposition:
+            raise ValueError(
+                "cache_log_likelihood requires the DFT phase decomposition, "
+                f"which {waveform_generator.approximant_str} does not use here."
+            )
+    elif not waveform_generator.phase_is_global_factor:
+        raise ValueError(
+            "cache_log_likelihood with approximation_22_mode requires a phase "
+            "shift to be a global exp(2i phase) factor, which "
+            f"{waveform_generator.approximant_str} is not with "
+            f"spin_conversion_phase = {waveform_generator.spin_conversion_phase}."
+        )
+    elif len(next(iter(given.values()))):
+        mismatch = _phase_global_factor_mismatch(
+            waveform_generator, {k: v[0] for k, v in given.items()}
+        )
+        # A NaN waveform fails the probe like any other disagreement.
+        if not mismatch <= 1e-10:
+            raise ValueError(
+                f"{waveform_generator.approximant_str} is listed as having a "
+                f"global exp(2i phase) factor, but a phase shift changes the "
+                f"waveform by a mismatch of {mismatch:.1e}; refusing to cache "
+                f"the (2, 2) log likelihood."
+            )
 
 
 class SyntheticPhaseFactor(Factor):
@@ -197,38 +241,13 @@ class SyntheticPhaseFactor(Factor):
         logger.info(f"Estimating synthetic phase for {n} samples.")
         t0 = time.time()
         if self.cache_log_likelihood:
-            # The cached value equals a direct likelihood call only where the phase
-            # dependence is exact: the mode sum via the DFT decomposition, or the
-            # (2, 2) path for a model whose phase shift is a global exp(2i phase)
-            # factor. The model's declared property decides, a probe verifies it.
-            waveform_generator = context.likelihood(
-                use_base_domain=self.use_base_domain, wfg_updates=self.wfg_updates
-            ).waveform_generator
-            if not self.approximation_22_mode:
-                if not waveform_generator.uses_dft_phase_decomposition:
-                    raise ValueError(
-                        "cache_log_likelihood requires the DFT phase decomposition, "
-                        f"which {waveform_generator.approximant_str} does not use here."
-                    )
-            elif not waveform_generator.phase_is_global_factor:
-                raise ValueError(
-                    "cache_log_likelihood with approximation_22_mode requires a phase "
-                    "shift to be a global exp(2i phase) factor, which "
-                    f"{waveform_generator.approximant_str} is not with "
-                    f"spin_conversion_phase = {waveform_generator.spin_conversion_phase}."
-                )
-            elif n:
-                mismatch = _phase_global_factor_mismatch(
-                    waveform_generator, {k: v[0] for k, v in given.items()}
-                )
-                # A NaN waveform fails the probe like any other disagreement.
-                if not mismatch <= 1e-10:
-                    raise ValueError(
-                        f"{waveform_generator.approximant_str} is listed as having a "
-                        f"global exp(2i phase) factor, but a phase shift changes the "
-                        f"waveform by a mismatch of {mismatch:.1e}; refusing to cache "
-                        f"the (2, 2) log likelihood."
-                    )
+            _check_cached_log_likelihood_is_exact(
+                context.likelihood(
+                    use_base_domain=self.use_base_domain, wfg_updates=self.wfg_updates
+                ).waveform_generator,
+                self.approximation_22_mode,
+                given,
+            )
         phases, phase_posterior, terms = self._phase_profile(given, context)
         new_phase, log_prob = interpolated_sample_and_log_prob_multi(
             phases, phase_posterior, self.num_processes
@@ -321,21 +340,39 @@ class SyntheticPhasePsiFactor(Factor):
 
         mu(psi) = cos(2 psi) mu(0) + sin(2 psi) mu(pi / 4).
 
-    The inner products of the two projections give `log L` at any (phase, psi), see
-    `StationaryGaussianGWLikelihood.phase_grid_terms`. The modes are summed exactly
-    (there is no (2, 2)-mode option), which requires the waveform generator's
-    `spin_conversion_phase = 0`.
+    The inner products of the two projections give `log L` at any (phase, psi). As
+    in `SyntheticPhaseFactor`, there are two modes.
 
-    The proposal is `q(phase) q(psi | phase)`. `q(phase)` is the likelihood grid
+    With `approximation_22_mode=False` the modes are summed exactly, which requires
+    the waveform generator's `spin_conversion_phase = 0`, see
+    `StationaryGaussianGWLikelihood.phase_grid_terms`. The proposal is
+    `q(phase) q(psi | phase)`. `q(phase)` is the likelihood on a (phase, psi) grid
     summed over psi, evaluated in chunks of rows sized by `max_grid_elements`.
     `q(psi | phase)` is the likelihood on the psi grid at the drawn phase itself,
-    not at a phase grid point. As in `SyntheticPhaseFactor`, each is exponentiated,
-    given a uniform floor of weight `uniform_weight`, and sampled on the grid as a
-    piecewise-constant density.
+    not at a phase grid point.
+
+    With `approximation_22_mode=True` the whole waveform transforms as
+    `exp(2i phase)`, see `StationaryGaussianGWLikelihood.phase_psi_terms_22`, so at
+    fixed psi
+
+        log L(phase, psi) = log_Zn + |z| cos(2 phase + arg z) - (h, h) / 2,
+
+    with z = (d, h) at phase = 0 and both terms functions of psi. The phase then
+    integrates out in closed form, which fixes the order the other way round: the
+    proposal is `q(psi) q(phase | psi)`. `q(psi)` is the phase-marginal likelihood
+    `exp(-(h, h) / 2) I0(|z|)` on the psi grid, without any phase grid, and
+    `q(phase | psi)` is the exact conditional, a von Mises distribution in
+    `2 phase`, drawn directly. `n_grid_phase` is not used.
+
+    Each density is exponentiated and given a uniform floor of weight
+    `uniform_weight`. The grid densities are sampled as piecewise-constant
+    densities; the von Mises conditional is mixed with the uniform density in the
+    same proportion, `uniform_weight / (1 + uniform_weight)`.
 
     With `cache_log_likelihood=True` the factor also emits `log L` at the drawn
     (phase, psi), evaluated exactly from the same inner products, as the
-    annotation column `log_likelihood_cache`.
+    annotation column `log_likelihood_cache`. As in `SyntheticPhaseFactor`, this
+    requires an exact phase dependence, which is checked before the first draw.
     """
 
     # Upper bound on the (chunk, n_grid_phase, n_grid_psi) grid held at once, in elements.
@@ -346,6 +383,7 @@ class SyntheticPhasePsiFactor(Factor):
         conditioning: list[str],
         n_grid_phase: int = 512,
         n_grid_psi: int = 128,
+        approximation_22_mode: bool = False,
         uniform_weight: float = 0.01,
         num_processes: int = 1,
         use_base_domain: bool = False,
@@ -359,11 +397,14 @@ class SyntheticPhasePsiFactor(Factor):
             The physical parameters the likelihood needs to generate the waveform
             (everything the chain has produced except `phase` and `psi`).
         n_grid_phase : int, default 512
-            Number of phase grid points on `[0, 2 pi]`, endpoints included.
+            Number of phase grid points on `[0, 2 pi]`, endpoints included. Not
+            used with `approximation_22_mode`, where the phase is drawn exactly.
         n_grid_psi : int, default 128
             Number of psi grid points on `[0, pi]`, endpoints included.
+        approximation_22_mode : bool, default False
+            Use the (2, 2)-mode approximation instead of the exact mode sum.
         uniform_weight : float, default 0.01
-            Weight of the uniform floor added to `q(phase)` and to `q(psi | phase)`.
+            Weight of the uniform floor added to each of the two densities.
         num_processes : int, default 1
             Parallel processes for the per-sample waveform evaluations and the
             interpolated draws.
@@ -376,12 +417,14 @@ class SyntheticPhasePsiFactor(Factor):
             `SamplerContext.likelihood`).
         cache_log_likelihood : bool, default False
             Also emit the log likelihood at the drawn (phase, psi) as the column
-            `log_likelihood_cache`, for reuse by importance sampling.
+            `log_likelihood_cache`, for reuse by importance sampling. Requires an
+            exact phase dependence, as in `SyntheticPhaseFactor`.
         """
         self.parameters = ["phase", "psi"]
         self.conditioning = list(conditioning)
         self.n_grid_phase = n_grid_phase
         self.n_grid_psi = n_grid_psi
+        self.approximation_22_mode = approximation_22_mode
         self.uniform_weight = uniform_weight
         self.num_processes = num_processes
         self.use_base_domain = use_base_domain
@@ -391,8 +434,9 @@ class SyntheticPhasePsiFactor(Factor):
 
     def sample_and_log_prob(self, num_samples, context, given=None):
         """Draw one (phase, psi) per row of `given` (`num_samples` must be 1): phase
-        from `q(phase)`, then psi from `q(psi | phase)` at the drawn phase. The log
-        probability is `log q(phase) + log q(psi | phase)`. See
+        from `q(phase)`, then psi from `q(psi | phase)` at the drawn phase, or with
+        `approximation_22_mode` psi from `q(psi)`, then the phase from
+        `q(phase | psi)`. The log probability is that of the pair. See
         `Factor.sample_and_log_prob`."""
         if num_samples != 1:
             raise ValueError(
@@ -403,23 +447,52 @@ class SyntheticPhasePsiFactor(Factor):
         device = reference.device if torch.is_tensor(reference) else None
         logger.info(f"Estimating synthetic phase and psi for {len(reference)} samples.")
         t0 = time.time()
-        likelihood, terms, phases, phase_posterior = self._phase_profile(given, context)
-        new_phase, log_prob_phase = interpolated_sample_and_log_prob_multi(
-            phases, phase_posterior, self.num_processes
-        )
-        psis, psi_posterior = self._psi_profile(likelihood, terms, new_phase)
-        new_psi, log_prob_psi = interpolated_sample_and_log_prob_multi(
-            psis, psi_posterior, self.num_processes
-        )
+        if self.cache_log_likelihood:
+            _check_cached_log_likelihood_is_exact(
+                context.likelihood(
+                    use_base_domain=self.use_base_domain, wfg_updates=self.wfg_updates
+                ).waveform_generator,
+                self.approximation_22_mode,
+                given,
+            )
+        if self.approximation_22_mode:
+            likelihood, terms, psis, psi_posterior = self._psi_profile_22(
+                given, context
+            )
+            new_psi, log_prob_psi = interpolated_sample_and_log_prob_multi(
+                psis, psi_posterior, self.num_processes
+            )
+            terms_at_psi = {
+                k: v[:, 0]
+                for k, v in likelihood.terms_22_at_psi(terms, new_psi[:, None]).items()
+            }
+            new_phase = self._sample_phase_22(terms_at_psi)
+            log_prob_phase = self._log_prob_phase_22(terms_at_psi, new_phase)
+        else:
+            likelihood, terms, phases, phase_posterior = self._phase_profile(
+                given, context
+            )
+            new_phase, log_prob_phase = interpolated_sample_and_log_prob_multi(
+                phases, phase_posterior, self.num_processes
+            )
+            psis, psi_posterior = self._psi_profile(likelihood, terms, new_phase)
+            new_psi, log_prob_psi = interpolated_sample_and_log_prob_multi(
+                psis, psi_posterior, self.num_processes
+            )
         samples = {
             "phase": torch.as_tensor(new_phase, device=device),
             "psi": torch.as_tensor(new_psi, device=device),
         }
         if self.cache_log_likelihood:
             # Exact log likelihood at the drawn (off-grid) point, from the same terms.
-            log_likelihood = likelihood.log_likelihood_from_phase_grid_terms(
-                terms, new_phase[:, None], new_psi[:, None]
-            )[:, 0, 0]
+            if self.approximation_22_mode:
+                log_likelihood = likelihood.log_likelihood_22_from_terms(
+                    terms_at_psi, new_phase[:, None]
+                )[:, 0]
+            else:
+                log_likelihood = likelihood.log_likelihood_from_phase_grid_terms(
+                    terms, new_phase[:, None], new_psi[:, None]
+                )[:, 0, 0]
             samples["log_likelihood_cache"] = torch.as_tensor(
                 log_likelihood, device=device
             )
@@ -427,19 +500,34 @@ class SyntheticPhasePsiFactor(Factor):
         return samples, torch.as_tensor(log_prob_phase + log_prob_psi, device=device)
 
     def log_prob(self, theta_i, context, given=None):
-        """Evaluate `log q(phase) + log q(psi | phase)` at the given angles, rebuilding
-        both grid distributions from `given`. See `Factor.log_prob`."""
+        """Evaluate the log probability of the given angles, rebuilding both
+        distributions from `given`. See `Factor.log_prob`."""
         reference = next(iter(given.values()))
         device = reference.device if torch.is_tensor(reference) else None
         phase, psi = _to_numpy(theta_i["phase"]), _to_numpy(theta_i["psi"])
-        likelihood, terms, phases, phase_posterior = self._phase_profile(given, context)
-        log_prob_phase = interpolated_log_prob_multi(
-            phases, phase_posterior, phase, self.num_processes
-        )
-        psis, psi_posterior = self._psi_profile(likelihood, terms, phase)
-        log_prob_psi = interpolated_log_prob_multi(
-            psis, psi_posterior, psi, self.num_processes
-        )
+        if self.approximation_22_mode:
+            likelihood, terms, psis, psi_posterior = self._psi_profile_22(
+                given, context
+            )
+            log_prob_psi = interpolated_log_prob_multi(
+                psis, psi_posterior, psi, self.num_processes
+            )
+            terms_at_psi = {
+                k: v[:, 0]
+                for k, v in likelihood.terms_22_at_psi(terms, psi[:, None]).items()
+            }
+            log_prob_phase = self._log_prob_phase_22(terms_at_psi, phase)
+        else:
+            likelihood, terms, phases, phase_posterior = self._phase_profile(
+                given, context
+            )
+            log_prob_phase = interpolated_log_prob_multi(
+                phases, phase_posterior, phase, self.num_processes
+            )
+            psis, psi_posterior = self._psi_profile(likelihood, terms, phase)
+            log_prob_psi = interpolated_log_prob_multi(
+                psis, psi_posterior, psi, self.num_processes
+            )
         return torch.as_tensor(log_prob_phase + log_prob_psi, device=device)
 
     def describe(self) -> dict:
@@ -450,6 +538,7 @@ class SyntheticPhasePsiFactor(Factor):
             "conditioning": list(self.conditioning),
             "n_grid_phase": self.n_grid_phase,
             "n_grid_psi": self.n_grid_psi,
+            "approximation_22_mode": self.approximation_22_mode,
             "uniform_weight": self.uniform_weight,
             "use_base_domain": self.use_base_domain,
             "cache_log_likelihood": self.cache_log_likelihood,
@@ -507,6 +596,58 @@ class SyntheticPhasePsiFactor(Factor):
             terms, np.asarray(phase)[:, None], psis
         )[:, 0, :]
         return psis, _floored_density(log_conditional, self.uniform_weight)
+
+    def _psi_profile_22(self, given, context):
+        """Return the likelihood, the stacked (2, 2) terms of all rows of `given`, the
+        psi grid, and `q(psi)` on it: the likelihood integrated over the phase,
+        `exp(log_Zn - (h, h) / 2) I0(|(d, h)|)` up to a constant, floored;
+        unnormalized, shape (N, n_grid_psi)."""
+        theta = pd.DataFrame({k: _to_numpy(v) for k, v in given.items()})
+        likelihood = context.likelihood(
+            use_base_domain=self.use_base_domain, wfg_updates=self.wfg_updates
+        )
+        terms_per_sample = apply_func_with_multiprocessing(
+            likelihood.phase_psi_terms_22, theta, self.num_processes
+        )
+        terms = {
+            k: np.array([t[k] for t in terms_per_sample])
+            for k in ("d_inner_h", "h_inner_h")
+        }
+        psis = np.linspace(0, np.pi, self.n_grid_psi)
+        terms_on_grid = likelihood.terms_22_at_psi(terms, psis)
+        log_marginal = (
+            ln_i0(np.abs(terms_on_grid["d_inner_h"])) - terms_on_grid["h_inner_h"] / 2
+        )
+        return (
+            likelihood,
+            terms,
+            psis,
+            _floored_density(log_marginal, self.uniform_weight),
+        )
+
+    def _sample_phase_22(self, terms_at_psi):
+        """Draw the phase from `q(phase | psi)` given the (2, 2) terms at the drawn
+        psi, one phase per row: the von Mises conditional, with probability
+        `uniform_weight / (1 + uniform_weight)` replaced by a uniform draw (the
+        floor). Uses bilby's random generator, like the interpolated draws."""
+        rng = bilby.core.utils.random.rng
+        z = terms_at_psi["d_inner_h"]
+        n = len(z)
+        # Re[z exp(2i phase)] = |z| cos(2 phase + arg z), so 2 phase is von Mises
+        # about -arg z, and phase is either of its two halves in [0, 2 pi).
+        two_phase = rng.vonmises(-np.angle(z), np.abs(z))
+        phase = np.mod(two_phase / 2 + np.pi * rng.integers(2, size=n), 2 * np.pi)
+        floor = rng.uniform(size=n) < self.uniform_weight / (1 + self.uniform_weight)
+        return np.where(floor, rng.uniform(0, 2 * np.pi, size=n), phase)
+
+    def _log_prob_phase_22(self, terms_at_psi, phase):
+        """`log q(phase | psi)`, the density `_sample_phase_22` draws from: the von
+        Mises density of `2 phase` with the uniform floor, normalized on [0, 2 pi)."""
+        z = terms_at_psi["d_inner_h"]
+        von_mises = np.exp((z * np.exp(2j * phase)).real - ln_i0(np.abs(z)))
+        return np.log(
+            (von_mises + self.uniform_weight) / (2 * np.pi * (1 + self.uniform_weight))
+        )
 
 
 def _build_gnpe_transforms(model: BasePosteriorModel):

@@ -351,8 +351,50 @@ def test_phase_recovery_default_serves_both_factors():
             kwargs, conditioning=list(result.prior), num_samples=100
         )
         assert isinstance(step, cls) and step.cache_log_likelihood
+        assert not step.approximation_22_mode
         grid = (step.n_grid_phase, getattr(step, "n_grid_psi", None))
         assert grid == ((512, 128) if drop_psi else (5001, None))
+
+
+@pytest.mark.parametrize(
+    "waveform_generator, exact_22",
+    [
+        # A BNS network in Bilby's spin convention: the (2, 2) path is exact.
+        (
+            {
+                "approximant": "IMRPhenomXP_NRTidalv3",
+                "f_ref": 20.0,
+                "spin_conversion_phase": None,
+            },
+            True,
+        ),
+        # Higher modes, fixed convention: the exact mode sum, as before.
+        (WAVEFORM_GENERATOR_DFT, False),
+    ],
+)
+def test_phase_psi_recovery_default_takes_the_exact_path(waveform_generator, exact_22):
+    # dingo_pipe's (phase, psi) default leaves approximation_22_mode to Result, which
+    # takes the (2, 2) path where it is exact and the mode sum otherwise; caching
+    # follows in either case. An explicit setting still wins.
+    from dingo.pipe.default_settings import IMPORTANCE_SAMPLING_SETTINGS
+
+    kwargs = IMPORTANCE_SAMPLING_SETTINGS["PhasePsiRecoveryDefault"][
+        "synthetic_parameters"
+    ]
+    assert "approximation_22_mode" not in kwargs
+    result = make_gw_result(
+        drop_phase=True, drop_psi=True, waveform_generator=waveform_generator
+    )
+    step = result._synthetic_parameters_step(
+        kwargs, conditioning=list(result.prior), num_samples=100
+    )
+    assert step.approximation_22_mode is exact_22 and step.cache_log_likelihood
+    step = result._synthetic_parameters_step(
+        {**kwargs, "approximation_22_mode": not exact_22},
+        conditioning=list(result.prior),
+        num_samples=100,
+    )
+    assert step.approximation_22_mode is not exact_22
 
 
 def test_synthetic_phase_grid_size_settings():
@@ -367,24 +409,24 @@ def test_synthetic_phase_grid_size_settings():
         result._synthetic_parameters_step({"n_grid": 16}, [], num_samples=100)
 
 
-def test_synthetic_phase_psi_rejects_approximation_22_mode():
-    # The (phase, psi) grid is exact-mode only: an explicit approximation_22_mode
-    # raises instead of being ignored, omitting it is fine. The phase-only factor
-    # still honours it.
+def test_synthetic_phase_approximation_22_mode_reaches_both_factors():
+    # approximation_22_mode reaches the factor with and without psi. Omitted, it
+    # defaults to (2, 2) for the phase alone, and together with psi wherever the
+    # (2, 2) path is exact, as for this (2, 2)-only IMRPhenomD network.
     from dingo.gw.inference.steps import SyntheticPhaseFactor, SyntheticPhasePsiFactor
 
-    result = make_gw_result(drop_phase=True, drop_psi=True)
-    with pytest.raises(ValueError, match="requires the exact mode sum"):
-        result._synthetic_parameters_step(
-            {"approximation_22_mode": True}, [], num_samples=100
-        )
-    step = result._synthetic_parameters_step({}, [], num_samples=100)
-    assert isinstance(step, SyntheticPhasePsiFactor)
-
-    step = make_gw_result(drop_phase=True)._synthetic_parameters_step(
-        {"approximation_22_mode": True}, [], num_samples=100
-    )
-    assert isinstance(step, SyntheticPhaseFactor) and step.approximation_22_mode
+    for drop_psi, cls, default in (
+        (True, SyntheticPhasePsiFactor, True),
+        (False, SyntheticPhaseFactor, True),
+    ):
+        result = make_gw_result(drop_phase=True, drop_psi=drop_psi)
+        for kwargs, expected in (
+            ({"approximation_22_mode": True}, True),
+            ({"approximation_22_mode": False}, False),
+            ({}, default),
+        ):
+            step = result._synthetic_parameters_step(kwargs, [], num_samples=100)
+            assert isinstance(step, cls) and step.approximation_22_mode is expected
 
 
 def test_synthetic_phase_requires_uniform_phase_prior():
@@ -859,12 +901,13 @@ def test_calibration_and_synthetic_phase_run_as_one_chain(tmp_path):
     assert weights[5] == 0.0 and np.all(weights[:5] > 0)
 
 
-def test_synthetic_phase_22_cache_matches_direct_importance_sampling():
+@pytest.mark.parametrize("drop_psi", [False, True])
+def test_synthetic_phase_22_cache_matches_direct_importance_sampling(drop_psi):
     # For a model whose phase shift is a global exp(2i phase) factor, the (2, 2)
     # path is exact, so the synthetic phase caches its log likelihood and
-    # importance sampling reuses it. IMRPhenomD is (2, 2)-only, hence exact in
-    # either spin convention.
-    result = make_gw_result(drop_phase=True)
+    # importance sampling reuses it, for the phase alone and together with psi.
+    # IMRPhenomD is (2, 2)-only, hence exact in either spin convention.
+    result = make_gw_result(drop_phase=True, drop_psi=drop_psi)
     assert result.sampler_context.likelihood().waveform_generator.phase_is_global_factor
     bilby_random.seed(0)
     result.sample_proposal_extensions(
@@ -883,3 +926,57 @@ def test_synthetic_phase_22_cache_matches_direct_importance_sampling():
     ]
     direct = result.likelihood.log_likelihood_multi(theta)
     np.testing.assert_allclose(cached, direct, rtol=1e-9)
+
+
+@pytest.mark.parametrize(
+    "waveform_generator, approximation_22_mode, caches",
+    [
+        # Networks trained with a fixed spin convention, as before this change. For a
+        # precessing model the (2, 2) path is then approximate, so nothing is cached;
+        # the mode sum is exact through the DFT decomposition and is.
+        (WAVEFORM_GENERATOR_DFT, True, False),
+        (WAVEFORM_GENERATOR_DFT, False, True),
+        # An aligned (2, 2)-only model has no in-plane spins to leave behind, so it is
+        # exact in either convention.
+        (
+            {"approximant": "IMRPhenomD", "f_ref": 20.0, "spin_conversion_phase": 0.0},
+            True,
+            True,
+        ),
+        (
+            {"approximant": "IMRPhenomD", "f_ref": 20.0, "spin_conversion_phase": None},
+            True,
+            True,
+        ),
+        # Networks trained in Bilby's convention: exact on the (2, 2) path for a single
+        # co-precessing pair, and not for higher modes.
+        (
+            {
+                "approximant": "IMRPhenomXP_NRTidalv3",
+                "f_ref": 20.0,
+                "spin_conversion_phase": None,
+            },
+            True,
+            True,
+        ),
+        (
+            {
+                "approximant": "IMRPhenomXPHM",
+                "f_ref": 20.0,
+                "spin_conversion_phase": None,
+            },
+            True,
+            False,
+        ),
+    ],
+)
+def test_cache_decision_per_network(waveform_generator, approximation_22_mode, caches):
+    """The synthetic phase caches its log likelihood exactly where the phase dependence
+    is exact, and the decision follows from the network's own waveform settings."""
+    result = make_gw_result(drop_phase=True, waveform_generator=waveform_generator)
+    step = result._synthetic_parameters_step(
+        {"n_grid_phase": 16, "approximation_22_mode": approximation_22_mode},
+        conditioning=list(result.prior),
+        num_samples=100,
+    )
+    assert step.cache_log_likelihood is caches
