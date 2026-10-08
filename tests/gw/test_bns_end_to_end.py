@@ -1,5 +1,5 @@
 """DINGO-BNS on a toy scale, end to end: a heterodyned multibanded dataset, training
-with chirp-mass GNPE and sky-position conditioning, inference on an injection with the
+with prior conditioning on the chirp mass and on the sky position, inference on an injection with the
 context pinned, and importance sampling with the synthetic phase. The training-time
 network input is also compared with the inference-time data preparation for the same
 signal and proxy, which is the contract a trained network relies on."""
@@ -97,7 +97,7 @@ data:
     psi: default
     luminosity_distance: bilby.core.prior.Uniform(minimum=20.0, maximum=60.0)
   ref_time: 1187008882.42
-  gnpe_chirp:
+  chirp_prior_conditioning:
     kernel:
       chirp_mass: bilby.core.prior.Uniform(minimum=-{KERNEL_HALF_WIDTH}, maximum={KERNEL_HALF_WIDTH})
     order: 0
@@ -210,8 +210,8 @@ def test_trained_model_records_bns_settings(trained_bns_model):
     data_settings = model.metadata["train_settings"]["data"]
     assert data_settings["context_parameters"] == ["ra", "dec", "chirp_mass_proxy"]
     assert (
-        data_settings["gnpe_chirp"]["kernel"]
-        == TRAIN_SETTINGS["data"]["gnpe_chirp"]["kernel"]
+        data_settings["chirp_prior_conditioning"]["kernel"]
+        == TRAIN_SETTINGS["data"]["chirp_prior_conditioning"]["kernel"]
     )
     assert set(data_settings["standardization"]["mean"]) == set(
         data_settings["inference_parameters"] + data_settings["context_parameters"]

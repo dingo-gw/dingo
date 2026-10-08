@@ -107,18 +107,21 @@ def parse_args():
         description="Evaluate performance of multibanding on waveform dataset.",
     )
     parser.add_argument(
+        "--settings_file",
         "--settings-file",
         type=str,
         required=True,
         help="YAML file containing database settings",
     )
     parser.add_argument(
+        "--num_samples",
         "--num-samples",
         type=int,
         default=5000,
         help="Number of waveform evaluations for comparison.",
     )
     parser.add_argument(
+        "--chirp_mass_proxy_offset",
         "--chirp-mass-proxy-offset",
         type=float,
         default=0.0,

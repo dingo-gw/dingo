@@ -8,7 +8,7 @@ from dingo.gw.transforms.waveform_transforms import (
     factor_fiducial_waveform,
     HeterodynePhase,
 )
-from dingo.gw.transforms.gnpe_transforms import GNPEChirp
+from dingo.gw.transforms.gnpe_transforms import ChirpPriorConditioning
 from dingo.gw.gwutils import get_mismatch
 
 
@@ -146,15 +146,15 @@ def test_heterodyne_phase_fixed_parameters(domain, complex_waveform_dict):
         np.testing.assert_allclose(result["waveform"][k], expected[k], atol=1e-12)
 
 
-# --- Tests for GNPEChirp ---
+# --- Tests for ChirpPriorConditioning ---
 
 
-def test_gnpe_chirp_training(domain, complex_waveform_dict):
-    """Test GNPEChirp in training mode: proxies sampled, delta stored, waveform modified."""
+def test_chirp_prior_conditioning_training(domain, complex_waveform_dict):
+    """Test ChirpPriorConditioning in training mode: proxies sampled, delta stored, waveform modified."""
     kernel = {
         "chirp_mass": "bilby.core.prior.Uniform(minimum=-0.01, maximum=0.01)",
     }
-    transform = GNPEChirp(kernel, domain, order=0, inference=False)
+    transform = ChirpPriorConditioning(kernel, domain, order=0, inference=False)
 
     mc_true = 1.2
     sample = {
@@ -178,12 +178,12 @@ def test_gnpe_chirp_training(domain, complex_waveform_dict):
         assert not np.allclose(result["waveform"][k], complex_waveform_dict[k])
 
 
-def test_gnpe_chirp_inference(domain):
-    """Test GNPEChirp in inference mode with pre-existing proxies."""
+def test_chirp_prior_conditioning_inference(domain):
+    """Test ChirpPriorConditioning in inference mode with pre-existing proxies."""
     kernel = {
         "chirp_mass": "bilby.core.prior.Uniform(minimum=-0.01, maximum=0.01)",
     }
-    transform = GNPEChirp(kernel, domain, order=0, inference=True)
+    transform = ChirpPriorConditioning(kernel, domain, order=0, inference=True)
 
     batch = 4
     n = len(domain)
@@ -207,21 +207,21 @@ def test_gnpe_chirp_inference(domain):
     torch.testing.assert_close(ep["chirp_mass_proxy"], mc_proxy)
 
 
-def test_gnpe_chirp_context_parameters(domain):
+def test_chirp_prior_conditioning_context_parameters(domain):
     """Verify context_parameters list is correct (should be proxy names from GNPEBase)."""
     kernel = {
         "chirp_mass": "bilby.core.prior.Uniform(minimum=-0.01, maximum=0.01)",
     }
-    transform = GNPEChirp(kernel, domain, order=0)
+    transform = ChirpPriorConditioning(kernel, domain, order=0)
     assert transform.context_parameters == ["chirp_mass_proxy"]
 
 
-def test_gnpe_chirp_no_waveform(domain):
-    """Verify GNPEChirp works when no 'waveform' key (standardization case)."""
+def test_chirp_prior_conditioning_no_waveform(domain):
+    """Verify ChirpPriorConditioning works when no 'waveform' key (standardization case)."""
     kernel = {
         "chirp_mass": "bilby.core.prior.Uniform(minimum=-0.01, maximum=0.01)",
     }
-    transform = GNPEChirp(kernel, domain, order=0)
+    transform = ChirpPriorConditioning(kernel, domain, order=0)
 
     sample = {
         "parameters": {"chirp_mass": 1.2},

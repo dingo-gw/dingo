@@ -696,7 +696,7 @@ def generate_multibanded_domain_settings(
         For a dataset with `phase_heterodyning` (DINGO-BNS), the bands are determined
         from waveforms heterodyned at their chirp mass plus or minus this offset,
         alternating by row: set it to the half-width of the training kernel
-        (`gnpe_chirp`), the worst case for the residual oscillation. The mismatch
+        (`chirp_prior_conditioning`), the worst case for the residual oscillation. The mismatch
         target then applies to the worse of the two sides. Default: 0.
 
     Returns
@@ -935,30 +935,35 @@ def parse_args():
     )
     parser.add_argument(
         "--settings_file",
+        "--settings-file",
         type=str,
         required=True,
         help="Path to the UFD waveform dataset settings YAML file.",
     )
     parser.add_argument(
         "--num_samples",
+        "--num-samples",
         type=int,
         default=1000,
         help="Number of waveforms used for threshold tuning and mismatch evaluation.",
     )
     parser.add_argument(
         "--target_median_mismatch",
+        "--target-median-mismatch",
         type=float,
         required=True,
         help="Desired upper bound on the median mismatch between UFD and MFD waveforms.",
     )
     parser.add_argument(
         "--num_processes",
+        "--num-processes",
         type=int,
         default=1,
         help="Number of parallel processes for waveform generation.",
     )
     parser.add_argument(
         "--token_size",
+        "--token-size",
         type=int,
         default=None,
         help="Transformer token size (multibanded bins per token). Set to 16 for "
@@ -966,6 +971,7 @@ def parse_args():
     )
     parser.add_argument(
         "--difference_over_full_window",
+        "--difference-over-full-window",
         action="store_true",
         help="Compare each decimated bin against all original bins in its decimation "
         "window instead of against the window center at 2x resolution. More "
@@ -973,6 +979,7 @@ def parse_args():
     )
     parser.add_argument(
         "--chirp_mass_proxy_offset",
+        "--chirp-mass-proxy-offset",
         type=float,
         default=0.0,
         help="For a dataset with phase_heterodyning (DINGO-BNS): heterodyne the "

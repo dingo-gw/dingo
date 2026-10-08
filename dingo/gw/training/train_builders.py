@@ -18,7 +18,8 @@ from dingo.gw.transforms import (
     AddWhiteNoiseComplex,
     CropMaskStrainRandom,
     GetDetectorTimes,
-    GNPEChirp,
+    ChirpPriorConditioning,
+    chirp_prior_conditioning_settings,
     GNPECoalescenceTimes,
     MaskDetectors,
     MaskFrequencyNotches,
@@ -81,8 +82,9 @@ def set_train_transforms(
     Set the transform attribute of a waveform dataset based on a settings dictionary.
     The transform takes waveform polarizations, samples random extrinsic parameters,
     projects to detectors, adds noise, and formats the data for input to the neural
-    network. It also implements optional GNPE transformations: detector time shifts
-    (`gnpe_time_shifts`) and chirp-mass phase heterodyning (`gnpe_chirp`, DINGO-BNS).
+    network. It also implements optional GNPE detector time shifts
+    (`gnpe_time_shifts`) and prior conditioning on the chirp mass
+    (`chirp_prior_conditioning`, DINGO-BNS).
 
     Note that the WaveformDataset is modified in-place, so this function returns nothing.
 
@@ -144,12 +146,14 @@ def set_train_transforms(
             )
         )
         extra_context_parameters += transforms[-1].context_parameters
-    if "gnpe_chirp" in data_settings:
+    d = chirp_prior_conditioning_settings(data_settings)
+    if d is not None:
         # Heterodyne the polarizations at a blurred chirp mass (the proxy, on which the
         # network conditions) and infer the offset delta_chirp_mass. The heterodyne
         # commutes with the detector projection, whitening, and (white) noise below.
-        d = data_settings["gnpe_chirp"]
-        transforms.append(GNPEChirp(d["kernel"], domain, d.get("order", 0)))
+        transforms.append(
+            ChirpPriorConditioning(d["kernel"], domain, d.get("order", 0))
+        )
         extra_context_parameters += transforms[-1].context_parameters
 
     # Add the GNPE context to context_parameters the first time the transforms are

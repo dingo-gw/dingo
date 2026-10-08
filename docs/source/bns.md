@@ -7,9 +7,9 @@ binary black holes, and their chirp mass is measured so precisely that a network
 covering the full training prior would spend nearly all of its capacity on parameter
 values excluded by any individual event. DINGO-BNS addresses both with a single
 device: a chirp-mass proxy that simplifies the data (phase heterodyning) and narrows
-the effective prior (prior conditioning). The proxy is fixed per event, so sampling is
-single-step GNPE: one pass through the network, with the density preserved and
-importance sampling available directly.
+the effective prior (prior conditioning). The proxy is set per event, so sampling is
+one pass through the network, with the density preserved and importance sampling
+available directly.
 
 ## Phase heterodyning
 
@@ -27,12 +27,17 @@ $\tilde{\mathcal{M}}$ close to the true value. The residual oscillations are slo
 and the multibanded frequency domain can then decimate the data far more
 aggressively.
 
-The reference value is the *chirp-mass proxy*. During training it is drawn by
-blurring the true chirp mass with a narrow kernel, and the network conditions on it;
-this is GNPE with the chirp mass as the proxy parameter (see [GNPE](gnpe.md)). At
-inference the proxy is fixed per event, so a single iteration suffices and the
-density is preserved. A chirp-mass-conditioned model records the kernel and the
-phase order in its metadata under `gnpe_chirp`, and the
+The reference value $\tilde{\mathcal{M}}$ is the *chirp-mass proxy*,
+`chirp_mass_proxy`. Following {footcite:p}`Dax:2024mcn`, the network is trained on a
+family of restricted chirp-mass priors centered on $\tilde{\mathcal{M}}$ and
+conditioned on $\tilde{\mathcal{M}}$ ([prior conditioning](#prior-conditioning)). In
+training, $\tilde{\mathcal{M}} = \mathcal{M} + \epsilon$ with $\epsilon$ drawn from a
+narrow kernel, so the kernel's support is the restricted prior. At inference the proxy
+is set per event, from a search trigger or the
+[chirp-mass scan](#the-chirp-mass-scan), and one network pass gives samples with their
+density. The implementation reuses the proxy machinery of [GNPE](gnpe.md), without
+its Gibbs iteration. A prior-conditioned model records the kernel and the phase order
+in its metadata under `chirp_prior_conditioning`, and the
 [sampler context](sampling_chains.md#sampler-context) reads this to prepare data
 as a function of `chirp_mass_proxy`. Heterodyning is applied to the raw strain before
 decimation (the two operations do not commute).
@@ -47,6 +52,12 @@ event, so one network amortizes over events while retaining the resolution of an
 event-specific narrow prior. The network infers the offset
 `delta_chirp_mass` $= \mathcal{M} - \tilde{\mathcal{M}}$ rather than the chirp mass
 itself; the chain reconstructs the physical value with a `ProxyOffsetReparam` step.
+
+In the notation of {footcite:p}`Dax:2024mcn`, the reference chirp mass
+$\tilde{\mathcal{M}}$ is `chirp_mass_proxy`, the prior half-width
+$\Delta\mathcal{M}$ is the half-width of the kernel, the offset
+$\delta\mathcal{M}$ is `delta_chirp_mass`, and the hyperprior over
+$\tilde{\mathcal{M}}$ is the dataset's chirp-mass prior convolved with the kernel.
 
 The chain:
 

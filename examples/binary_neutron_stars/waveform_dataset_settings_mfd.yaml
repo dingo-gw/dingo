@@ -1,7 +1,5 @@
-# Multibanded version of waveform_dataset_settings_ufd.yaml, written by
-# dingo_generate_multibanded_domain with --target_median_mismatch 1e-5 and
-# --chirp_mass_proxy_offset 0.005 (bands determined from heterodyned waveforms).
-# Generate the dataset from this file:
+# Written by dingo_generate_multibanded_domain from waveform_dataset_settings_ufd.yaml
+# (see there). Generate the dataset from this file:
 #   dingo_generate_dataset --settings_file waveform_dataset_settings_mfd.yaml \
 #       --num_processes N --out_file waveform_dataset.hdf5
 domain:

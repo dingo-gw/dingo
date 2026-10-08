@@ -96,7 +96,7 @@ The two settings files differ only in `num_psds_max` (1 for the fiducial dataset
 dingo_train --settings_file train_settings.yaml --train_dir training
 ```
 
-The `data` section of `train_settings.yaml` is where chirp-mass GNPE comes in:
+The `data` section of `train_settings.yaml` is where prior conditioning comes in:
 
 ```yaml
 data:
@@ -104,10 +104,9 @@ data:
   domain_update:
     f_min: 23.0
     f_max: 1536.0
-  gnpe_chirp:
+  chirp_prior_conditioning:
     kernel:
       chirp_mass: bilby.core.prior.Uniform(minimum=-0.005, maximum=0.005)
-    order: 0
   inference_parameters:
     - delta_chirp_mass
     - mass_ratio
@@ -116,7 +115,7 @@ data:
     - lambda_2
 ```
 
-`gnpe_chirp` inserts the chirp-mass GNPE transform after the extrinsic parameters are sampled. It blurs the true chirp mass with the kernel (a Bilby prior on the offset) to give `chirp_mass_proxy`, heterodynes the polarizations at that proxy, and conditions the network on it (`chirp_mass_proxy` is added to `context_parameters` automatically). Because the network sees the proxy, it does not need to infer the chirp mass itself, only the offset `delta_chirp_mass`, which therefore replaces `chirp_mass` in `inference_parameters`; the sampling chain adds the proxy back at inference (see [prior conditioning](bns.md#prior-conditioning)). The SVD that seeds the embedding network is likewise built from heterodyned waveforms.
+`chirp_prior_conditioning` switches on prior conditioning on the chirp mass, inserting its transform after the extrinsic parameters are sampled. It blurs the true chirp mass with the kernel (a Bilby prior on the offset) to give `chirp_mass_proxy`, heterodynes the polarizations at that proxy, and conditions the network on it (`chirp_mass_proxy` is added to `context_parameters` automatically). Because the network sees the proxy, it does not need to infer the chirp mass itself, only the offset `delta_chirp_mass`, which therefore replaces `chirp_mass` in `inference_parameters`; the sampling chain adds the proxy back at inference (see [prior conditioning](bns.md#prior-conditioning)). The SVD that seeds the embedding network is likewise built from heterodyned waveforms.
 
 We list `inference_parameters` explicitly because the `default` list contains only the 15 black-hole parameters and we need `lambda_1` and `lambda_2` as well. We leave out `phase`: the network is phase marginalized, and the phase is reconstructed synthetically before importance sampling. If you want to condition the network on further parameters, list them under `context_parameters`; anything listed there is dropped from `inference_parameters` and pinned to a value per event at inference (Step 4). This is how the network in {footcite:p}`Dax:2024mcn` was conditioned on the sky position; here we infer it instead. The rest of the settings (model, training stages, local) follow the standard [training](training.md) layout, and training runs with `dingo_train` or `dingo_train_condor`.
 

@@ -1,7 +1,4 @@
-# DINGO-BNS training settings. They follow the GW170817 network of Dax et al., Nature
-# 639, 49 (2025): chirp-mass GNPE (phase heterodyning together with prior conditioning),
-# with the proxy fixed at inference. The one difference is that this network infers
-# the sky position, whereas that network conditioned on it.
+# DINGO-BNS training settings (see the BNS example in the docs).
 data:
   waveform_dataset_path: training_data/waveform_dataset.hdf5  # Generated from waveform_dataset_settings_mfd.yaml
   train_fraction: 0.98
@@ -20,20 +17,13 @@ data:
     psi: default
     luminosity_distance: bilby.core.prior.Uniform(minimum=10.0, maximum=100.0, name='luminosity_distance')
   ref_time: 1187008882.42
-  # Chirp-mass GNPE: the chirp mass is blurred by the kernel to give the proxy
-  # chirp_mass_proxy; the polarizations are heterodyned at the proxy, the network
-  # conditions on it, and infers the offset delta_chirp_mass. At inference the proxy is
-  # fixed per event (single-step GNPE), see the BNS documentation page.
-  gnpe_chirp:
+  # Prior conditioning on the chirp mass. The kernel half-width must equal the
+  # --chirp_mass_proxy_offset used to multiband the dataset.
+  chirp_prior_conditioning:
     kernel:
       chirp_mass: bilby.core.prior.Uniform(minimum=-0.005, maximum=0.005)
-    order: 0
-  # chirp_mass_proxy is added to context_parameters automatically, so nothing needs to
-  # be listed for it. Any further context parameters (for instance ra and dec when the
-  # host galaxy is known) would be listed under context_parameters and pinned for each
-  # event at inference.
-  # No phase: the network is phase marginalized, and the phase is reconstructed
-  # synthetically during importance sampling.
+  # chirp_mass_proxy is added to context_parameters automatically.
+  # No phase: the network is phase marginalized (synthetic phase at importance sampling).
   inference_parameters:
     - delta_chirp_mass
     - mass_ratio

@@ -32,6 +32,7 @@ from dingo.gw.likelihood import StationaryGaussianGWLikelihood
 from dingo.gw.prior import build_prior_with_defaults
 from dingo.gw.transforms import (
     DecimateWaveformsAndASDS,
+    chirp_prior_conditioning_settings,
     HeterodynePhase,
     MaskDataForFrequencyRangeUpdate,
     MaskTokensForFrequencyRangeUpdate,
@@ -239,22 +240,24 @@ class GWSamplerContext:
         detectors = _event_detectors(data_settings, event_metadata)
 
         transforms = []
-        # Chirp-mass GNPE (BNS): heterodyne the raw strain -- before decimation
-        # (they do not commute) and on the base domain. The transform draws the
-        # chirp mass from the sample's "parameters", which `prepared_data`
-        # injects from the chain's conditioning: the proxy value has a single
-        # owner (the chain's DeltaFactor), and the preparation is a function of
-        # it. Iterated chirp GNPE (heterodyning inside a Gibbs loop) is not
-        # implemented: it would require carrying the undecimated strain per
-        # sample.
-        gnpe_chirp = data_settings.get("gnpe_chirp")
+        # Prior conditioning on the chirp mass (BNS): heterodyne the raw strain --
+        # before decimation (they do not commute) and on the base domain. The
+        # transform draws the chirp mass from the sample's "parameters", which
+        # `prepared_data` injects from the chain's conditioning: the proxy value has
+        # a single owner (the chain's DeltaFactor), and the preparation is a
+        # function of it. Iterated GNPE on the chirp proxy (heterodyning inside a
+        # Gibbs loop) is not implemented: it would require carrying the undecimated
+        # strain per sample.
+        chirp_prior_conditioning = chirp_prior_conditioning_settings(data_settings)
         data_prep_conditioning = []
-        if gnpe_chirp is not None:
-            data_prep_conditioning = [k + "_proxy" for k in gnpe_chirp["kernel"]]
+        if chirp_prior_conditioning is not None:
+            data_prep_conditioning = [
+                k + "_proxy" for k in chirp_prior_conditioning["kernel"]
+            ]
             transforms.append(
                 HeterodynePhase(
                     domain=getattr(domain, "base_domain", domain),
-                    order=gnpe_chirp.get("order", 0),
+                    order=chirp_prior_conditioning.get("order", 0),
                 )
             )
         # Decimate from the base domain when using a multibanded frequency domain.

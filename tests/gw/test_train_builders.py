@@ -286,13 +286,13 @@ def test_tokenization_with_cropping_is_refused(tmp_path):
         )
 
 
-def test_gnpe_chirp_training_transforms(tmp_path):
-    """`gnpe_chirp` heterodynes the polarizations at the proxy chirp mass, adds the
+def test_chirp_prior_conditioning_training_transforms(tmp_path):
+    """`chirp_prior_conditioning` heterodynes the polarizations at the proxy chirp mass, adds the
     proxy as a context parameter with `delta_chirp_mass` standardized, and stays in
     the chain that builds the embedding-network SVD."""
     from dingo.gw.training.train_builders import build_svd_for_embedding_network
     from dingo.gw.transforms import (
-        GNPEChirp,
+        ChirpPriorConditioning,
         RepackageStrainsAndASDS,
         SelectStandardizeRepackageParameters,
         UnpackDict,
@@ -301,7 +301,7 @@ def test_gnpe_chirp_training_transforms(tmp_path):
 
     data_settings = {k: v for k, v in DATA_SETTINGS.items() if k != "tokenization"} | {
         "inference_parameters": ["delta_chirp_mass", "mass_ratio"],
-        "gnpe_chirp": {
+        "chirp_prior_conditioning": {
             "kernel": {
                 "chirp_mass": "bilby.core.prior.Uniform(minimum=-0.01, maximum=0.01)"
             },
@@ -329,7 +329,7 @@ def test_gnpe_chirp_training_transforms(tmp_path):
     set_train_transforms(wfd, data_settings, asd_file, omit_transforms=keep)
     with_chirp = wfd[0]
     set_train_transforms(
-        wfd, data_settings, asd_file, omit_transforms=keep + [GNPEChirp]
+        wfd, data_settings, asd_file, omit_transforms=keep + [ChirpPriorConditioning]
     )
     without_chirp = wfd[0]
     proxy = with_chirp["extrinsic_parameters"]["chirp_mass_proxy"]
@@ -354,7 +354,7 @@ def test_gnpe_chirp_training_transforms(tmp_path):
         num_validation_samples=2,
         batch_size=4,
     )
-    assert any(isinstance(t, GNPEChirp) for t in wfd.transform.transforms)
+    assert any(isinstance(t, ChirpPriorConditioning) for t in wfd.transform.transforms)
     assert [V.shape for V in V_rb_list] == [
         (len(wfd.domain) - wfd.domain.min_idx, 2)
     ] * len(DETECTORS)

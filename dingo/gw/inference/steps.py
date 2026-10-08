@@ -319,7 +319,7 @@ def _build_gnpe_transforms(model: BasePosteriorModel):
     gnpe_time_settings = data_settings.get("gnpe_time_shifts")
     if not gnpe_time_settings:
         raise NotImplementedError(
-            "Only time-shift GNPE is supported here so far (no gnpe_chirp / gnpe_phase)."
+            "Only time-shift GNPE (gnpe_time_shifts) is supported here."
         )
 
     gnpe_transform = GNPECoalescenceTimes(
