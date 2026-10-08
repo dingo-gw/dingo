@@ -126,3 +126,28 @@ def test_new_interface_extra_kwargs(uniform_fd_domain, precessing_spin_wf_parame
     assert params_gwsignal["postadiabatic_type"] == "analytic"
     assert params_gwsignal["enable_antisymmetric_modes"] is True
     assert params_gwsignal["antisymmetric_modes_hm"] is True
+
+def test_approximant_comes_from_lalsimulations_registry(uniform_fd_domain):
+    """The approximant number is looked up in LALSimulation's own registry rather than
+    guessed from the name. SEOBNRv5_ROM is in it, although its name starts like the
+    gwsignal-only SEOBNRv5PHM, which is not and must go through the new interface; a
+    name LALSimulation does not implement fails at construction rather than later.
+    LAL's own parser cannot be used for this: given an unknown name it logs an error
+    and returns EOBNR."""
+    from dingo.gw.waveform_generator.waveform_generator import LAL_APPROXIMANTS
+
+    wfg = WaveformGenerator("SEOBNRv5_ROM", uniform_fd_domain, 20.0)
+    assert wfg.approximant == LAL_APPROXIMANTS["SEOBNRv5_ROM"]
+
+    with pytest.raises(ValueError, match="no waveform called SEOBNRv5PHM"):
+        WaveformGenerator("SEOBNRv5PHM", uniform_fd_domain, 20.0)
+    assert (
+        NewInterfaceWaveformGenerator(
+            approximant="SEOBNRv5PHM", domain=uniform_fd_domain, f_ref=20.0
+        ).approximant_str
+        == "SEOBNRv5PHM"
+    )
+
+    # A name LALSimulation knows but no longer implements.
+    with pytest.raises(ValueError, match="no waveform called EOBNR"):
+        WaveformGenerator("EOBNR", uniform_fd_domain, 20.0)

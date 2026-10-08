@@ -58,8 +58,10 @@ def test_signal_m_EOB(signal_setup_EOB, BBH_parameters):
 
     phase_shift = np.random.uniform(high=2 * np.pi)
     waveform_ref = signal.signal({**p, "phase": p["phase"] + phase_shift})["waveform"]
-    waveform_m = signal.signal_m(p)
-    waveform_m = {k: v["waveform"] for k, v in waveform_m.items()}
+    waveform_m = {
+        m: {ifo: strain[0] for ifo, strain in pol.items()}
+        for m, pol in signal.signal_m(p, [p["psi"]]).items()
+    }
     waveform = sum_contributions_m(waveform_m, phase_shift=phase_shift)
     mismatches = [
         get_mismatch(
@@ -75,10 +77,7 @@ def test_signal_m_EOB(signal_setup_EOB, BBH_parameters):
 
 def test_signal_dicts_carry_only_data_and_parameters(signal_setup_EOB, BBH_parameters):
     # The projection transforms consume the extrinsic parameters; the emptied
-    # scratch part of the training sample layout is not returned.
+    # scratch part of the training sample layout is not returned. (signal_m returns
+    # only the projected strains.)
     signal = signal_setup_EOB
     assert set(signal.signal(BBH_parameters)) == {"waveform", "parameters"}
-    assert all(
-        set(s) == {"waveform", "parameters"}
-        for s in signal.signal_m(BBH_parameters).values()
-    )

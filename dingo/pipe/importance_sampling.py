@@ -5,9 +5,7 @@ analysis script."""
 import os
 import sys
 
-import bilby
 import numpy as np
-import torch
 import yaml
 from bilby_pipe.input import Input
 from bilby_pipe.utils import (
@@ -19,6 +17,7 @@ from bilby_pipe.utils import (
     BilbyPipeError,
 )
 
+from dingo.core.utils.torchutils import seed_generators
 from dingo.gw.data.event_dataset import EventDataset
 from dingo.gw.domains import MultibandedFrequencyDomain
 from dingo.pipe.default_settings import IMPORTANCE_SAMPLING_SETTINGS
@@ -123,15 +122,16 @@ class ImportanceSamplingInput(Input):
 
     @sampling_seed.setter
     def sampling_seed(self, sampling_seed):
-        """Mirrors bilby_pipe's DataAnalysisInput, plus torch. The Pool workers of
-        importance sampling and the synthetic phase are not re-seeded: under fork
-        they copy one stream, under spawn they start unseeded (#408)."""
+        """Like bilby_pipe's DataAnalysisInput, but torch, numpy and bilby are seeded
+        from separate children of SeedSequence([seed, 1]), so that they share no
+        stream with each other or with the sampling job (stage 0). Without a seed,
+        one is drawn from 128 bits of OS entropy."""
         if sampling_seed is None:
-            sampling_seed = np.random.randint(1, 1e6)
+            sampling_seed = np.random.SeedSequence().entropy
         self._sampling_seed = int(sampling_seed)
-        torch.manual_seed(self._sampling_seed)
-        np.random.seed(self._sampling_seed)
-        bilby.core.utils.random.seed(self._sampling_seed)
+        seed_generators(
+            np.random.SeedSequence([self._sampling_seed, 1]), all_devices=True
+        )
         logger.info(f"Sampling seed set to {self._sampling_seed}")
 
     def _load_proposal(self):
@@ -177,11 +177,18 @@ class ImportanceSamplingInput(Input):
 
     @importance_sampling_settings.setter
     def importance_sampling_settings(self, settings):
-        # Set up defaults.
+        # Set up defaults: recover the phase if the network does not infer it, and
+        # psi along with it if the network infers neither.
         if "phase" not in self.result.samples.columns:
-            self._importance_sampling_settings = IMPORTANCE_SAMPLING_SETTINGS[
+            default = (
                 "PhaseRecoveryDefault"
-            ]
+                if "psi" in self.result.samples.columns
+                else "PhasePsiRecoveryDefault"
+            )
+            # Copied, since the settings are updated below.
+            self._importance_sampling_settings = dict(
+                IMPORTANCE_SAMPLING_SETTINGS[default]
+            )
         else:
             self._importance_sampling_settings = dict()
 
@@ -197,12 +204,20 @@ class ImportanceSamplingInput(Input):
                 self._importance_sampling_settings.update(
                     IMPORTANCE_SAMPLING_SETTINGS["PhaseRecoveryDefault"]
                 )
-            else:
+            elif settings.lower() == "phasepsirecoverydefault":
                 self._importance_sampling_settings.update(
-                    convert_string_to_dict(settings)
+                    IMPORTANCE_SAMPLING_SETTINGS["PhasePsiRecoveryDefault"]
                 )
+            else:
+                user_settings = convert_string_to_dict(settings)
+                if "synthetic_phase" in user_settings:
+                    raise ValueError(
+                        "importance-sampling-settings: synthetic_phase has been renamed "
+                        "to synthetic_parameters."
+                    )
+                self._importance_sampling_settings.update(user_settings)
             if "phase_marginalization" in self._importance_sampling_settings:
-                self._importance_sampling_settings.pop("synthetic_phase", None)
+                self._importance_sampling_settings.pop("synthetic_parameters", None)
         else:
             self._importance_sampling_settings = dict()
 
@@ -241,23 +256,23 @@ class ImportanceSamplingInput(Input):
 
         # Calibration parameters and synthetic phase are drawn in one chain, the
         # calibration first, so that the phase is conditioned on it.
-        synthetic_phase_kwargs = None
-        if "synthetic_phase" in self.importance_sampling_settings:
-            synthetic_phase_kwargs = {
-                **self.importance_sampling_settings["synthetic_phase"],
+        synthetic_parameters_kwargs = None
+        if "synthetic_parameters" in self.importance_sampling_settings:
+            synthetic_parameters_kwargs = {
+                **self.importance_sampling_settings["synthetic_parameters"],
                 "num_processes": self.request_cpus,
             }
         calibration_sampling_kwargs = self.importance_sampling_settings.get(
             "calibration_sampling_settings"
         )
-        if synthetic_phase_kwargs or calibration_sampling_kwargs:
+        if synthetic_parameters_kwargs or calibration_sampling_kwargs:
             if calibration_sampling_kwargs:
                 logger.info("Sampling calibration parameters")
-            if synthetic_phase_kwargs:
+            if synthetic_parameters_kwargs:
                 logger.info("Sampling synthetic phase")
             self.result.sample_proposal_extensions(
                 calibration_sampling_kwargs=calibration_sampling_kwargs,
-                synthetic_phase_kwargs=synthetic_phase_kwargs,
+                synthetic_parameters_kwargs=synthetic_parameters_kwargs,
             )
 
         self.result.importance_sample(

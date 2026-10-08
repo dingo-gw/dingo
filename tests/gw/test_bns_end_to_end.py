@@ -344,9 +344,9 @@ def test_inference_and_importance_sampling_on_injection(trained_bns_model):
     assert "phase" not in samples  # phase-marginalized network
 
     result.sample_proposal_extensions(
-        synthetic_phase_kwargs={
+        synthetic_parameters_kwargs={
             "approximation_22_mode": True,
-            "n_grid": 101,
+            "n_grid_phase": 101,
             "uniform_weight": 0.01,
         }
     )

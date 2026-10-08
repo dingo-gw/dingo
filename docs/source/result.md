@@ -22,24 +22,31 @@ Density recovery can also be achieved using an unconditional density estimator f
 
 It is often challenging for Dingo to learn to model the `phase` parameter $\phi_c$. For this reason, we usually marginalize over it in training by excluding it from the list of `inference_parameters`. The phase is, however, required for importance sampling unless using also a phase-marginalized likelihood (which is approximate except under special circumstances).
 
-The Dingo `gw.Result` class includes a method `sample_proposal_extensions()` which, given `synthetic_phase_kwargs`, produces a $\phi_c$ sample from a $\phi_c$-marginalized sample. It does so by evaluating the likelihood on a $\phi_c$-grid and then sampling from the associated 1D distribution. The `log_prob` value for the sample is also corrected to reflect the sampled $\phi_c$. Speed is ensured by caching waveform modes and evaluating the polarizations for different $\phi_c$. For further details, see the Supplemental Material of {cite:p}`Dax:2022pxd`.
+The Dingo `gw.Result` class includes a method `sample_proposal_extensions()` which, given `synthetic_parameters_kwargs`, produces a $\phi_c$ sample from a $\phi_c$-marginalized sample. It does so by evaluating the likelihood on a $\phi_c$-grid and then sampling from the associated 1D distribution. The `log_prob` value for the sample is also corrected to reflect the sampled $\phi_c$. Speed is ensured by caching waveform modes and evaluating the polarizations for different $\phi_c$. For further details, see the Supplemental Material of {cite:p}`Dax:2022pxd`.
 
 This method should be run *after* recovering the density, since in particular it applies a correction to the density.
 
+### Synthetic phase and polarization angle
+
+A network may leave out the polarization angle $\psi$ as well as $\phi_c$. Both can then be recovered together: $\psi$ enters the detector strain only through the antenna patterns, which rotate with $2\psi$, and every later projection step (time shift, calibration, whitening) is linear. The strain at any $\psi$ is therefore $\cos 2\psi \, h(\psi{=}0) + \sin 2\psi \, h(\psi{=}\pi/4)$, and the same single waveform evaluation per sample, projected at these two reference angles, gives the likelihood on a full $(\phi_c, \psi)$ grid. `sample_proposal_extensions()` uses this automatically when the samples lack `psi` (the `SyntheticPhasePsiFactor`), adding the joint proposal density to `log_prob`, and has the additional setting `n_grid_psi`. With the exact mode sum (`approximation_22_mode: false`) it draws $\phi_c$ from the $\psi$-marginal of the grid and then $\psi$ from the conditional at the drawn $\phi_c$. With `approximation_22_mode: true` no phase grid is needed: at fixed $\psi$ the log likelihood depends on $\phi_c$ only through $|z| \cos(2\phi_c + \arg z)$, with $z = (d, h)$ at $\phi_c = 0$, so the phase integrates out in closed form. $\psi$ is then drawn from its marginal $\propto e^{-(h, h)/2} I_0(|z|)$ on the $\psi$ grid, and $\phi_c$ exactly from the conditional, a von Mises distribution in $2\phi_c$; `n_grid_phase` is not used. If `approximation_22_mode` is not given, the $(2, 2)$ path is taken where it is exact (the models listed under `approximation_22_mode` below, e.g. BNS networks in Bilby's spin convention) and the exact mode sum otherwise; `PhasePsiRecoveryDefault` in `dingo_pipe` leaves it unset for this reason.
+
 ### Configuration
 
-The `synthetic_phase_kwargs` argument of `sample_proposal_extensions()` is a dict. An example configuration is
+The `synthetic_parameters_kwargs` argument of `sample_proposal_extensions()` is a dict (in `dingo_pipe`, the `synthetic_parameters` entry of `importance-sampling-settings`). An example configuration is
 ```yaml
 approximation_22_mode: false
-n_grid: 5001
+n_grid_phase: 5001
 uniform_weight: 0.01
 num_processes: 100
 ```
 approximation_22_mode
 : Whether to assume that a phase shift multiplies the waveform by $\exp(2 i \phi_c)$, which holds exactly when only the $(l, m) = (2, \pm 2)$ modes are present. This simplifies computations since it does not require caching of waveform modes. It is *exact*, not an approximation, for approximants whose co-precessing content is a single $(2, \pm 2)$ pair: IMRPhenomPv2, IMRPhenomXP and their NRTidal variants in Bilby's spin convention (`spin_conversion_phase: null`, where a phase shift also rotates the in-plane spins), and aligned-spin $(2, 2)$-only models such as IMRPhenomD in any convention. Elsewhere it is an approximation whose error grows with in-plane spin and with inclination away from face-on.
 
-n_grid
-: Specifies the phase grid on which the likelihoods are evaluated.
+n_grid_phase
+: Number of points of the phase grid on which the likelihoods are evaluated (`dingo_pipe` uses 5001 in `PhaseRecoveryDefault`, and 512 in `PhasePsiRecoveryDefault` when $\psi$ is drawn as well). Not used when $\psi$ is drawn as well with `approximation_22_mode: true`, where the phase is drawn exactly.
+
+n_grid_psi
+: Number of $\psi$ grid points on $[0, \pi]$. Only used if the samples lack `psi` as well, see above (128 in `PhasePsiRecoveryDefault`). The grids only shape the proposal, so importance sampling is unbiased for any size, but they should resolve the likelihood peak, whose width in either angle is about 1 / SNR: for very loud events, increase them.
 
 uniform_weight
 : Base probability level to add to ensure mass coverage.

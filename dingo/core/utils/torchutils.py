@@ -21,6 +21,22 @@ def fix_random_seeds(_):
         pass
 
 
+def seed_generators(seed_sequence: np.random.SeedSequence, all_devices=False):
+    """Seed numpy's legacy generator, bilby's generator and torch's CPU generator (all
+    devices if `all_devices`) from separate children of `seed_sequence`.
+
+    Seeding all devices queues the seed for CUDA if it is not yet initialized, which
+    restoring the CPU state cannot undo; hence CPU only by default."""
+    numpy_seed, bilby_seed, torch_seed = seed_sequence.spawn(3)
+    np.random.seed(numpy_seed.generate_state(4))
+    bilby.core.utils.random.seed(bilby_seed)
+    torch_seed = int(torch_seed.generate_state(1)[0])
+    if all_devices:
+        torch.manual_seed(torch_seed)
+    else:
+        torch.default_generator.manual_seed(torch_seed)
+
+
 def set_float32_matmul_precision(local_settings: dict) -> None:
     """Apply ``local.float32_matmul_precision`` (``highest`` | ``high`` | ``medium``).
 

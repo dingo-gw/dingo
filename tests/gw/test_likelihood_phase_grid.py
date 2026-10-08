@@ -97,8 +97,8 @@ def test_phase_grid_matches_direct_evaluation(likelihood):
     grid = likelihood.log_likelihood_phase_grid(THETA, phases=phases)
 
     pol_m = {
-        m: pol["waveform"]
-        for m, pol in likelihood.signal_m({**THETA, "phase": 0}).items()
+        m: {ifo: strain[0] for ifo, strain in pol.items()}
+        for m, pol in likelihood.signal_m({**THETA, "phase": 0}, [THETA["psi"]]).items()
     }
     d = likelihood.whitened_strains
     min_idx = likelihood.data_domain.min_idx
@@ -146,15 +146,17 @@ def test_terms_reproduce_direct_likelihood_at_off_grid_phase(likelihood):
     for extra in ({}, calibration):
         theta = {**THETA, **extra}
         terms = likelihood.phase_grid_terms(theta)
-        from_terms = likelihood.log_likelihood_from_phase_grid_terms(terms, phases)
+        from_terms = likelihood.log_likelihood_from_phase_grid_terms(
+            terms, phases, [theta["psi"]]
+        )[:, 0]
         direct = [likelihood.log_likelihood({**theta, "phase": p}) for p in phases]
         np.testing.assert_allclose(from_terms, direct, rtol=1e-9, atol=atol)
     # The calibration curve changes the likelihood.
     assert not np.allclose(
         from_terms,
         likelihood.log_likelihood_from_phase_grid_terms(
-            likelihood.phase_grid_terms(THETA), phases
-        ),
+            likelihood.phase_grid_terms(THETA), phases, [THETA["psi"]]
+        )[:, 0],
     )
 
 
@@ -169,30 +171,152 @@ def test_stacked_terms_match_per_sample_evaluation(likelihood):
         "deltas": terms_per_sample[0]["deltas"],
         **{
             k: np.array([t[k] for t in terms_per_sample])
-            for k in ("kappa2_modes", "rho2opt_crossterms", "rho2opt_const")
+            for k in ("kappa2_modes", "rho2opt_const", "rho2opt_crossterms")
         },
     }
     grid = np.linspace(0, 2 * np.pi, 7)
     drawn = np.array([0.3, 4.2])
-    on_grid = likelihood.log_likelihood_from_phase_grid_terms(terms, grid)
-    at_drawn = likelihood.log_likelihood_from_phase_grid_terms(terms, drawn[:, None])
-    assert on_grid.shape == (2, 7) and at_drawn.shape == (2, 1)
+    psis = [THETA["psi"]]
+    on_grid = likelihood.log_likelihood_from_phase_grid_terms(terms, grid, psis)
+    at_drawn = likelihood.log_likelihood_from_phase_grid_terms(
+        terms, drawn[:, None], psis
+    )
+    assert on_grid.shape == (2, 7, 1) and at_drawn.shape == (2, 1, 1)
     for i, t in enumerate(terms_per_sample):
         np.testing.assert_allclose(
-            on_grid[i], likelihood.log_likelihood_from_phase_grid_terms(t, grid)
+            on_grid[i], likelihood.log_likelihood_from_phase_grid_terms(t, grid, psis)
         )
         np.testing.assert_allclose(
             at_drawn[i],
-            likelihood.log_likelihood_from_phase_grid_terms(t, drawn[i : i + 1]),
+            likelihood.log_likelihood_from_phase_grid_terms(t, drawn[i : i + 1], psis),
         )
 
 
-def test_terms_22_reproduce_direct_likelihood():
-    """The (2, 2) terms evaluate to the direct log likelihood at any phase, for a
-    model whose phase shift is a global exp(2i phase) factor. This is what lets
-    importance sampling reuse the value cached by the synthetic phase on the
-    (2, 2) path, which is the only exact route for the NRTidal family (LALSimulation
-    implements no frequency-domain modes for it)."""
+def test_terms_reproduce_direct_likelihood_at_off_grid_psi(likelihood):
+    """log L from the terms at off-grid (phase, psi) equals the direct
+    likelihood, so both s(psi) = cos2psi s(0) + sin2psi s(pi/4) and the mode algebra
+    hold through the real projection pipeline."""
+    phases = np.array([0.37, 2.9, 5.81])
+    psis = np.array([0.1, 1.2, 2.8])
+    # As in test_terms_reproduce_direct_likelihood_at_off_grid_phase, pyseobnr's
+    # multi-phase and single-phase evaluations differ by ~1e-5 nats.
+    approximant = likelihood.waveform_generator.approximant_str
+    atol = 1e-4 if approximant == "SEOBNRv5PHM" else 0.0
+    terms = likelihood.phase_grid_terms(THETA)
+    grid = likelihood.log_likelihood_from_phase_grid_terms(terms, phases, psis)
+    direct = [
+        [likelihood.log_likelihood({**THETA, "phase": p, "psi": s}) for s in psis]
+        for p in phases
+    ]
+    assert grid.shape == (3, 3)
+    np.testing.assert_allclose(grid, direct, rtol=1e-9, atol=atol)
+
+
+def test_stacked_terms_at_one_point_per_sample(likelihood):
+    """Stacked terms evaluate at one (phase, psi) per sample, shape (N, 1, 1).
+    This is what the synthetic phase+psi cache uses."""
+    thetas = [{**THETA, "mass_1": m1} for m1 in (45.0, 50.0)]
+    # As in test_terms_reproduce_direct_likelihood_at_off_grid_phase, pyseobnr's
+    # multi-phase and single-phase evaluations differ by ~1e-5 nats.
+    approximant = likelihood.waveform_generator.approximant_str
+    atol = 1e-4 if approximant == "SEOBNRv5PHM" else 0.0
+    per = [likelihood.phase_grid_terms(t) for t in thetas]
+    terms = {
+        "m_vals": per[0]["m_vals"],
+        "deltas": per[0]["deltas"],
+        **{
+            k: np.array([t[k] for t in per])
+            for k in ("kappa2_modes", "rho2opt_const", "rho2opt_crossterms")
+        },
+    }
+    phase, psi = np.array([[1.0], [4.0]]), np.array([[0.3], [2.0]])
+    out = likelihood.log_likelihood_from_phase_grid_terms(terms, phase, psi)
+    direct = [
+        likelihood.log_likelihood({**t, "phase": p[0], "psi": s[0]})
+        for t, p, s in zip(thetas, phase, psi)
+    ]
+    assert out.shape == (2, 1, 1)
+    np.testing.assert_allclose(out[:, 0, 0], direct, rtol=1e-9, atol=atol)
+    # A shared (phase, psi) grid gives (N, G, H).
+    grid = likelihood.log_likelihood_from_phase_grid_terms(
+        terms, np.linspace(0, 2 * np.pi, 5), np.linspace(0, np.pi, 3)
+    )
+    assert grid.shape == (2, 5, 3)
+
+
+def test_phase_psi_algebra_matches_brute_force():
+    """The (phase, psi) grid algebra, checked without a waveform model: terms built
+    from random per-mode strains A_m (psi = 0) and B_m (psi = pi/4) and random data
+    reproduce the brute-force log Zn + Re<d, mu> - <mu, mu> / 2 with
+    mu(phase, psi) = sum_m exp(-i m phase) [cos 2psi A_m + sin 2psi B_m]."""
+    rng = np.random.default_rng(0)
+    ifos, n_bins, m_vals = ["H1", "L1"], 40, list(range(-3, 4))
+
+    def strain():
+        return rng.normal(size=n_bins) + 1j * rng.normal(size=n_bins)
+
+    basis = [{m: {ifo: strain() for ifo in ifos} for m in m_vals} for _ in range(2)]
+    d = {ifo: strain() for ifo in ifos}
+    log_Zn = -0.5 * sum(inner_product(d[ifo], d[ifo]) for ifo in ifos)
+
+    def overlap(x, y):
+        return sum(np.sum(x[ifo].conj() * y[ifo]) for ifo in ifos)
+
+    from collections import defaultdict
+
+    crossterms = defaultdict(lambda: np.zeros((2, 2), dtype=complex))
+    for i, m in enumerate(m_vals):
+        for n in m_vals[i + 1 :]:
+            pair = np.array([[overlap(b[m], c[n]) for c in basis] for b in basis])
+            crossterms[n - m] += pair + pair.T
+    deltas = sorted(crossterms)
+    terms = {
+        "m_vals": np.array(m_vals),
+        "deltas": np.array(deltas),
+        "kappa2_modes": np.array([[overlap(d, b[m]) for m in m_vals] for b in basis]),
+        "rho2opt_const": np.array(
+            [
+                [sum(overlap(b[m], c[m]).real for m in m_vals) for c in basis]
+                for b in basis
+            ]
+        ),
+        "rho2opt_crossterms": np.moveaxis(
+            np.array([crossterms[delta] for delta in deltas]), 0, -1
+        ),
+    }
+
+    class _Terms:
+        pass
+
+    fake = _Terms()
+    fake.log_Zn = log_Zn
+    phases = np.linspace(0, 2 * np.pi, 9)
+    psis = np.linspace(0, np.pi, 6)
+    fast = StationaryGaussianGWLikelihood.log_likelihood_from_phase_grid_terms(
+        fake, terms, phases, psis
+    )
+
+    brute = np.zeros((len(phases), len(psis)))
+    for i, phase in enumerate(phases):
+        for j, psi in enumerate(psis):
+            mu = {
+                ifo: sum(
+                    np.exp(-1j * m * phase)
+                    * (
+                        np.cos(2 * psi) * basis[0][m][ifo]
+                        + np.sin(2 * psi) * basis[1][m][ifo]
+                    )
+                    for m in m_vals
+                )
+                for ifo in ifos
+            }
+            brute[i, j] = log_Zn + overlap(d, mu).real - 0.5 * overlap(mu, mu).real
+    np.testing.assert_allclose(fast, brute, rtol=1e-10, atol=1e-10)
+
+
+def _bns_likelihood_22():
+    """A BNS likelihood whose phase shift is a global exp(2i phase) factor, and a
+    precessing parameter point for it."""
     domain = UniformFrequencyDomain(f_min=20.0, f_max=512.0, delta_f=1 / 4.0)
     rng = np.random.default_rng(42)
     waveform, asds = {}, {}
@@ -222,7 +346,16 @@ def test_terms_22_reproduce_direct_likelihood():
         t_ref=1126259462.4,
     )
     assert likelihood.waveform_generator.phase_is_global_factor
+    return likelihood, theta
 
+
+def test_terms_22_reproduce_direct_likelihood():
+    """The (2, 2) terms evaluate to the direct log likelihood at any phase, for a
+    model whose phase shift is a global exp(2i phase) factor. This is what lets
+    importance sampling reuse the value cached by the synthetic phase on the
+    (2, 2) path, which is the only exact route for the NRTidal family (LALSimulation
+    implements no frequency-domain modes for it)."""
+    likelihood, theta = _bns_likelihood_22()
     phases = np.array([0.37, 2.9, 5.81])
     terms = likelihood.phase_grid_terms_22(theta)
     from_terms = likelihood.log_likelihood_22_from_terms(terms, phases)
@@ -234,6 +367,34 @@ def test_terms_22_reproduce_direct_likelihood():
     at_drawn = likelihood.log_likelihood_22_from_terms(stacked, phases[:2, None])
     assert at_drawn.shape == (2, 1)
     np.testing.assert_allclose(at_drawn[:, 0], direct[:2], rtol=1e-9)
+
+
+def test_phase_psi_terms_22_reproduce_direct_likelihood():
+    """The (2, 2) terms at the two basis angles give the direct log likelihood at
+    any (phase, psi), from one waveform evaluation, and at the sample's own psi the
+    same terms as `phase_grid_terms_22`. This is what the (phase, psi) factor's
+    (2, 2) path and its cached log likelihood rest on."""
+    likelihood, theta = _bns_likelihood_22()
+    terms = likelihood.phase_psi_terms_22(theta)
+    assert terms["d_inner_h"].shape == (2,) and terms["h_inner_h"].shape == (2, 2)
+
+    phases = np.array([0.37, 2.9, 5.81])
+    psis = np.array([0.2, 1.1, 2.75])
+    at_psi = likelihood.terms_22_at_psi(terms, psis[:, None])
+    from_terms = likelihood.log_likelihood_22_from_terms(
+        {k: v[:, 0] for k, v in at_psi.items()}, phases[:, None]
+    )[:, 0]
+    direct = [
+        likelihood.log_likelihood({**theta, "phase": phase, "psi": psi})
+        for phase, psi in zip(phases, psis)
+    ]
+    np.testing.assert_allclose(from_terms, direct, rtol=1e-9)
+    assert np.ptp(direct) > 1.0  # the check is not dominated by log_Zn
+
+    own = likelihood.terms_22_at_psi(terms, np.array([theta["psi"]]))
+    expected = likelihood.phase_grid_terms_22(theta)
+    for k in ("d_inner_h", "h_inner_h"):
+        np.testing.assert_allclose(own[k][0], expected[k], rtol=1e-12)
 
 
 def test_phase_grid_raise_points_at_the_exact_22_path():

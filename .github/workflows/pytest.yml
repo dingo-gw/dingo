@@ -21,6 +21,11 @@ jobs:
           - "3.11"
           - "3.12"
           - "3.13"
+        # pyseobnr builds from source, so install it on one Python version only
+        # to keep CI fast.
+        include:
+          - python-version: "3.12"
+            extras: "--extra pyseobnr"
     runs-on: ubuntu-latest
     env:
       OPENBLAS_NUM_THREADS: 1
@@ -38,10 +43,11 @@ jobs:
       # pyseobnr (for the SEOBNRv5PHM tests) depends on pygsl_lite, which builds
       # from source against GSL and may regenerate its wrappers with SWIG.
       - name: Install GSL and SWIG
+        if: matrix.extras
         run: sudo apt-get update && sudo apt-get install -y libgsl-dev swig
 
       - name: Install the project
-        run: uv sync --extra dev --extra pyseobnr
+        run: uv sync --extra dev ${{ matrix.extras }}
 
       - name: Run Pytest
         run: |
