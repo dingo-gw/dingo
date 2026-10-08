@@ -174,7 +174,7 @@ class SyntheticPhaseFactor(Factor):
     log probability, and interpolating the grid of log likelihoods would only be
     approximate. The value equals a direct likelihood call only if the m-components
     sum exactly to the direct waveform, as with the DFT phase decomposition;
-    `Result._synthetic_phase_step` enables caching only then.
+    `Result._synthetic_parameters_step` enables caching only then.
     """
 
     def __init__(
