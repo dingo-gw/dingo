@@ -4,8 +4,10 @@ Tests for StationaryGaussianGWLikelihood.log_likelihood_phase_grid().
 
 import importlib.util
 
+import lalsimulation as LS
 import numpy as np
 import pytest
+from packaging.version import Version
 
 from dingo.gw.domains import MultibandedFrequencyDomain, UniformFrequencyDomain
 from dingo.gw.likelihood import StationaryGaussianGWLikelihood, inner_product
@@ -31,12 +33,14 @@ THETA = {
 
 
 # The cached-vs-direct comparison runs per decomposition path: the DFT phase
-# decomposition of a LAL model on uniform and multibanded domains, and of
+# decomposition of LAL models on uniform and multibanded domains, and of
 # SEOBNRv5PHM (needs pyseobnr >= 0.3.7).
 @pytest.fixture(
     params=[
         "IMRPhenomXPHM-uniform",
         "IMRPhenomXPHM-multibanded",
+        "IMRPhenomXPNR-uniform",
+        "IMRPhenomXPNR-multibanded",
         pytest.param(
             "SEOBNRv5PHM-uniform",
             marks=pytest.mark.skipif(
@@ -83,6 +87,20 @@ def likelihood(request):
     )
     assert likelihood.waveform_generator.uses_dft_phase_decomposition
     return likelihood
+
+
+def _atol(approximant):
+    """Absolute tolerance, in nats, of the likelihood from the m-components against
+    a direct call at an arbitrary phase. The LAL models agree to round-off. For
+    SEOBNRv5PHM, pyseobnr's multi-phase and single-phase evaluations differ slightly
+    (measured ~1e-5 nats). So does IMRPhenomXPNR before lalsimulation's fix of its
+    antisymmetric contribution (in releases after 6.2.1), whose phase dependence was
+    then not exactly that of m-components (measured 2e-5 nats)."""
+    if approximant == "SEOBNRv5PHM":
+        return 1e-4
+    if approximant == "IMRPhenomXPNR" and Version(LS.__version__) <= Version("6.2.1"):
+        return 1e-4
+    return 0.0
 
 
 def test_phase_grid_matches_direct_evaluation(likelihood):
@@ -139,10 +157,8 @@ def test_terms_reproduce_direct_likelihood_at_off_grid_phase(likelihood):
         for i in range(5)
     }
     phases = np.array([0.37, 2.9, 5.81])
-    # The LAL models agree to round-off. For SEOBNRv5PHM, pyseobnr's multi-phase and
-    # single-phase evaluations differ slightly (measured ~1e-5 nats).
     approximant = likelihood.waveform_generator.approximant_str
-    atol = 1e-4 if approximant == "SEOBNRv5PHM" else 0.0
+    atol = _atol(approximant)
     for extra in ({}, calibration):
         theta = {**THETA, **extra}
         terms = likelihood.phase_grid_terms(theta)
@@ -201,7 +217,7 @@ def test_terms_reproduce_direct_likelihood_at_off_grid_psi(likelihood):
     # As in test_terms_reproduce_direct_likelihood_at_off_grid_phase, pyseobnr's
     # multi-phase and single-phase evaluations differ by ~1e-5 nats.
     approximant = likelihood.waveform_generator.approximant_str
-    atol = 1e-4 if approximant == "SEOBNRv5PHM" else 0.0
+    atol = _atol(approximant)
     terms = likelihood.phase_grid_terms(THETA)
     grid = likelihood.log_likelihood_from_phase_grid_terms(terms, phases, psis)
     direct = [
@@ -219,7 +235,7 @@ def test_stacked_terms_at_one_point_per_sample(likelihood):
     # As in test_terms_reproduce_direct_likelihood_at_off_grid_phase, pyseobnr's
     # multi-phase and single-phase evaluations differ by ~1e-5 nats.
     approximant = likelihood.waveform_generator.approximant_str
-    atol = 1e-4 if approximant == "SEOBNRv5PHM" else 0.0
+    atol = _atol(approximant)
     per = [likelihood.phase_grid_terms(t) for t in thetas]
     terms = {
         "m_vals": per[0]["m_vals"],
