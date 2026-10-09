@@ -576,15 +576,18 @@ def test_likelihood_sees_the_analyzed_detectors_only(monkeypatch):
         context(["H1", "V1"]).likelihood()
 
 
-def test_psd_notch_dict_survives_an_hdf5_round_trip(tmp_path):
-    # Nested interval lists come back from a Result file as 2-D arrays.
+def test_psd_notch_dict_as_arrays_from_an_old_hdf5_file(tmp_path):
+    # Result files written before lists were tagged return nested interval lists as
+    # 2-D arrays.
     import h5py
 
-    from dingo.core.dataset import recursive_hdf5_load, recursive_hdf5_save
+    from dingo.core.dataset import recursive_hdf5_load
 
     event_metadata = {"psd_notch_dict": {"L1": [[60.0, 61.0], [120.0, 121.0]]}}
     with h5py.File(tmp_path / "m.hdf5", "w") as fp:
-        recursive_hdf5_save(fp, event_metadata)
+        fp.create_dataset(
+            "psd_notch_dict/L1", data=event_metadata["psd_notch_dict"]["L1"]
+        )
     with h5py.File(tmp_path / "m.hdf5", "r") as fp:
         reloaded = recursive_hdf5_load(fp)
     assert isinstance(reloaded["psd_notch_dict"]["L1"], np.ndarray)

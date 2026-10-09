@@ -14,6 +14,9 @@ DTypeMap: TypeAlias = Mapping[str, "DTypeLike | DTypeMap"]
 
 
 def recursive_hdf5_save(group, d):
+    """Recursively save a dict to an HDF5 group: dicts become groups, everything
+    else a dataset. Lists are tagged so that recursive_hdf5_load restores them as
+    lists rather than arrays."""
     for k, v in d.items():
         if v is None:
             continue
@@ -24,7 +27,9 @@ def recursive_hdf5_save(group, d):
             group.create_dataset(k, data=v)
         elif isinstance(v, pd.DataFrame):
             group.create_dataset(k, data=v.to_records(index=False))
-        elif isinstance(v, (int, float, complex, str, list)):
+        elif isinstance(v, list):
+            group.create_dataset(k, data=v).attrs["python_type"] = "list"
+        elif isinstance(v, (int, float, complex, str)):
             # TODO: Set scalars as attributes?
             group.create_dataset(k, data=v)
         else:
@@ -39,6 +44,7 @@ def recursive_hdf5_load(
     _inherited_dtype: Optional[DTypeLike] = None,
 ):
     """This is a generic helper function to recursively load data from an HDF5 file.
+    Datasets saved from lists by recursive_hdf5_save are returned as lists.
 
     Parameters
     ----------
@@ -117,6 +123,12 @@ def recursive_hdf5_load(
                     # Apply dtype conversion to DataFrame if specified
                     if effective_dtype is not None:
                         d[k] = d[k].astype(effective_dtype, copy=False)
+                # Restore a list tagged by recursive_hdf5_save (the tag is on the
+                # dataset, not on an astype view). Strings come back as bytes.
+                elif v.attrs.get("python_type") == "list":
+                    if d[k].dtype == "O":
+                        d[k] = np.char.decode(d[k].astype("S"))
+                    d[k] = d[k].tolist()
                 # Convert 0-dimensional arrays to scalars
                 elif d[k].ndim == 0:
                     d[k] = d[k].item()
@@ -124,7 +136,7 @@ def recursive_hdf5_load(
                         # Assume this is a string.
                         d[k] = d[k].decode()
                 # If an array is 1D and of type object, assume it originated as a list
-                # of strings.
+                # of strings (files written before lists were tagged).
                 elif d[k].ndim == 1 and d[k].dtype == "O":
                     d[k] = [x.decode() for x in d[k]]
     return d
