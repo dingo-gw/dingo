@@ -129,10 +129,11 @@ train with `spin_conversion_phase: null` (Bilby's convention): a phase shift is 
 global factor $e^{2i\phi_c}$, so the synthetic phase with `approximation_22_mode: true`
 is exact, and importance sampling reuses its log likelihood. The same holds for a
 network that also marginalizes $\psi$: both angles are then recovered from one waveform
-evaluation per sample, with the phase drawn exactly. A network trained with
-`spin_conversion_phase: 0.0` gets an approximate proposal instead; importance sampling
-stays unbiased, at a lower efficiency. See the
-[synthetic phase](result.md#synthetic-phase) section.
+evaluation per sample, with the phase drawn exactly. For a network trained with
+`spin_conversion_phase: 0.0` the default is the exact mode sum, which for these models
+needs a `mode_list` in the waveform generator settings; `approximation_22_mode: true`
+gives an approximate proposal instead, and importance sampling stays unbiased, at a
+lower efficiency. See the [synthetic phase](result.md#synthetic-phase) section.
 
 ```{eval-rst}
 .. footbibliography::

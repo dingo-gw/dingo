@@ -4,26 +4,14 @@ against Result.sample_proposal_extensions is covered by the model-based harness.
 
 from types import SimpleNamespace
 
-import lalsimulation as LS
 import numpy as np
 import pytest
 import torch
 from bilby.core.utils import random as bilby_random
 
-from dingo.gw.domains import UniformFrequencyDomain
 from dingo.gw.inference.context import GWSamplerContext
 from dingo.gw.inference.steps import SyntheticPhaseFactor, SyntheticPhasePsiFactor
 from dingo.gw.likelihood import StationaryGaussianGWLikelihood
-
-
-_MOCK_DOMAIN = UniformFrequencyDomain(20.0, 27.0, 1.0)
-
-
-def _mock_polarizations(theta):
-    """A waveform that a phase shift multiplies by exp(2i phase), so that the probe
-    before caching the (2, 2) log likelihood passes."""
-    h = np.exp(2j * theta["phase"]) * np.ones(len(_MOCK_DOMAIN))
-    return {"h_plus": h, "h_cross": 1j * h}
 
 
 class _MockLikelihood:
@@ -36,9 +24,6 @@ class _MockLikelihood:
             phase_is_global_factor=phase_is_global_factor,
             spin_conversion_phase=0.0,
             approximant_str="mock",
-            approximant=LS.IMRPhenomXP,
-            domain=_MOCK_DOMAIN,
-            generate_hplus_hcross=_mock_polarizations,
         )
 
     def phase_grid_terms_22(self, theta):
@@ -122,27 +107,51 @@ def test_synthetic_phase_is_one_to_one():
         factor.sample_and_log_prob(2, _MockContext(), _given())
 
 
-def test_profile_approx_matches_formula():
-    n, n_grid, weight = 5, 257, 0.01
+def test_phase_22_density_is_the_floored_conditional():
+    # On the (2, 2) path log q(phase) is exp(log L(phase)) normalized over the phase,
+    # mixed with the uniform floor in the proportion of the grid densities, without
+    # any phase grid; and the factor records no grid size there.
+    n, weight = 4, 0.01
     factor = SyntheticPhaseFactor(
-        conditioning=["chirp_mass"],
-        n_grid_phase=n_grid,
-        approximation_22_mode=True,
-        uniform_weight=weight,
+        conditioning=["chirp_mass"], approximation_22_mode=True, uniform_weight=weight
     )
+    assert "n_grid_phase" not in factor.describe()
     given = _given(n)
-    phases, profile, _ = factor._phase_profile(given, _MockContext())
-
+    phases = np.linspace(0, 2 * np.pi, 4001)
+    log_q = np.array(
+        [
+            factor.log_prob(
+                {"phase": torch.full((n,), p, dtype=torch.float64)},
+                _MockContext(),
+                given,
+            )
+            for p in phases
+        ]
+    ).T
     cm = given["chirp_mass"].numpy()
     kappa = np.array([complex(c, 0.5) for c in cm])
-    log_posterior = np.outer(kappa, np.exp(2j * phases)).real - cm[:, None]
-    expected = np.exp(log_posterior - log_posterior.max(axis=1, keepdims=True))
-    expected += expected.mean(axis=1, keepdims=True) * weight
+    conditional = np.exp(np.outer(kappa, np.exp(2j * phases)).real)
+    conditional /= np.trapezoid(conditional, phases, axis=1)[:, None]
+    expected = (conditional + weight / (2 * np.pi)) / (1 + weight)
+    np.testing.assert_allclose(np.exp(log_q), expected, rtol=1e-8)
 
-    assert phases.shape == (n_grid,)
-    assert profile.shape == (n, n_grid)
-    assert np.allclose(profile, expected)
-    assert (profile > 0).all()  # uniform floor keeps it mass-covering
+
+def test_phase_22_draws_match_the_psi_factor():
+    # With psi fixed, the phase factor's (2, 2) draw is the psi factor's conditional
+    # draw: the same function, the same random numbers, the same phases.
+    from dingo.gw.inference.steps import _sample_phase_22
+
+    factor = SyntheticPhaseFactor(
+        conditioning=["chirp_mass"], approximation_22_mode=True
+    )
+    given = _given(50)
+    _seed(6)
+    block, log_prob = factor.sample_and_log_prob(1, _MockContext(), given)
+    _seed(6)
+    z = np.array([complex(c, 0.5) for c in given["chirp_mass"].numpy()])
+    np.testing.assert_array_equal(block["phase"].numpy(), _sample_phase_22(z, 0.01))
+    replug = factor.log_prob({"phase": block["phase"]}, _MockContext(), given)
+    np.testing.assert_allclose(log_prob.numpy(), replug.numpy())
 
 
 def test_profile_exact_mode_runs():
@@ -453,6 +462,8 @@ def test_phase_psi_22_psi_marginal_is_the_phase_integral():
 def test_phase_psi_22_phase_density_is_the_floored_conditional():
     # log q(phase | psi) is exp(log L(phase, psi)) normalized over the phase, mixed
     # with the uniform floor in the proportion of the grid densities.
+    from dingo.gw.inference.steps import _log_prob_phase_22
+
     factor = _psi_factor_22()
     weight = factor.uniform_weight
     cm, psi = np.array([20.0, 40.0]), np.array([0.3, 2.2])
@@ -469,7 +480,7 @@ def test_phase_psi_22_phase_density_is_the_floored_conditional():
     terms = {k: v[:, 0] for k, v in terms.items()}
     phases = np.linspace(0, 2 * np.pi, 4001)
     log_q = np.array(
-        [factor._log_prob_phase_22(terms, np.full(2, p)) for p in phases]
+        [_log_prob_phase_22(terms["d_inner_h"], np.full(2, p), weight) for p in phases]
     ).T
     conditional = np.exp(
         _MockLikelihood.log_l_phase_psi_22(cm[:, None], phases, psi[:, None])
@@ -485,21 +496,36 @@ def test_phase_psi_22_phase_draws_follow_their_density():
     # floor) is distributed as exp(log q(phase | psi)), for weak and strong
     # concentration.
     from scipy.stats import kstest
+    from dingo.gw.inference.steps import _log_prob_phase_22, _sample_phase_22
 
-    factor = _psi_factor_22(uniform_weight=0.05)
+    weight = 0.05
     n = 40000
     for z in (0.7 - 0.4j, 8.0 + 30.0j):
-        terms = {"d_inner_h": np.full(n, z)}
         _seed(4)
-        phase = factor._sample_phase_22(terms)
+        phase = _sample_phase_22(np.full(n, z), weight)
         assert (phase >= 0).all() and (phase < 2 * np.pi).all()
         grid = np.linspace(0, 2 * np.pi, 200001)
-        density = np.exp(factor._log_prob_phase_22({"d_inner_h": np.full(1, z)}, grid))
+        density = np.exp(_log_prob_phase_22(np.full(1, z), grid, weight))
         cdf = np.concatenate(
             [[0], np.cumsum((density[1:] + density[:-1]) / 2 * np.diff(grid))]
         )
         assert cdf[-1] == pytest.approx(1.0, abs=1e-8)
         assert kstest(phase, lambda x: np.interp(x, grid, cdf)).pvalue > 1e-3
+
+
+def test_phase_22_floor_fraction():
+    # The floor replaces a fraction w / (1 + w) of the draws by uniform ones, the
+    # proportion `_floored_density` gives the grid densities (not w). With a very
+    # concentrated von Mises part, every draw away from its two modes is a floor draw.
+    from dingo.gw.inference.steps import _sample_phase_22
+
+    weight, n, half_width, mode = 0.5, 200000, 0.1, 0.4
+    _seed(7)
+    phase = _sample_phase_22(np.full(n, 1e6 * np.exp(-2j * mode)), weight)
+    distance = np.abs(np.mod(phase - mode + np.pi / 2, np.pi) - np.pi / 2)
+    away = np.mean(distance > half_width)
+    expected = weight / (1 + weight) * (1 - 4 * half_width / (2 * np.pi))
+    assert away == pytest.approx(expected, abs=5 * np.sqrt(expected / n))
 
 
 def test_phase_psi_22_log_prob_replug_matches_sample():
@@ -551,6 +577,8 @@ def test_phase_psi_22_cached_log_likelihood_at_drawn_point():
     block, log_prob = _psi_factor_22().sample_and_log_prob(1, context, given)
     factor = _psi_factor_22(cache_log_likelihood=True)
     assert factor.produces == ["phase", "psi", "log_likelihood_cache"]
+    assert "n_grid_phase" not in factor.describe()
+    assert "n_grid_phase" in _psi_factor().describe()
     _seed(2)
     block_cached, log_prob_cached = factor.sample_and_log_prob(1, context, given)
     phase, psi = block_cached["phase"].numpy(), block_cached["psi"].numpy()
@@ -594,25 +622,3 @@ def test_cached_log_likelihood_requires_an_exact_22_path(cls):
     )
     with pytest.raises(ValueError, match="global exp"):
         factor.sample_and_log_prob(1, _NoGlobalFactorContext(), _given())
-
-
-def test_cached_log_likelihood_refuses_a_nan_probe():
-    # A model listed as having a global exp(2i phase) factor but whose waveform comes
-    # back NaN must fail the probe, not slip through the "mismatch > tolerance" test.
-    class _NaNContext(_MockContext):
-        def likelihood(self, **kwargs):
-            likelihood = _MockLikelihood()
-            likelihood.waveform_generator.generate_hplus_hcross = lambda theta: {
-                "h_plus": np.full(len(_MOCK_DOMAIN), np.nan, dtype=complex),
-                "h_cross": np.full(len(_MOCK_DOMAIN), np.nan, dtype=complex),
-            }
-            return likelihood
-
-    factor = SyntheticPhaseFactor(
-        conditioning=["chirp_mass"],
-        n_grid_phase=33,
-        approximation_22_mode=True,
-        cache_log_likelihood=True,
-    )
-    with pytest.raises(ValueError, match="refusing to cache"):
-        factor.sample_and_log_prob(1, _NaNContext(), _given())

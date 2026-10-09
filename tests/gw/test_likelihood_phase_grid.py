@@ -397,6 +397,16 @@ def test_phase_psi_terms_22_reproduce_direct_likelihood():
         np.testing.assert_allclose(own[k][0], expected[k], rtol=1e-12)
 
 
+def test_terms_22_share_the_phase_grid_guards():
+    """The (2, 2) producers describe the plain likelihood, like `phase_grid_terms`,
+    and refuse a phase-marginalized one in the same way."""
+    likelihood, theta = _bns_likelihood_22()
+    likelihood.phase_marginalization = True
+    for producer in (likelihood.phase_grid_terms_22, likelihood.phase_psi_terms_22):
+        with pytest.raises(ValueError, match="phase-marginalized"):
+            producer(theta)
+
+
 def test_phase_grid_raise_points_at_the_exact_22_path():
     """With a spin convention the mode sum cannot use, the error says so -- and for a
     model whose phase shift is a global factor it also says that the (2, 2) path is
