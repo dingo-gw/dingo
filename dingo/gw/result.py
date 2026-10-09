@@ -1,5 +1,6 @@
 import copy
 import time
+import warnings
 from typing import Optional
 
 import numpy as np
@@ -17,6 +18,7 @@ from dingo.core.inference.composer import ChainComposer
 from dingo.core.inference.steps import PriorFactor, SampleTableFactor
 from bilby.gw.detector import InterferometerList
 from dingo.gw.frequency_updates import resolve_frequency_bounds
+from dingo.gw.prior import split_off_extrinsic_parameters
 
 
 RANDOM_STATE = 150914
@@ -452,18 +454,18 @@ class Result(CoreResult):
             n_grid_phase : int, optional
                 Number of phase grid points on [0, 2pi], endpoints included.
                 Defaults to the factor's default (5001 for the phase alone, 512
-                together with psi).
+                together with psi). Not used in approximation_22_mode, where the
+                phase is drawn exactly.
             n_grid_psi : int, optional
                 Number of psi grid points on [0, pi], endpoints included, default
                 128. Only used if the samples lack psi as well as the phase: then
-                both are drawn from the likelihood on a (phase, psi) grid (exact
-                mode sum only), see `SyntheticPhasePsiFactor`.
-            approximation_22_mode : bool, default True
+                both are drawn from the likelihood, see `SyntheticPhasePsiFactor`.
+            approximation_22_mode : bool, optional
                 Assume a (2, 2)-dominated waveform. Otherwise the exact mode sum is
                 used, which requires the waveform generator's
-                spin_conversion_phase = 0. Not available together with psi: the
-                (phase, psi) grid always uses the exact mode sum, so omit it or
-                set it False there (True raises a ValueError).
+                spin_conversion_phase = 0. Defaults to True where the (2, 2) path is
+                exact (`WaveformGenerator.phase_is_global_factor`), as for BNS
+                networks in Bilby's spin convention, and to False otherwise.
             uniform_weight : float, default 0.01
                 Weight of the uniform floor added to the phase distribution for
                 mass coverage.
@@ -622,12 +624,11 @@ class Result(CoreResult):
         """
         Set up the synthetic phase step of `sample_proposal_extensions`: a
         `SyntheticPhaseFactor`, which constructs `q(phase | theta, d)` per sample
-        from the likelihood on a phase grid (with a uniform floor for mass coverage,
-        so importance sampling remains exact even where the conditional is
-        approximate). It applies to samples in the full parameter space except the
-        phase. If the samples lack psi as
-        well, the step is a `SyntheticPhasePsiFactor`, which draws both angles from
-        the likelihood on a (phase, psi) grid.
+        from the likelihood (with a uniform floor for mass coverage, so importance
+        sampling remains exact even where the conditional is approximate). It
+        applies to samples in the full parameter space except the phase. If the
+        samples lack psi as well, the step is a `SyntheticPhasePsiFactor`, which
+        draws both angles from the likelihood.
 
         Parameters
         ----------
@@ -646,6 +647,7 @@ class Result(CoreResult):
         from dingo.gw.inference.steps import (
             SyntheticPhaseFactor,
             SyntheticPhasePsiFactor,
+            _phase_global_factor_mismatch,
         )
 
         if self.sampler_context is None:
@@ -689,26 +691,70 @@ class Result(CoreResult):
             raise ValueError(
                 "synthetic_parameters_kwargs: n_grid has been renamed to n_grid_phase."
             )
-        # The psi factor is exact-mode only; the phase-only factor defaults to (2, 2).
+        waveform_generator = self.sampler_context.likelihood(
+            use_base_domain=self.use_base_domain, wfg_updates=wfg_updates
+        ).waveform_generator
+        # Both factors default to the (2, 2) path where it is exact, and to the mode
+        # sum otherwise.
         approximation_22_mode = synthetic_parameters_kwargs.get(
-            "approximation_22_mode", self.psi_prior is None
+            "approximation_22_mode", waveform_generator.phase_is_global_factor
         )
-        # The (phase, psi) grid is exact-mode only; don't silently ignore the setting.
-        if self.psi_prior is not None and approximation_22_mode:
-            raise ValueError(
-                "synthetic_parameters_kwargs: the (phase, psi) grid requires the exact "
-                "mode sum, approximation_22_mode=False."
-            )
         # Cache the log likelihood at the drawn phase only where it equals a direct
-        # likelihood call: the exact mode sum with the DFT phase decomposition, whose
-        # m-components sum to exactly the direct waveform. Only the DFT flag is
-        # forwarded as wfg_updates, so the direct waveform is the same model's.
+        # likelihood call: the exact mode sum with the DFT phase decomposition, or
+        # the (2, 2) path for a model whose phase shift is a global exp(2i phase)
+        # factor.
         cache_log_likelihood = (
-            not approximation_22_mode
-            and self.sampler_context.likelihood(
-                use_base_domain=self.use_base_domain, wfg_updates=wfg_updates
-            ).waveform_generator.uses_dft_phase_decomposition
+            waveform_generator.phase_is_global_factor
+            if approximation_22_mode
+            else waveform_generator.uses_dft_phase_decomposition
         )
+        # The first sample within the prior, to check the chosen route on the waveform.
+        within_prior = np.isfinite(self._log_prior())
+        sample = None
+        if within_prior.any():
+            sample = (
+                self.samples[
+                    [k for k, v in self.prior.items() if not isinstance(v, Constraint)]
+                ][within_prior]
+                .iloc[0]
+                .to_dict()
+            )
+        # The mode sum needs the m-decomposition, which not every network has (none
+        # with spin_conversion_phase = None, and the NRTidal family only through the
+        # DFT, with a mode_list). Say so before drawing, with the way out.
+        if not approximation_22_mode and sample is not None:
+            intrinsic = split_off_extrinsic_parameters(sample)[0]
+            try:
+                waveform_generator.generate_hplus_hcross_m(
+                    {**{k: float(v) for k, v in intrinsic.items()}, "phase": 0.0}
+                )
+            # The convention guard, or a model without modes. LAL failing on this
+            # sample (a RuntimeError) is a different problem and passes through.
+            except (ValueError, NotImplementedError) as e:
+                raise ValueError(
+                    f"The exact mode sum (approximation_22_mode: false) is not "
+                    f"available for {waveform_generator.approximant_str} with "
+                    f"spin_conversion_phase = "
+                    f"{waveform_generator.spin_conversion_phase}: {e} Set "
+                    f"approximation_22_mode: true for a (2, 2) proposal instead; "
+                    f"importance sampling stays unbiased, at a lower sample "
+                    f"efficiency."
+                ) from e
+        # For the (2, 2) path a probe on the waveform at the first sample confirms
+        # it (IMRPhenomXP fails it, very slightly, at exactly zero in-plane spin). The
+        # draws stay valid either way, so a failure only skips the cache.
+        if cache_log_likelihood and approximation_22_mode and sample is not None:
+            mismatch = _phase_global_factor_mismatch(waveform_generator, sample)
+            # A NaN waveform fails the probe like any other disagreement.
+            if not mismatch <= 1e-10:
+                warnings.warn(
+                    f"{waveform_generator.approximant_str} is listed as having a "
+                    f"global exp(2i phase) factor, but at the first sample a phase "
+                    f"shift changes the waveform by a mismatch of {mismatch:.1e}. "
+                    f"The (2, 2) log likelihood is not cached; importance sampling "
+                    f"evaluates it instead."
+                )
+                cache_log_likelihood = False
         common = dict(
             conditioning=conditioning,
             uniform_weight=synthetic_parameters_kwargs.get("uniform_weight", 0.01),
@@ -726,7 +772,9 @@ class Result(CoreResult):
         if self.psi_prior is not None:
             if "n_grid_psi" in synthetic_parameters_kwargs:
                 common["n_grid_psi"] = synthetic_parameters_kwargs["n_grid_psi"]
-            step = SyntheticPhasePsiFactor(**common)
+            step = SyntheticPhasePsiFactor(
+                approximation_22_mode=approximation_22_mode, **common
+            )
         else:
             step = SyntheticPhaseFactor(
                 approximation_22_mode=approximation_22_mode,

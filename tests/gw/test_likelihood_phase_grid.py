@@ -312,3 +312,122 @@ def test_phase_psi_algebra_matches_brute_force():
             }
             brute[i, j] = log_Zn + overlap(d, mu).real - 0.5 * overlap(mu, mu).real
     np.testing.assert_allclose(fast, brute, rtol=1e-10, atol=1e-10)
+
+
+def _bns_likelihood_22():
+    """A BNS likelihood whose phase shift is a global exp(2i phase) factor, and a
+    precessing parameter point for it."""
+    domain = UniformFrequencyDomain(f_min=20.0, f_max=512.0, delta_f=1 / 4.0)
+    rng = np.random.default_rng(42)
+    waveform, asds = {}, {}
+    for ifo in ["H1", "L1"]:
+        d = (rng.normal(size=len(domain)) + 1j * rng.normal(size=len(domain))) * 1e-23
+        waveform[ifo] = np.where(domain.frequency_mask, d, 0.0)
+        asds[ifo] = np.where(domain.frequency_mask, 1e-23, 1.0)
+    theta = {
+        **THETA,
+        "mass_1": 1.6,
+        "mass_2": 1.3,
+        "lambda_1": 400.0,
+        "lambda_2": 600.0,
+        "luminosity_distance": 100.0,
+    }
+    likelihood = StationaryGaussianGWLikelihood(
+        wfg_kwargs={
+            "approximant": "IMRPhenomXP_NRTidalv3",
+            "f_ref": 20.0,
+            # Bilby's convention: a phase shift then also rotates the in-plane
+            # spins, which is what makes the (2, 2) dependence exact.
+            "spin_conversion_phase": None,
+        },
+        wfg_domain=domain,
+        data_domain=domain,
+        event_data={"waveform": waveform, "asds": asds},
+        t_ref=1126259462.4,
+    )
+    assert likelihood.waveform_generator.phase_is_global_factor
+    return likelihood, theta
+
+
+def test_terms_22_reproduce_direct_likelihood():
+    """The (2, 2) terms evaluate to the direct log likelihood at any phase, for a
+    model whose phase shift is a global exp(2i phase) factor. This is what lets
+    importance sampling reuse the value cached by the synthetic phase on the
+    (2, 2) path, which is the only exact route for the NRTidal family (LALSimulation
+    implements no frequency-domain modes for it)."""
+    likelihood, theta = _bns_likelihood_22()
+    phases = np.array([0.37, 2.9, 5.81])
+    terms = likelihood.phase_grid_terms_22(theta)
+    from_terms = likelihood.log_likelihood_22_from_terms(terms, phases)
+    direct = [likelihood.log_likelihood({**theta, "phase": p}) for p in phases]
+    np.testing.assert_allclose(from_terms, direct, rtol=1e-9)
+
+    # Stacked along a leading sample axis, as the synthetic phase evaluates them.
+    stacked = {k: np.array([v, v]) for k, v in terms.items()}
+    at_drawn = likelihood.log_likelihood_22_from_terms(stacked, phases[:2, None])
+    assert at_drawn.shape == (2, 1)
+    np.testing.assert_allclose(at_drawn[:, 0], direct[:2], rtol=1e-9)
+
+
+def test_phase_psi_terms_22_reproduce_direct_likelihood():
+    """The (2, 2) terms at the two basis angles give the direct log likelihood at
+    any (phase, psi), from one waveform evaluation, and at the sample's own psi the
+    same terms as `phase_grid_terms_22`. This is what the (phase, psi) factor's
+    (2, 2) path and its cached log likelihood rest on."""
+    likelihood, theta = _bns_likelihood_22()
+    terms = likelihood.phase_psi_terms_22(theta)
+    assert terms["d_inner_h"].shape == (2,) and terms["h_inner_h"].shape == (2, 2)
+
+    phases = np.array([0.37, 2.9, 5.81])
+    psis = np.array([0.2, 1.1, 2.75])
+    at_psi = likelihood.terms_22_at_psi(terms, psis[:, None])
+    from_terms = likelihood.log_likelihood_22_from_terms(
+        {k: v[:, 0] for k, v in at_psi.items()}, phases[:, None]
+    )[:, 0]
+    direct = [
+        likelihood.log_likelihood({**theta, "phase": phase, "psi": psi})
+        for phase, psi in zip(phases, psis)
+    ]
+    np.testing.assert_allclose(from_terms, direct, rtol=1e-9)
+    assert np.ptp(direct) > 1.0  # the check is not dominated by log_Zn
+
+    own = likelihood.terms_22_at_psi(terms, np.array([theta["psi"]]))
+    expected = likelihood.phase_grid_terms_22(theta)
+    for k in ("d_inner_h", "h_inner_h"):
+        np.testing.assert_allclose(own[k][0], expected[k], rtol=1e-12)
+
+
+def test_terms_22_share_the_phase_grid_guards():
+    """The (2, 2) producers describe the plain likelihood, like `phase_grid_terms`,
+    and refuse a phase-marginalized one in the same way."""
+    likelihood, theta = _bns_likelihood_22()
+    likelihood.phase_marginalization = True
+    for producer in (likelihood.phase_grid_terms_22, likelihood.phase_psi_terms_22):
+        with pytest.raises(ValueError, match="phase-marginalized"):
+            producer(theta)
+
+
+def test_phase_grid_raise_points_at_the_exact_22_path():
+    """With a spin convention the mode sum cannot use, the error says so -- and for a
+    model whose phase shift is a global factor it also says that the (2, 2) path is
+    exact there, which is the cheaper way out rather than fixing the convention."""
+    domain = UniformFrequencyDomain(f_min=20.0, f_max=512.0, delta_f=1.0)
+    event_data = {
+        "waveform": {ifo: np.zeros(len(domain), dtype=complex) for ifo in ["H1"]},
+        "asds": {ifo: np.ones(len(domain)) for ifo in ["H1"]},
+    }
+    for approximant, hinted in (("IMRPhenomXP", True), ("IMRPhenomXPHM", False)):
+        likelihood = StationaryGaussianGWLikelihood(
+            wfg_kwargs={
+                "approximant": approximant,
+                "f_ref": 20.0,
+                "spin_conversion_phase": None,
+            },
+            wfg_domain=domain,
+            data_domain=domain,
+            event_data=event_data,
+            t_ref=1126259462.4,
+        )
+        with pytest.raises(ValueError, match="spin_conversion_phase = 0") as excinfo:
+            likelihood.phase_grid_terms(THETA)
+        assert ("approximation_22_mode" in str(excinfo.value)) is hinted
