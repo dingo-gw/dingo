@@ -237,6 +237,30 @@ def test_phase_is_global_factor_matches_the_waveform(
     assert bool(mismatch < 1e-12) is exact, f"probe mismatch {mismatch:.2e}"
 
 
+@pytest.mark.parametrize(
+    "spins, exact",
+    [
+        # Spins fixed to zero.
+        ({"a_1": 0.0, "a_2": 0.0, "tilt_1": 1.0, "tilt_2": 0.5}, False),
+        # Aligned spins: no in-plane components, and no tilts to set generically.
+        ({"chi_1": 0.3, "chi_2": 0.2}, False),
+        # Any nonzero in-plane spin restores the global factor.
+        ({"a_1": 1e-6, "a_2": 1e-6, "tilt_1": 1.0, "tilt_2": 0.5}, True),
+    ],
+)
+def test_phase_probe_notices_xp_at_zero_in_plane_spin(ufd, spins, exact):
+    """IMRPhenomXP's (2, 2) path is very slightly inexact at exactly zero in-plane
+    spin (a mismatch of ~3e-10, from LAL's MSA precession), and the probe, which keeps
+    the sample's spin magnitudes, notices."""
+    from dingo.gw.inference.steps import _phase_global_factor_mismatch
+
+    spin_keys = ("a_1", "a_2", "tilt_1", "tilt_2", "phi_12", "phi_jl")
+    parameters = {k: v for k, v in BNS_PARAMETERS.items() if k not in spin_keys}
+    wf_gen = WaveformGenerator(APPROXIMANT, ufd, F_REF, spin_conversion_phase=None)
+    mismatch = _phase_global_factor_mismatch(wf_gen, {**parameters, **spins})
+    assert bool(mismatch < 1e-12) is exact, f"probe mismatch {mismatch:.2e}"
+
+
 BNS_ALIGNED_PARAMETERS = {
     **{k: v for k, v in BNS_PARAMETERS.items() if k not in ("tilt_1", "tilt_2")},
     "tilt_1": 0.0,

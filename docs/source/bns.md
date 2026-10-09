@@ -122,8 +122,7 @@ Beyond a BBH setup, a tidal run needs:
   `spin_conversion_phase: null` (Bilby's convention). For models with a single
   co-precessing $(2, \pm 2)$ pair a phase shift is then a global $e^{2i\phi_c}$
   factor, so the $(2, 2)$ synthetic phase (`approximation_22_mode: true`) is exact.
-  `spin_conversion_phase: 0.0` is needed only for the exact mode sum, which these
-  models do not support.
+  `spin_conversion_phase: 0.0` is needed only for the exact mode sum.
 - **Dataset, `intrinsic_prior`**: BNS-appropriate mass and spin ranges (the
   `default` entries are tuned to BBH), plus `lambda_1: default` /
   `lambda_2: default` (`Uniform(0, 5000)`) or explicit prior strings.
@@ -133,23 +132,26 @@ Beyond a BBH setup, a tidal run needs:
 For the synthetic phase, `approximation_22_mode: true` is then both the cheapest
 and the exact choice: one waveform evaluation per sample, and the log likelihood
 at the drawn $\phi_c$ comes with it, so importance sampling reuses it instead of
-regenerating the waveforms. Dingo probes the waveform before relying on this and
-refuses to cache if a phase shift turns out not to be a global factor. The exact
+regenerating the waveforms. Dingo probes the waveform at the first sample before
+relying on this, and if a phase shift turns out not to be a global factor it warns
+and leaves the likelihood to importance sampling. The exact
 mode sum (`approximation_22_mode: false`) is not an option for the NRTidal
 family: LALSimulation implements no frequency-domain modes for it, and the DFT
 phase decomposition needs the fixed spin convention that we are avoiding here.
 The same holds for a network that marginalizes $\psi$ as well: with
 `approximation_22_mode: true` both angles are recovered from one waveform
 evaluation per sample, the phase drawn exactly rather than on a grid, and the log
-likelihood is cached in the same way (see [Synthetic phase and polarization
-angle](result.md#synthetic-phase-and-polarization-angle)).
+likelihood is cached in the same way (see [Synthetic phase](result.md#synthetic-phase)).
 
 A network trained with `spin_conversion_phase: 0.0` is the other case. There a
 phase shift leaves the in-plane spins behind, so the $(2, 2)$ path is an
 approximation (mismatch $\sim 3 \times 10^{-3}$ for IMRPhenomXP_NRTidalv3 at
-$a \sim 0.3$) and its log likelihood is not cached. Importance sampling stays
-unbiased, since the synthetic phase only shapes the proposal, but the sample
-efficiency is lower.
+$a \sim 0.3$) and its log likelihood is not cached. The default is then the exact
+mode sum, which for the NRTidal family needs the DFT phase decomposition and
+hence a `mode_list` in the waveform generator settings; without one, Dingo raises
+and asks for `approximation_22_mode: true`. Importance sampling stays unbiased with
+the $(2, 2)$ proposal, since the synthetic phase only shapes the proposal, but the
+sample efficiency is lower.
 
 ## Running through dingo_pipe
 
@@ -187,7 +189,7 @@ fixed-context-parameters = {chirp_mass_proxy: 1.19786, ra: 3.44616, dec: -0.4080
 # fixed-context-parameters = {ra: 3.44616, dec: -0.408084}
 
 importance-sample = true
-importance-sampling-settings = {synthetic_parameters: {approximation_22_mode: true, n_grid_phase: 5001, uniform_weight: 0.01}}
+importance-sampling-settings = {synthetic_parameters: {approximation_22_mode: true, uniform_weight: 0.01}}
 
 ################################################################################
 ## Data generation arguments
@@ -204,9 +206,10 @@ Importance sampling follows the standard [workflow](result.md). For a multibande
 model the likelihood is evaluated on the undecimated base domain by default
 (`use_base_domain`, set automatically and adjustable in
 `importance-sampling-settings`). Phase-marginalized networks reconstruct the phase
-synthetically before reweighting; `approximation_22_mode: true` is the right
-setting for BNS, and for a network trained in Bilby's spin convention it is exact
-as well as fast, see [Tidal parameters](#tidal-parameters).
+synthetically before reweighting. For a network trained in Bilby's spin
+convention the defaults take the exact $(2, 2)$ path; one trained with
+`spin_conversion_phase: 0.0` needs `approximation_22_mode: true`, as in the
+example above. See [Tidal parameters](#tidal-parameters).
 
 As an indication of expected performance, analyses of GW170817 on public data with a
 development network reach sample efficiencies of roughly 10% and a log Bayes factor

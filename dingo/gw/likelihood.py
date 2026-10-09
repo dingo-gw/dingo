@@ -8,7 +8,6 @@ from scipy.special import logsumexp
 from bilby.gw.utils import ln_i0
 
 from dingo.core.likelihood import Likelihood
-from dingo.core.multiprocessing import apply_func_with_multiprocessing
 from dingo.gw.injection import GWSignal
 from dingo.gw.transforms import (
     DecimateWaveformsAndASDS,
@@ -378,6 +377,22 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
             :, 0
         ]
 
+    def _check_phase_grid_supported(self):
+        """The phase grid terms describe the plain likelihood: raise for the settings
+        they do not cover."""
+        # TODO: Implement for time marginalization
+        if self.return_aux_snr:
+            raise NotImplementedError
+        if self.phase_marginalization:
+            raise ValueError(
+                "Can't compute likelihood on a phase grid for "
+                "phase-marginalized posteriors"
+            )
+        if self.time_marginalization:
+            raise NotImplementedError(
+                "log_likelihood on phase grid not yet implemented."
+            )
+
     def phase_grid_terms_22(self, theta: dict) -> dict:
         """
         Compute, from one waveform evaluation at phase = 0, the two inner products
@@ -395,6 +410,7 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         dict
             d_inner_h: complex, (d, h_0); h_inner_h: float, (h_0, h_0).
         """
+        self._check_phase_grid_supported()
         mu = self.signal({**theta, "phase": 0.0})["waveform"]
         d = self.whitened_strains
         return {
@@ -456,6 +472,7 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         dict
             d_inner_h: (2,) complex, (d, h^b); h_inner_h: (2, 2) real, Re (h^b, h^c).
         """
+        self._check_phase_grid_supported()
         # (n_freq, 2) per detector, frequency first as the inner products sum over it.
         mu = {
             ifo: h.T
@@ -531,19 +548,7 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
             rho2opt_crossterms: (2, 2, P) complex, the sum over m < n with
                 n - m = delta of (mu^b_m, mu^c_n) + (mu^c_m, mu^b_n).
         """
-        # TODO: Implement for time marginalization
-        if self.return_aux_snr:
-            raise NotImplementedError
-        if self.phase_marginalization:
-            raise ValueError(
-                "Can't compute likelihood on a phase grid for "
-                "phase-marginalized posteriors"
-            )
-        if self.time_marginalization:
-            raise NotImplementedError(
-                "log_likelihood on phase grid not yet implemented."
-            )
-
+        self._check_phase_grid_supported()
         if self.waveform_generator.spin_conversion_phase != 0:
             # For a model whose phase shift is a global factor there is no reason to
             # fix the convention: say so, since this is the recommended BNS setup.
