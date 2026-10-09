@@ -728,8 +728,9 @@ class Result(CoreResult):
                 waveform_generator.generate_hplus_hcross_m(
                     {**{k: float(v) for k, v in intrinsic.items()}, "phase": 0.0}
                 )
-            # The convention guard, a model without modes, or LAL itself.
-            except (ValueError, NotImplementedError, RuntimeError) as e:
+            # The convention guard, or a model without modes. LAL failing on this
+            # sample (a RuntimeError) is a different problem and passes through.
+            except (ValueError, NotImplementedError) as e:
                 raise ValueError(
                     f"The exact mode sum (approximation_22_mode: false) is not "
                     f"available for {waveform_generator.approximant_str} with "
