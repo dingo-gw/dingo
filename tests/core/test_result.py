@@ -584,6 +584,27 @@ def test_reset_event_drops_cached_log_likelihood():
     assert "log_likelihood_cache" not in result.samples.columns
 
 
+def test_reset_event_after_a_round_trip_with_nested_lists(tmp_path, capsys):
+    # Importance sampling reloads the sampling Result and compares its event
+    # metadata with the event file's settings, which keep their lists (#443).
+    from types import SimpleNamespace
+
+    event_metadata = {
+        "T": 8.0,
+        "detectors": ["H1", "L1"],
+        "psd_notch_dict": {"H1": [[59.5, 60.5]], "L1": [[59.5, 60.6], [119.0, 121.0]]},
+    }
+    samples = pd.DataFrame({"x": [1.0, 2.0]})
+    file_name = tmp_path / "result.hdf5"
+    Result(dictionary={"samples": samples, "event_metadata": event_metadata}).to_file(
+        file_name
+    )
+    result = Result(file_name=file_name)
+    assert result.event_metadata == event_metadata
+    result.reset_event(SimpleNamespace(data={}, settings=event_metadata))
+    assert "Changes" not in capsys.readouterr().out
+
+
 # ---------------------------------------------------------------------------
 # importance_sample with cached log likelihoods
 # ---------------------------------------------------------------------------
