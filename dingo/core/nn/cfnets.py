@@ -25,6 +25,9 @@ class ContinuousFlow(nn.Module):
     The parameters and context can optionally be provided as gated linear unit (GLU)
     context to the main network, rather than as the main input to the network. For a
     DenseResidualNet, this context is input repeatedly via GLUs, for each residual block.
+
+    Context parameters (e.g., GNPE proxies), passed as the last context input, bypass
+    the context embedding network and are concatenated to its output.
     """
 
     def __init__(
@@ -34,6 +37,7 @@ class ContinuousFlow(nn.Module):
         theta_embedding_net: Optional[nn.Module] = None,
         context_with_glu: bool = False,
         theta_with_glu: bool = False,
+        num_context_parameters: int = 0,
     ):
         """
         Parameters
@@ -50,6 +54,9 @@ class ContinuousFlow(nn.Module):
         theta_with_glu: bool = False
             Whether to provide theta (and t) as GLU or main input to the
             continuous_flow_net.
+        num_context_parameters: int = 0
+            Number of context parameters. If nonzero, the last context input is a
+            tensor of context parameters, concatenated to the embedded context.
         """
         super(ContinuousFlow, self).__init__()
         self.continuous_flow_net = continuous_flow_net
@@ -67,6 +74,7 @@ class ContinuousFlow(nn.Module):
         )
         self.theta_with_glu = theta_with_glu
         self.context_with_glu = context_with_glu
+        self.num_context_parameters = num_context_parameters
 
         self._use_cache = None
         self._cached_context = None
@@ -103,15 +111,23 @@ class ContinuousFlow(nn.Module):
         # if all tensors in batch are the same: do forward pass with batch_size 1
         if all([(x == x[:1]).all() for x in context]):
             self._cached_context = tuple(x[:1] for x in context)
-            self._cached_context_embedding = self.context_embedding_net(
+            self._cached_context_embedding = self._embed_context(
                 *self._cached_context
             ).detach()
 
         else:
             self._cached_context = context
-            self._cached_context_embedding = self.context_embedding_net(
+            self._cached_context_embedding = self._embed_context(
                 *self._cached_context
             ).detach()
+
+    def _embed_context(self, *context: torch.Tensor):
+        """Embed the context inputs, and append the context parameters (if any)."""
+        if self.num_context_parameters:
+            return torch.cat(
+                (self.context_embedding_net(*context[:-1]), context[-1]), dim=1
+            )
+        return self.context_embedding_net(*context)
 
     def _get_cached_context_embedding(self, batch_size):
         if self._cached_context_embedding.size(0) == 1:
@@ -132,7 +148,7 @@ class ContinuousFlow(nn.Module):
 
         # embed context (self.context_embedding_net might just be identity)
         if not self.use_cache:
-            context_embedding = self.context_embedding_net(*context)
+            context_embedding = self._embed_context(*context)
 
         else:
             self._update_cached_context(*context)
@@ -174,6 +190,7 @@ def create_cf(
     embedding_kwargs: dict = None,
     initial_weights: dict = None,
     embedding_type: str = "resnet",
+    num_context_parameters: int = 0,
 ):
     """
     Build a continuous flow based on settings dictionaries.
@@ -190,6 +207,8 @@ def create_cf(
         "resnet" (SVD projection followed by a dense residual network) or
         "transformer" (tokenized data; the context is then the list of waveform,
         position and token_mask tensors, passed through to the embedding network).
+    num_context_parameters: int
+        Number of context parameters, concatenated to the embedded context.
 
     Returns
     -------
@@ -255,6 +274,7 @@ def create_cf(
         theta_embedding,
         theta_with_glu=posterior_kwargs.get("theta_with_glu", False),
         context_with_glu=posterior_kwargs.get("context_with_glu", False),
+        num_context_parameters=num_context_parameters,
     )
     return model
 

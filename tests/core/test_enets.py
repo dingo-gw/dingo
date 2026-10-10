@@ -2,7 +2,6 @@ import pytest
 from testutils_enets import *
 from dingo.core.nn.enets import (
     LinearProjectionRB,
-    ModuleMerger,
     create_enet_with_projection_layer_and_dense_resnet,
 )
 
@@ -199,81 +198,6 @@ def test_forward_pass_of_2stage_enet_with_layer_norm(data_setup_rb):
     check_model_forward_pass(
         enet, [enet_kwargs["output_dim"]], enet_kwargs["input_dims"], d["batch_size"]
     )
-
-
-def test_ModuleMerger(data_setup_rb):
-    """
-    Test the ModuleMerger class for correct outputs and backward passes.
-    """
-    d = data_setup_rb
-    enet_kwargs = d["enet_kwargs"]
-    enet = ModuleMerger(
-        (
-            nn.Identity(),
-            create_enet_with_projection_layer_and_dense_resnet(**enet_kwargs),
-        )
-    )
-    x = (
-        torch.ones(d["batch_size"], 3),
-        torch.rand(d["batch_size"], *enet_kwargs["input_dims"]),
-    )
-
-    # check backward pass and optimizer step for the model
-    out_0, out_1 = check_model_backward_pass(enet, x=x)
-
-    # check that additional context is left unchanged
-    assert torch.all(
-        out_0[:, :3] == 1
-    ), "Individual embedding nets not applied correctly."
-    assert torch.all(
-        out_1[:, :3] == 1
-    ), "Individual embedding nets not applied correctly."
-
-
-def test_forward_pass_of_2stage_enet_with_context(data_setup_rb):
-    """
-    Test forward pass of the embedding network built by
-    create_enet_with_projection_layer_and_dense_resnet with additional context.
-    Check that ValueError is raised when enet is provided wrong input.
-    """
-    d = data_setup_rb
-    enet_kwargs = d["enet_kwargs"]
-    enet = create_enet_with_projection_layer_and_dense_resnet(
-        **enet_kwargs, added_context=True
-    )
-
-    # define primary and additional context
-    x = torch.rand((d["batch_size"], *enet_kwargs["input_dims"]))
-    z = torch.ones((d["batch_size"], 2))
-
-    check_model_forward_pass(enet, [enet_kwargs["output_dim"] + 2], x=(x, z))
-
-    _ = enet(x, z)
-    with pytest.raises(ValueError):
-        enet(x)
-    with pytest.raises(ValueError):
-        enet((x,))
-
-
-def test_backward_pass_of_2stage_enet_with_context(data_setup_rb):
-    """
-    Test backward pass of the embedding network built by
-    create_enet_with_projection_layer_and_dense_resnet with additional context.
-    """
-    d = data_setup_rb
-    enet_kwargs = d["enet_kwargs"]
-    enet = create_enet_with_projection_layer_and_dense_resnet(
-        **enet_kwargs, added_context=True
-    )
-
-    # define primary and additional context
-    x = torch.rand((d["batch_size"], *enet_kwargs["input_dims"]))
-    z = torch.ones((d["batch_size"], 2))
-
-    y1, y2 = check_model_backward_pass(enet, x=(x, z))
-    assert torch.all(y1[:, -2:] == 1) and torch.all(
-        y2[:, -2:] == 1
-    ), "Indentity mapping for additional context is broken."
 
 
 if __name__ == "__main__":

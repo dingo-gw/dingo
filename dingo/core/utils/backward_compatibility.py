@@ -180,6 +180,17 @@ def update_model_config(model_settings: dict):
     if "embedding_kwargs" in model_settings and "embedding_type" not in model_settings:
         model_settings["embedding_type"] = "resnet"
 
+    # Context parameters (e.g., GNPE proxies) used to be concatenated inside the resnet
+    # embedding net (`added_context`); the posterior network now does this, given
+    # their number. See also `update_model_state_dict`.
+    if model_settings.get("embedding_type") == "resnet" and (
+        model_settings.get("embedding_kwargs") or {}
+    ).pop("added_context", False):
+        model_settings["num_context_parameters"] = (
+            model_settings["posterior_kwargs"]["context_dim"]
+            - model_settings["embedding_kwargs"]["output_dim"]
+        )
+
     if model_settings.get("embedding_type") == "transformer":
         # Networks trained on the dingo-t1 branch (e.g. the published Dingo-T1
         # network) store kwargs that are now either fixed or derived.
@@ -207,6 +218,36 @@ def update_model_config(model_settings: dict):
             ]
             tokenizer_kwargs["position_continuous_dim"] = 2
         (embedding_kwargs.get("final_net_kwargs") or {}).pop("input_dim", None)
+
+
+def update_model_state_dict(state_dict: dict) -> dict:
+    """
+    Update a model state dict to ensure backwards compatibility with networks
+    trained using previous versions of Dingo. Networks with context parameters used
+    to wrap the resnet embedding net as the first module of a `ModuleMerger`; its
+    keys `embedding_net.enets.0.*` (normalizing flow) and
+    `context_embedding_net.enets.0.*` (flow matching) are renamed to
+    `embedding_net.*` and `context_embedding_net.*`.
+
+    Parameters
+    ----------
+    state_dict: dict
+        Model state dict, as saved.
+
+    Returns
+    -------
+    dict
+        The state dict with current keys (a new dict; the input is not modified).
+    """
+
+    def rename(key):
+        for prefix in ("embedding_net", "context_embedding_net"):
+            old = f"{prefix}.enets.0"
+            if key == old or key.startswith(old + "."):
+                return prefix + key[len(old) :]
+        return key
+
+    return {rename(k): v for k, v in state_dict.items()}
 
 
 def update_data_config(settings: dict):
