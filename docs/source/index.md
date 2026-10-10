@@ -46,6 +46,7 @@ As training a network from scratch can be expensive, we intend to also distribut
    example_npe_model
    example_gnpe_model
    example_dingo_t1
+   example_bns
    example_injection
 
 .. toctree::

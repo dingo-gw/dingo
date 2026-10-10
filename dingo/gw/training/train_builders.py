@@ -19,6 +19,8 @@ from dingo.gw.transforms import (
     CropMaskStrainRandom,
     DistancePriorConditioning,
     GetDetectorTimes,
+    ChirpPriorConditioning,
+    chirp_prior_conditioning_settings,
     GNPECoalescenceTimes,
     MaskDetectors,
     MaskFrequencyNotches,
@@ -81,9 +83,10 @@ def set_train_transforms(
     Set the transform attribute of a waveform dataset based on a settings dictionary.
     The transform takes waveform polarizations, samples random extrinsic parameters,
     projects to detectors, adds noise, and formats the data for input to the neural
-    network. It also implements optional GNPE transformations, and optional prior
-    conditioning on the upper bound of the luminosity-distance prior
-    (`distance_prior_conditioning`).
+    network. It also implements optional GNPE detector time shifts
+    (`gnpe_time_shifts`), prior conditioning on the chirp mass
+    (`chirp_prior_conditioning`, DINGO-BNS), and prior conditioning on the upper bound
+    of the luminosity-distance prior (`distance_prior_conditioning`).
 
     Note that the WaveformDataset is modified in-place, so this function returns nothing.
 
@@ -143,6 +146,15 @@ def set_train_transforms(
                 d["exact_equiv"],
                 inference=False,
             )
+        )
+        extra_context_parameters += transforms[-1].context_parameters
+    d = chirp_prior_conditioning_settings(data_settings)
+    if d is not None:
+        # Heterodyne the polarizations at a blurred chirp mass (the proxy, on which the
+        # network conditions) and infer the offset delta_chirp_mass. The heterodyne
+        # commutes with the detector projection, whitening, and (white) noise below.
+        transforms.append(
+            ChirpPriorConditioning(d["kernel"], domain, d.get("order", 0))
         )
         extra_context_parameters += transforms[-1].context_parameters
     distance_conditioning = data_settings.get("distance_prior_conditioning")
@@ -340,7 +352,8 @@ def build_svd_for_embedding_network(
     data_settings.pop("distance_prior_conditioning", None)
 
     # Build the dataset, but with certain transforms omitted. In particular, we want to
-    # build the SVD based on zero-noise waveforms. They should still be whitened though.
+    # build the SVD based on zero-noise waveforms. They should still be whitened, and
+    # heterodyned when the network is (the basis must span the network's input).
     set_train_transforms(
         wfd,
         data_settings,

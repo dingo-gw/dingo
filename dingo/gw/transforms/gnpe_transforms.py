@@ -231,12 +231,12 @@ class GNPECoalescenceTimes(GNPEBase):
         return sample
 
 
-class GNPEChirp(GNPEBase):
+class ChirpPriorConditioning(GNPEBase):
     """
-    Relative binning / heterodyning GNPE transform, which factors out the overall chirp
-    from the waveform. This is done based on the proxy parameters chirp_mass_proxy and
-    optionally mass_ratio_proxy. These are defined as blurred version of the parameters
-    chirp_mass and mass_ratio.
+    Prior-conditioning on the chirp: a relative binning / heterodyning transform, which
+    factors out the overall chirp from the waveform. This is done based on the proxy parameters
+    chirp_mass_proxy and optionally mass_ratio_proxy. These are defined as blurred
+    version of the parameters chirp_mass and mass_ratio.
 
     At leading order, the data are transformed by dividing by a fiducial waveform of the
     form
@@ -276,7 +276,7 @@ class GNPEChirp(GNPEBase):
             if "mass_ratio" in kernel:
                 print(
                     "Warning: mass_ratio kernel provided, but will be ignored for "
-                    "order 0 GNPE."
+                    "order 0."
                 )
                 kernel.pop("mass_ratio")
         elif order == 2:
@@ -338,3 +338,20 @@ class GNPEChirp(GNPEBase):
             )["waveform"]
 
         return sample
+
+
+def chirp_prior_conditioning_settings(data_settings: dict):
+    """Return the `chirp_prior_conditioning` data settings, or None if absent. The
+    former name `gnpe_chirp` is read as well, so that networks trained before the
+    rename run. Raises if both names are set, or if the block is empty."""
+    keys = [k for k in ("chirp_prior_conditioning", "gnpe_chirp") if k in data_settings]
+    if len(keys) > 1:
+        raise ValueError(
+            "Both chirp_prior_conditioning and its former name gnpe_chirp are set; "
+            "keep only chirp_prior_conditioning."
+        )
+    if not keys:
+        return None
+    if not data_settings[keys[0]]:
+        raise ValueError(f"The {keys[0]} settings are empty; they need a kernel.")
+    return data_settings[keys[0]]

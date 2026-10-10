@@ -212,7 +212,6 @@ class GWSignal(object):
         dict
             keys:
                 waveform: GW strain signal for each detector.
-                extrinsic_parameters: {}
                 parameters: waveform parameters
                 asd (if set): amplitude spectral density for each detector
         """
@@ -236,7 +235,11 @@ class GWSignal(object):
         if asd is not None:
             sample["asds"] = asd
 
-        return self.projection_transforms(sample)
+        sample = self.projection_transforms(sample)
+        # The projection has moved the extrinsic parameters into "parameters"; the
+        # emptied part of the training sample layout is not data.
+        del sample["extrinsic_parameters"]
+        return sample
 
     # It would be good to have an ASD class to handle all of this functionality,
     # namely storing ASDs from numpy arrays, from ASDDatasets, loading from files,
@@ -282,22 +285,54 @@ class GWSignal(object):
         }
 
         # Step 2: project m-contributions to h_plus and h_cross onto detectors
-        out = {}
-        for m, pol in pol_m.items():
-            projected = []
-            for psi in psis:
-                sample = {
-                    "parameters": theta_intrinsic,
-                    "extrinsic_parameters": {**theta_extrinsic, "psi": psi},
-                    "waveform": pol,
-                }
-                if self.asd is not None:
-                    sample["asds"] = self.asd
-                projected.append(self.projection_transforms(sample)["waveform"])
-            out[m] = {
-                ifo: np.stack([p[ifo] for p in projected]) for ifo in projected[0]
+        return {
+            m: self._project_at_psis(theta_intrinsic, theta_extrinsic, pol, psis)
+            for m, pol in pol_m.items()
+        }
+
+    def signal_psis(self, theta, psis):
+        """
+        Compute the GW signal for parameters theta, like self.signal(theta), at each
+        of several polarization angles, from one waveform evaluation.
+
+        Parameters
+        ----------
+        theta: dict
+            Signal parameters, as for self.signal(theta); theta["psi"] is ignored.
+        psis: sequence of float
+            Polarization angles at which to project the polarizations.
+
+        Returns
+        -------
+        dict
+            {ifo: strain}, where strain has shape (len(psis), n_freq), one row per
+            angle in psis.
+        """
+        theta_intrinsic, theta_extrinsic = split_off_extrinsic_parameters(theta)
+        theta_intrinsic = {k: float(v) for k, v in theta_intrinsic.items()}
+        polarizations = self.waveform_generator.generate_hplus_hcross(theta_intrinsic)
+        polarizations = {
+            k: self.data_domain.update_data(v) for k, v in polarizations.items()
+        }
+        return self._project_at_psis(
+            theta_intrinsic, theta_extrinsic, polarizations, psis
+        )
+
+    def _project_at_psis(self, theta_intrinsic, theta_extrinsic, polarizations, psis):
+        """Project polarizations onto the detectors once per angle in psis (optionally
+        whitened, as in self.signal); {ifo: strain} with strain of shape
+        (len(psis), n_freq)."""
+        projected = []
+        for psi in psis:
+            sample = {
+                "parameters": theta_intrinsic,
+                "extrinsic_parameters": {**theta_extrinsic, "psi": psi},
+                "waveform": polarizations,
             }
-        return out
+            if self.asd is not None:
+                sample["asds"] = self.asd
+            projected.append(self.projection_transforms(sample)["waveform"])
+        return {ifo: np.stack([p[ifo] for p in projected]) for ifo in projected[0]}
 
     @property
     def asd(self):
@@ -406,7 +441,6 @@ class Injection(GWSignal):
         dict
             keys:
                 waveform: data (signal + noise) in each detector
-                extrinsic_parameters: {}
                 parameters: waveform parameters
                 asd (if set): amplitude spectral density for each detector
         """
@@ -450,7 +484,6 @@ class Injection(GWSignal):
         dict
             keys:
                 waveform: data (signal + noise) in each detector
-                extrinsic_parameters: {}
                 parameters: waveform parameters
                 asd (if set): amplitude spectral density for each detector
         """

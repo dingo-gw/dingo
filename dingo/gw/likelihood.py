@@ -8,7 +8,6 @@ from scipy.special import logsumexp
 from bilby.gw.utils import ln_i0
 
 from dingo.core.likelihood import Likelihood
-from dingo.core.multiprocessing import apply_func_with_multiprocessing
 from dingo.gw.injection import GWSignal
 from dingo.gw.transforms import (
     DecimateWaveformsAndASDS,
@@ -378,6 +377,146 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
             :, 0
         ]
 
+    def _check_phase_grid_supported(self):
+        """The phase grid terms describe the plain likelihood: raise for the settings
+        they do not cover."""
+        # TODO: Implement for time marginalization
+        if self.return_aux_snr:
+            raise NotImplementedError
+        if self.phase_marginalization:
+            raise ValueError(
+                "Can't compute likelihood on a phase grid for "
+                "phase-marginalized posteriors"
+            )
+        if self.time_marginalization:
+            raise NotImplementedError(
+                "log_likelihood on phase grid not yet implemented."
+            )
+
+    def phase_grid_terms_22(self, theta: dict) -> dict:
+        """
+        Compute, from one waveform evaluation at phase = 0, the two inner products
+        from which `log_likelihood_22_from_terms` evaluates the log likelihood at
+        any phase, assuming a phase shift multiplies the waveform by
+        `exp(2i phase)` (`WaveformGenerator.phase_is_global_factor`).
+
+        Parameters
+        ----------
+        theta: dict
+            BBH parameters. The phase is ignored.
+
+        Returns
+        -------
+        dict
+            d_inner_h: complex, (d, h_0); h_inner_h: float, (h_0, h_0).
+        """
+        self._check_phase_grid_supported()
+        mu = self.signal({**theta, "phase": 0.0})["waveform"]
+        d = self.whitened_strains
+        return {
+            "d_inner_h": sum(
+                inner_product_complex(d_ifo, mu_ifo)
+                for d_ifo, mu_ifo in zip(d.values(), mu.values())
+            ),
+            "h_inner_h": sum(inner_product(mu_ifo, mu_ifo) for mu_ifo in mu.values()),
+        }
+
+    def log_likelihood_22_from_terms(
+        self, terms: dict, phases: np.ndarray
+    ) -> np.ndarray:
+        """
+        Evaluate the log likelihood at the given phases from the output of
+        `phase_grid_terms_22`, without a waveform evaluation:
+
+            log L(ph) = log_Zn + Re[(d, h_0) exp(2i ph)] - (h_0, h_0) / 2
+
+        Parameters
+        ----------
+        terms: dict
+            As returned by `phase_grid_terms_22`, optionally stacked along a
+            leading sample axis.
+        phases: np.ndarray
+            (G,) phases, shared by all samples, or (N, G) phases per sample.
+
+        Returns
+        -------
+        np.ndarray
+            (G,) log likelihoods for unstacked terms, else (N, G).
+        """
+        d_inner_h = np.asarray(terms["d_inner_h"])[..., None]
+        h_inner_h = np.asarray(terms["h_inner_h"])[..., None]
+        return (
+            self.log_Zn
+            + (d_inner_h * np.exp(2j * np.asarray(phases))).real
+            - h_inner_h / 2
+        )
+
+    def phase_psi_terms_22(self, theta: dict) -> dict:
+        """
+        Like `phase_grid_terms_22`, but for every polarization angle at once. Since
+        psi enters only through the antenna patterns, the signal at phase = 0 is
+
+            h(psi) = cos(2 psi) h^0 + sin(2 psi) h^1,
+
+        with h^0, h^1 the projections at psi = 0 and psi = pi / 4 of one waveform
+        evaluation. `terms_22_at_psi` combines the returned inner products into those
+        of `phase_grid_terms_22` at any psi.
+
+        Parameters
+        ----------
+        theta: dict
+            BBH parameters. The phase and psi are ignored.
+
+        Returns
+        -------
+        dict
+            d_inner_h: (2,) complex, (d, h^b); h_inner_h: (2, 2) real, Re (h^b, h^c).
+        """
+        self._check_phase_grid_supported()
+        # (n_freq, 2) per detector, frequency first as the inner products sum over it.
+        mu = {
+            ifo: h.T
+            for ifo, h in self.signal_psis(
+                {**theta, "phase": 0.0}, (0.0, np.pi / 4)
+            ).items()
+        }
+        d = self.whitened_strains
+        return {
+            "d_inner_h": sum(
+                inner_product_complex(d[ifo][:, None], mu[ifo]) for ifo in mu
+            ),
+            "h_inner_h": sum(
+                inner_product(mu[ifo][:, :, None], mu[ifo][:, None, :]) for ifo in mu
+            ),
+        }
+
+    def terms_22_at_psi(self, terms: dict, psis: np.ndarray) -> dict:
+        """
+        Combine the output of `phase_psi_terms_22` into that of `phase_grid_terms_22`
+        at the given polarization angles, ready for `log_likelihood_22_from_terms`:
+        with weights w = (cos 2 psi, sin 2 psi), (d, h(psi)) = w . d_inner_h and
+        (h(psi), h(psi)) = w . h_inner_h . w.
+
+        Parameters
+        ----------
+        terms: dict
+            As returned by `phase_psi_terms_22`, optionally stacked along a leading
+            sample axis N.
+        psis: np.ndarray
+            (H,) angles, shared by all samples, or (N, H) angles per sample.
+
+        Returns
+        -------
+        dict
+            d_inner_h, h_inner_h of shape (H,), or (N, H) with a sample axis.
+        """
+        psis = np.asarray(psis)
+        w = np.stack([np.cos(2 * psis), np.sin(2 * psis)], axis=-1)
+        return {
+            "d_inner_h": np.einsum("...b,...hb->...h", terms["d_inner_h"], w),
+            "h_inner_h": np.einsum("...bc,...hb,...hc->...h", terms["h_inner_h"], w, w),
+        }
+
     def phase_grid_terms(self, theta: dict) -> dict:
         """
         Compute, from one waveform evaluation at phase = 0, the inner products from
@@ -409,24 +548,21 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
             rho2opt_crossterms: (2, 2, P) complex, the sum over m < n with
                 n - m = delta of (mu^b_m, mu^c_n) + (mu^c_m, mu^b_n).
         """
-        # TODO: Implement for time marginalization
-        if self.return_aux_snr:
-            raise NotImplementedError
-        if self.phase_marginalization:
-            raise ValueError(
-                "Can't compute likelihood on a phase grid for "
-                "phase-marginalized posteriors"
-            )
-        if self.time_marginalization:
-            raise NotImplementedError(
-                "log_likelihood on phase grid not yet implemented."
-            )
-
+        self._check_phase_grid_supported()
         if self.waveform_generator.spin_conversion_phase != 0:
+            # For a model whose phase shift is a global factor there is no reason to
+            # fix the convention: say so, since this is the recommended BNS setup.
+            hint = (
+                f" For {self.waveform_generator.approximant_str} the (2, 2) path "
+                f"(approximation_22_mode=True) is exact in this convention, at one "
+                f"waveform evaluation per sample instead of 2 ell_max + 1."
+                if self.waveform_generator.phase_is_global_factor
+                else ""
+            )
             raise ValueError(
                 f"The log likelihood on a phase grid assumes "
                 f"WaveformGenerator.spin_conversion_phase = 0, "
-                f"got {self.waveform_generator.spin_conversion_phase}."
+                f"got {self.waveform_generator.spin_conversion_phase}.{hint}"
             )
 
         d = self.whitened_strains
@@ -737,29 +873,6 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         likelihoods = self.log_Zn + kappa2 - 1 / 2.0 * rho2opt
         # Return the average over calibration envelopes
         return logsumexp(likelihoods) - np.log(len(likelihoods))
-
-    def d_inner_h_complex_multi(
-        self, theta: pd.DataFrame, num_processes: int = 1
-    ) -> np.ndarray:
-        """
-        Calculate the complex inner product (d | h(theta)) between the stored data d
-        and a simulated waveform with given parameters theta. Works with multiprocessing.
-
-        Parameters
-        ----------
-        theta : pd.DataFrame
-            Parameters at which to evaluate h.
-        num_processes : int
-            Number of parallel processes to use.
-
-        Returns
-        -------
-        np.ndarray
-            Complex inner products, one per row of theta.
-        """
-        return apply_func_with_multiprocessing(
-            self.d_inner_h_complex, theta, num_processes
-        )
 
     def d_inner_h_complex(self, theta):
         """

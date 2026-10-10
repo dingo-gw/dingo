@@ -38,7 +38,7 @@ _BNS_METADATA = {
             "extrinsic_prior": {"ra": "default", "dec": "default"},
             "inference_parameters": ["delta_chirp_mass", "mass_ratio"],
             "context_parameters": ["ra", "dec", "chirp_mass_proxy"],
-            "gnpe_chirp": {
+            "chirp_prior_conditioning": {
                 "kernel": {
                     "chirp_mass": (
                         "bilby.core.prior.Uniform(minimum=-0.005, maximum=0.005)"
@@ -98,6 +98,32 @@ def test_prepared_data_requires_conditioning():
     assert ctx.prior is not None
     with pytest.raises(ValueError, match="chirp_mass_proxy"):
         ctx.prepared_data()
+
+
+def test_former_gnpe_chirp_setting_is_read():
+    # Networks trained before the rename store the setting as gnpe_chirp; ignoring it
+    # would prepare the data without the heterodyne.
+    import copy
+
+    metadata = copy.deepcopy(_BNS_METADATA)
+    data_settings = metadata["train_settings"]["data"]
+    data_settings["gnpe_chirp"] = data_settings.pop("chirp_prior_conditioning")
+    ctx = GWSamplerContext.from_model_metadata(metadata, _event_data())
+    assert ctx.data_prep_conditioning == ["chirp_mass_proxy"]
+    assert isinstance(ctx._data_prep.transforms[0], HeterodynePhase)
+
+
+def test_chirp_prior_conditioning_settings_errors():
+    from dingo.gw.transforms import chirp_prior_conditioning_settings
+
+    block = {"kernel": {"chirp_mass": "bilby.core.prior.Uniform(-0.005, 0.005)"}}
+    assert chirp_prior_conditioning_settings({}) is None
+    with pytest.raises(ValueError, match="former name"):
+        chirp_prior_conditioning_settings(
+            {"chirp_prior_conditioning": block, "gnpe_chirp": block}
+        )
+    with pytest.raises(ValueError, match="empty"):
+        chirp_prior_conditioning_settings({"chirp_prior_conditioning": None})
 
 
 def _conditioning(value=1.1975, n=4):
@@ -252,7 +278,7 @@ def test_chirp_mass_scan_validates_model_and_pins():
 
     # A model without chirp-mass conditioning cannot be scanned.
     metadata_no_chirp = copy.deepcopy(_BNS_METADATA)
-    del metadata_no_chirp["train_settings"]["data"]["gnpe_chirp"]
+    del metadata_no_chirp["train_settings"]["data"]["chirp_prior_conditioning"]
     metadata_no_chirp["train_settings"]["data"]["context_parameters"] = ["ra", "dec"]
 
     class _StubNonChirpModel:

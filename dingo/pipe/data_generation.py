@@ -141,6 +141,9 @@ class DataGenerationInput(BilbyDataGenerationInput):
         self.numerical_relativity_file = args.numerical_relativity_file
         self.dingo_injection = args.dingo_injection
         self.injection_waveform_approximant = args.injection_waveform_approximant
+        injection_dict = args.injection_dict or {}
+        if isinstance(injection_dict, str):
+            injection_dict = convert_string_to_dict(injection_dict)
         if args.injection_waveform_approximant in [
             "SEOBNRv5PHM",
             "SEOBNRv5EHM",
@@ -148,6 +151,9 @@ class DataGenerationInput(BilbyDataGenerationInput):
         ]:
             self.injection_frequency_domain_source_model = "gwsignal_binary_black_hole"
             self.frequency_domain_source_model = "gwsignal_binary_black_hole"
+        elif "lambda_1" in injection_dict or "lambda_2" in injection_dict:
+            self.injection_frequency_domain_source_model = "lal_binary_neutron_star"
+            self.frequency_domain_source_model = "lal_binary_neutron_star"
         else:
             self.injection_frequency_domain_source_model = "lal_binary_black_hole"
             self.frequency_domain_source_model = "lal_binary_black_hole"
