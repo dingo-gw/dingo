@@ -27,6 +27,7 @@ from dingo.gw.waveform_generator.waveform_generator import DEFAULT_ELL_MAX
 from dingo.gw.gwutils import get_mismatch
 from dingo.gw.domains import build_domain
 from dingo.gw.prior import build_prior_with_defaults
+from packaging.version import Version
 
 
 @pytest.fixture
@@ -272,6 +273,9 @@ def test_generate_hplus_hcross_m(intrinsic_prior, wfg, num_evaluations, toleranc
 dft_approximant_list = [
     a for a in approximant_list if a in ("IMRPhenomXPHM", "SEOBNRv5PHM")
 ]
+# Models with no individual-mode route, so only the DFT tests that do not compare
+# against it apply.
+dft_only_approximant_list = dft_approximant_list + ["IMRPhenomXPNR"]
 
 DFT_PARAMETERS = [
     {
@@ -314,8 +318,8 @@ def dft_wfg_pair(uniform_fd_domain, approximant):
         # ell_max comes from the model, which reports max_ell_returned.
         wfg_class, mode_list = NewInterfaceWaveformGenerator, None
     else:
-        # XPHM's default mode content. The LAL path has no model to ask, so
-        # mode_list is what sizes the phase grid.
+        # XPHM's (and XPNR's) default mode content. The LAL path has no model to
+        # ask, so mode_list is what sizes the phase grid.
         wfg_class, mode_list = WaveformGenerator, [
             (2, 2),
             (2, 1),
@@ -366,8 +370,8 @@ def dft_vs_standard_tolerance(approximant):
     return 1e-4 if approximant == "IMRPhenomXPHM" else 1e-5
 
 
-@pytest.mark.parametrize("approximant", dft_approximant_list)
-def test_dft_reconstructs_phase_shift(dft_wfg_pair, uniform_fd_domain):
+@pytest.mark.parametrize("approximant", dft_only_approximant_list)
+def test_dft_reconstructs_phase_shift(dft_wfg_pair, uniform_fd_domain, approximant):
     """The DFT m-components reproduce a phase-shifted waveform.
 
     This is the invariant the DFT inversion has to satisfy, and it pins down the
@@ -383,9 +387,17 @@ def test_dft_reconstructs_phase_shift(dft_wfg_pair, uniform_fd_domain):
     of the direct route in double precision (see
     test_time_shift_in_double_precision); in single precision the two differed by
     a mismatch of 3e-12 and an amplitude of 3e-9.
+
+    IMRPhenomXPNR agrees to round-off as well (3e-16 and 5e-15), once lalsimulation
+    has the fix of its antisymmetric contribution (in releases after 6.2.1). Before
+    it, that contribution's phase dependence is not exactly that of m-components,
+    and the amplitude agrees only to 2.5e-8 here.
     """
     wfg_dft, _ = dft_wfg_pair
     min_idx = uniform_fd_domain.min_idx
+    tolerance = 1e-12
+    if approximant == "IMRPhenomXPNR" and Version(LS.__version__) <= Version("6.2.1"):
+        tolerance = 1e-6
 
     for p in DFT_PARAMETERS:
         pol_m = wfg_dft.generate_hplus_hcross_m(p)
@@ -401,13 +413,13 @@ def test_dft_reconstructs_phase_shift(dft_wfg_pair, uniform_fd_domain):
                     uniform_fd_domain,
                     asd_file="aLIGO_ZERO_DET_high_P_asd.txt",
                 )
-                assert mismatch < 1e-12, f"{name}, phase_shift={phase_shift}"
+                assert mismatch < tolerance, f"{name}, phase_shift={phase_shift}"
 
                 amplitude_ratio = np.linalg.norm(pol[name][min_idx:]) / np.linalg.norm(
                     pol_ref[name][min_idx:]
                 )
                 assert (
-                    abs(amplitude_ratio - 1) < 1e-12
+                    abs(amplitude_ratio - 1) < tolerance
                 ), f"{name}, phase_shift={phase_shift}, ratio={amplitude_ratio}"
 
 
@@ -474,7 +486,7 @@ def test_time_shift_in_double_precision(dft_wfg_pair, monkeypatch):
             )
 
 
-@pytest.mark.parametrize("approximant", dft_approximant_list)
+@pytest.mark.parametrize("approximant", dft_only_approximant_list)
 def test_dft_phase_grid_ignores_transform(dft_wfg_pair):
     """self.transform must stay out of the DFT phase grid.
 
@@ -493,7 +505,8 @@ def test_dft_phase_grid_ignores_transform(dft_wfg_pair):
             np.testing.assert_array_equal(pol_m_with_transform[m][name], expected)
 
 
-def test_default_ell_max_matches_mode_content(uniform_fd_domain):
+@pytest.mark.parametrize("approximant", ["IMRPhenomXPHM", "IMRPhenomXPNR"])
+def test_default_ell_max_matches_mode_content(uniform_fd_domain, approximant):
     """DEFAULT_ELL_MAX must match what the approximant actually returns.
 
     Users normally do not pass mode_list -- the settings stored with a trained
@@ -503,14 +516,42 @@ def test_default_ell_max_matches_mode_content(uniform_fd_domain):
     instead, by the max_ell_returned check in _generate_multi_phase_fd_pols.
     """
     wfg = WaveformGenerator(
-        approximant="IMRPhenomXPHM",
+        approximant=approximant,
         domain=uniform_fd_domain,
         f_ref=10.0,
         f_start=10.0,
         spin_conversion_phase=0.0,
     )
-    hlm_fd, _ = wfg.generate_FD_modes_LO(DFT_PARAMETERS[0])
-    assert max(ell for ell, _ in hlm_fd) == DEFAULT_ELL_MAX["IMRPhenomXPHM"]
+    hlm_fd = LS.SimInspiralChooseFDModes(
+        *wfg._convert_parameters(
+            {**DFT_PARAMETERS[0], "f_ref": wfg.f_ref},
+            target_function="SimInspiralChooseFDModes",
+        )
+    )
+    ells = []
+    while hlm_fd is not None:
+        ells.append(hlm_fd.l)
+        hlm_fd = hlm_fd.next
+    assert max(ells) == DEFAULT_ELL_MAX[approximant]
+
+
+def test_xpnr_has_no_individual_mode_route(uniform_fd_domain):
+    """IMRPhenomXPNR is decomposed through the DFT only. Built from LAL's modes the
+    way IMRPhenomXPHM's are, its m-components would miss the model's polarizations
+    by a mismatch of ~1e-3 (6e-3 to 2e-2 before lalsimulation's fix of the
+    antisymmetric contribution), against ~1e-6 for XPHM, so the individual-mode
+    route refuses it rather than return them."""
+    kwargs = dict(
+        approximant="IMRPhenomXPNR",
+        domain=uniform_fd_domain,
+        f_ref=10.0,
+        f_start=10.0,
+        spin_conversion_phase=0.0,
+    )
+    assert WaveformGenerator(**kwargs).uses_dft_phase_decomposition
+    wfg = WaveformGenerator(**kwargs, use_dft_phase_decomposition=False)
+    with pytest.raises(NotImplementedError):
+        wfg.generate_hplus_hcross_m(DFT_PARAMETERS[0])
 
 
 def test_unknown_approximant_is_an_error_not_a_guess(uniform_fd_domain):
