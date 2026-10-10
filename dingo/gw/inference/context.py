@@ -6,6 +6,8 @@ from __future__ import annotations
 
 import copy
 from typing import Optional, Union
+import warnings
+
 import numpy as np
 import torch
 from bilby.core.prior import PriorDict, Uniform
@@ -30,6 +32,7 @@ from dingo.gw.likelihood import StationaryGaussianGWLikelihood
 from dingo.gw.prior import build_prior_with_defaults
 from dingo.gw.transforms import (
     DecimateWaveformsAndASDS,
+    chirp_prior_conditioning_settings,
     HeterodynePhase,
     MaskDataForFrequencyRangeUpdate,
     MaskTokensForFrequencyRangeUpdate,
@@ -130,10 +133,11 @@ class GWSamplerContext:
             The one-time data-preprocessing transform chain (whiten / decimate /
             repackage).
         event_data : dict
-            The raw event data `d` (strain + ASDs per detector), i.e. `EventDataset.data`.
-            Consumed lazily by `prepared_data()` and reused for the likelihood. An
-            injection dict (`Injection.injection()`) may also carry its truths under
-            `"parameters"`; these are moved to `event_metadata["injection_parameters"]`.
+            The raw event data `d`: `"waveform"` and `"asds"`, each keyed by detector,
+            i.e. `EventDataset.data`; any other part is dropped. Consumed lazily by
+            `prepared_data()` and reused for the likelihood. An injection dict
+            (`Injection.injection()`) may also carry its truths under `"parameters"`;
+            these are moved to `event_metadata["injection_parameters"]`.
         event_metadata : dict, optional
             Per-event metadata: the grid the event data are on, the analyzed
             detectors, the per-detector frequency range and PSD notches, the RA
@@ -162,6 +166,18 @@ class GWSamplerContext:
             truths = event_data.pop("parameters")
             event_metadata = {**(event_metadata or {})}
             event_metadata.setdefault("injection_parameters", truths)
+        # Every remaining part is indexed by detector downstream (broadcasting, the
+        # likelihood's restriction to the analyzed detectors). Anything else is not
+        # data and is dropped: results saved from an injection dict by older code (up
+        # to v0.10.0) carry the training layout's emptied "extrinsic_parameters".
+        if event_data is not None:
+            unknown = set(event_data) - {"waveform", "asds"}
+            if unknown:
+                warnings.warn(
+                    "Event data carry parts other than 'waveform' and 'asds': "
+                    f"{sorted(unknown)}. They are not per-detector data; dropping them."
+                )
+                event_data = {k: v for k, v in event_data.items() if k not in unknown}
         self.domain = domain
         self._data_prep = data_prep
         self.model_metadata = model_metadata
@@ -224,22 +240,24 @@ class GWSamplerContext:
         detectors = _event_detectors(data_settings, event_metadata)
 
         transforms = []
-        # Chirp-mass GNPE (BNS): heterodyne the raw strain -- before decimation
-        # (they do not commute) and on the base domain. The transform draws the
-        # chirp mass from the sample's "parameters", which `prepared_data`
-        # injects from the chain's conditioning: the proxy value has a single
-        # owner (the chain's DeltaFactor), and the preparation is a function of
-        # it. Iterated chirp GNPE (heterodyning inside a Gibbs loop) is not
-        # implemented: it would require carrying the undecimated strain per
-        # sample.
-        gnpe_chirp = data_settings.get("gnpe_chirp")
+        # Prior conditioning on the chirp mass (BNS): heterodyne the raw strain --
+        # before decimation (they do not commute) and on the base domain. The
+        # transform draws the chirp mass from the sample's "parameters", which
+        # `prepared_data` injects from the chain's conditioning: the proxy value has
+        # a single owner (the chain's DeltaFactor), and the preparation is a
+        # function of it. Iterated GNPE on the chirp proxy (heterodyning inside a
+        # Gibbs loop) is not implemented: it would require carrying the undecimated
+        # strain per sample.
+        chirp_prior_conditioning = chirp_prior_conditioning_settings(data_settings)
         data_prep_conditioning = []
-        if gnpe_chirp is not None:
-            data_prep_conditioning = [k + "_proxy" for k in gnpe_chirp["kernel"]]
+        if chirp_prior_conditioning is not None:
+            data_prep_conditioning = [
+                k + "_proxy" for k in chirp_prior_conditioning["kernel"]
+            ]
             transforms.append(
                 HeterodynePhase(
                     domain=getattr(domain, "base_domain", domain),
-                    order=gnpe_chirp.get("order", 0),
+                    order=chirp_prior_conditioning.get("order", 0),
                 )
             )
         # Decimate from the base domain when using a multibanded frequency domain.

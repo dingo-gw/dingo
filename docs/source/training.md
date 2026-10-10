@@ -35,6 +35,10 @@ data:
   gnpe_time_shifts:
     kernel: bilby.core.prior.Uniform(minimum=-0.001, maximum=0.001)
     exact_equiv: True
+# chirp_prior_conditioning:  # Prior conditioning on the chirp mass (DINGO-BNS); see the BNS page.
+#   kernel:
+#     chirp_mass: bilby.core.prior.Uniform(minimum=-0.005, maximum=0.005)
+# context_parameters: [ra, dec]  # Further conditioning parameters, pinned per event at inference.
   inference_parameters: default
 
 model:

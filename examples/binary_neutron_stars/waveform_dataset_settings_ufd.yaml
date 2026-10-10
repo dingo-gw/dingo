@@ -1,0 +1,50 @@
+# DINGO-BNS waveform dataset on the uniform base domain (see the BNS example in the
+# docs). Convert to a multibanded domain with
+#
+#   dingo_generate_multibanded_domain --settings_file waveform_dataset_settings_ufd.yaml \
+#       --target_median_mismatch 1e-5 --chirp_mass_proxy_offset 0.005 --num_processes N
+#
+# The offset must equal the half-width of the chirp_prior_conditioning kernel in
+# train_settings.yaml.
+domain:
+  type: UniformFrequencyDomain
+  f_min: 20.0
+  f_max: 2048.0
+  delta_f: 0.0078125  # 1/128 s segments
+
+waveform_generator:
+  approximant: IMRPhenomXP_NRTidalv3
+  f_ref: 100.0
+  spin_conversion_phase: null  # Bilby's convention: makes the (2, 2) synthetic phase exact.
+
+intrinsic_prior:
+  mass_1: bilby.core.prior.Constraint(minimum=1.0, maximum=3.2)
+  mass_2: bilby.core.prior.Constraint(minimum=1.0, maximum=2.0)
+  chirp_mass: bilby.gw.prior.UniformInComponentsChirpMass(minimum=1.0, maximum=2.2)
+  mass_ratio: bilby.gw.prior.UniformInComponentsMassRatio(minimum=0.05, maximum=1.0)
+  a_1: bilby.core.prior.Uniform(minimum=0.0, maximum=0.05)  # low-spin prior
+  a_2: bilby.core.prior.Uniform(minimum=0.0, maximum=0.05)
+  tilt_1: default
+  tilt_2: default
+  phi_12: default
+  phi_jl: default
+  theta_jn: default
+  phase: default
+  lambda_1: default  # Uniform(0, 5000)
+  lambda_2: bilby.core.prior.Uniform(minimum=0.0, maximum=10000.0)
+  # Reference values for fixed (extrinsic) parameters, needed to generate a waveform.
+  luminosity_distance: 100.0  # Mpc
+  geocent_time: 0.0  # s
+
+num_samples: 30_000_000
+
+compression:
+  whitening: aLIGO_ZERO_DET_high_P_asd.txt
+  # For storage only: undone on decompression; training re-heterodynes at the proxy
+  # (chirp_prior_conditioning).
+  phase_heterodyning:
+    order: 0
+  svd:
+    size: 200
+    num_training_samples: 50000
+    num_validation_samples: 10000

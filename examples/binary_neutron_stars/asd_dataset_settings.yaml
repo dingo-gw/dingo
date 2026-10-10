@@ -1,0 +1,16 @@
+# Noise ASDs for a DINGO-BNS network: 128 s segments, matching delta_f = 1/128 of the
+# waveform dataset.
+dataset_settings:
+  f_s: 4096
+  time_psd: 4096
+  T: 128.0
+  window:
+    roll_off: 0.4
+    type: tukey
+  time_gap: 0
+  num_psds_max: 0
+  detectors:
+    - H1
+    - L1
+    - V1
+  observing_run: O2

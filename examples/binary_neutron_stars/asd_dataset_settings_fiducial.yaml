@@ -1,0 +1,16 @@
+# Fiducial noise ASDs (a single ASD per detector) for pretraining a DINGO-BNS network;
+# identical to asd_dataset_settings.yaml except for num_psds_max.
+dataset_settings:
+  f_s: 4096
+  time_psd: 4096
+  T: 128.0
+  window:
+    roll_off: 0.4
+    type: tukey
+  time_gap: 0
+  num_psds_max: 1
+  detectors:
+    - H1
+    - L1
+    - V1
+  observing_run: O2

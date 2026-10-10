@@ -540,6 +540,27 @@ def test_dft_phase_decomposition_is_the_default(uniform_fd_domain):
     assert wfg.use_dft_phase_decomposition is True
 
 
+def test_mode_decomposition_requires_a_fixed_spin_convention(uniform_fd_domain):
+    """The m-components describe phase shifts at fixed spins. With
+    spin_conversion_phase=None a phase shift also rotates the in-plane spins, so
+    neither the DFT nor the individual-mode path gives the model's phase dependence
+    (measured: shifting the individual-mode components disagrees with the model by a
+    mismatch of 9e-3 for IMRPhenomXPHM). Both generators must refuse rather than
+    return components that look right and are not."""
+    kwargs = dict(
+        approximant="IMRPhenomXPHM",
+        domain=uniform_fd_domain,
+        f_ref=10.0,
+        f_start=10.0,
+        spin_conversion_phase=None,
+    )
+    for use_dft in (True, False):
+        wfg = WaveformGenerator(**kwargs, use_dft_phase_decomposition=use_dft)
+        assert not wfg.uses_dft_phase_decomposition
+        with pytest.raises(ValueError, match="fixed spins"):
+            wfg.generate_hplus_hcross_m(DFT_PARAMETERS[0])
+
+
 def test_dft_falls_back_without_ell_max(uniform_fd_domain, monkeypatch):
     """With the flag on (default) but no way to size the phase grid --
     no mode_list and no DEFAULT_ELL_MAX entry -- generate_hplus_hcross_m must
