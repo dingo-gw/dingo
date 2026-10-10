@@ -3,9 +3,10 @@
 Everything the training pipeline does before the first gradient step, on a fabricated
 dataset: set_train_transforms with a full tokenization block, model autocompletion
 from a sample, model construction, and one loss/backward pass, for both the
-normalizing-flow and the flow-matching posterior model. The detector list is
-deliberately not in H1, L1, V1 order so that list-position indexing is exercised.
-Tokenization combined with GNPE must be refused up front.
+normalizing-flow and the flow-matching posterior model, with and without a context
+parameter. The detector list is deliberately not in H1, L1, V1 order so that
+list-position indexing is exercised. Tokenization combined with GNPE must be refused
+up front.
 """
 
 import copy
@@ -148,8 +149,11 @@ def _toy_asd_file(path):
     return str(path)
 
 
+@pytest.mark.parametrize("with_context", [False, True])
 @pytest.mark.parametrize("posterior_model_type", ["normalizing_flow", "flow_matching"])
-def test_transformer_training_path_builder_to_loss(tmp_path, posterior_model_type):
+def test_transformer_training_path_builder_to_loss(
+    tmp_path, posterior_model_type, with_context
+):
     np.random.seed(0)
     torch.manual_seed(0)
     wfd = _toy_waveform_dataset()
@@ -157,8 +161,15 @@ def test_transformer_training_path_builder_to_loss(tmp_path, posterior_model_typ
     model_settings["posterior_model_type"] = posterior_model_type
     if posterior_model_type == "flow_matching":
         model_settings["posterior_kwargs"] = dict(FMPE_POSTERIOR_KWARGS)
+    data_settings = copy.deepcopy(DATA_SETTINGS)
+    if with_context:
+        # Condition on the (sampled) luminosity distance.
+        data_settings["extrinsic_prior"][
+            "luminosity_distance"
+        ] = "bilby.core.prior.Uniform(minimum=100.0, maximum=1000.0)"
+        data_settings["context_parameters"] = ["luminosity_distance"]
     train_settings = {
-        "data": {"waveform_dataset_path": None, **DATA_SETTINGS},
+        "data": {"waveform_dataset_path": None, **data_settings},
         "model": model_settings,
         "training": {
             "stage_0": {"asd_dataset_path": _toy_asd_file(tmp_path / "asds.hdf5")}
@@ -170,7 +181,8 @@ def test_transformer_training_path_builder_to_loss(tmp_path, posterior_model_typ
         train_settings["training"]["stage_0"]["asd_dataset_path"],
     )
 
-    theta, waveform, position, token_mask = wfd[0]
+    theta, waveform, position, token_mask, *context = wfd[0]
+    assert [c.shape for c in context] == ([(1,)] if with_context else [])
     num_tokens_per_detector = wfd.domain.frequency_mask_length // TOKEN_SIZE + 1
     assert waveform.shape == (len(DETECTORS) * num_tokens_per_detector, 3 * TOKEN_SIZE)
     assert position.shape == (len(DETECTORS) * num_tokens_per_detector, 3)
@@ -181,6 +193,10 @@ def test_transformer_training_path_builder_to_loss(tmp_path, posterior_model_typ
     assert np.array_equal(position[:, 2], expected)
 
     autocomplete_model_kwargs(train_settings["model"], wfd[0])
+    assert train_settings["model"].get("num_context_parameters", 0) == len(context)
+    assert train_settings["model"]["posterior_kwargs"]["context_dim"] == 16 + len(
+        context
+    )
     tokenizer_kwargs = train_settings["model"]["embedding_kwargs"]["tokenizer_kwargs"]
     assert tokenizer_kwargs["position_category_sizes"] == [len(DETECTORS)]
     assert tokenizer_kwargs["position_continuous_dim"] == 2
@@ -207,6 +223,13 @@ def test_transformer_training_path_builder_to_loss(tmp_path, posterior_model_typ
     assert samples.shape == (1, 3, len(DATA_SETTINGS["inference_parameters"]))
     assert log_prob.shape == (1, 3)
     assert torch.isfinite(log_prob).all()
+
+    if with_context:
+        # The context parameter reaches the flow: shifting it changes the density.
+        with torch.no_grad():
+            log_prob = pm.log_prob(data[0], *data[1:])
+            shifted = pm.log_prob(data[0], *data[1:-1], data[-1] + 1.0)
+        assert not torch.allclose(log_prob, shifted)
 
 
 def test_normalize_position_runs_after_masking(tmp_path):

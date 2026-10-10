@@ -43,6 +43,7 @@ from dingo.core.nn.compile_utils import eager_mode
 from dingo.core.utils.backward_compatibility import (
     update_data_config,
     update_model_config,
+    update_model_state_dict,
 )
 from dingo.core.utils.misc import get_version
 from dingo.core.utils.torchutils import get_ddp_module, unwrap_network
@@ -379,7 +380,7 @@ class BasePosteriorModel(ABC):
 
         if device != "meta":
             self.initialize_network()
-            self.network.load_state_dict(d["model_state_dict"])
+            self.network.load_state_dict(update_model_state_dict(d["model_state_dict"]))
 
             self.network_to_device(device)
 

@@ -156,46 +156,6 @@ class LinearProjectionRB(nn.Module):
         return x
 
 
-class ModuleMerger(nn.Module):
-    """
-    This is a wrapper used to process multiple different kinds of context
-    information collected in x = (x_0, x_1, ...). For each kind of context
-    information x_i, an individual embedding network is provided in
-    enets = (enet_0, enet_1, ...). The embedded output of the forward method
-    is the concatenation of the individual embeddings enet_i(x_i).
-
-    In the GW use case, this wrapper can be used to embed the
-    high-dimensional signal input into a lower dimensional feature vector
-    with a large embedding network, while applying an identity embedding to
-    the time shifts.
-
-    Module specs
-    --------
-        input dimension:    (batch_size, ...), (batch_size, ...), ...
-        output dimension:   (batch_size, ?)
-    """
-
-    def __init__(
-        self,
-        module_list: Tuple,
-    ):
-        """
-        Parameters
-        ----------
-        module_list : tuple
-            nn.Modules for embedding networks,
-            use torch.nn.Identity for identity mappings
-        """
-        super(ModuleMerger, self).__init__()
-        self.enets = nn.ModuleList(module_list)
-
-    def forward(self, *x):
-        if len(x) != len(self.enets):
-            raise ValueError("Invalid number of input tensors provided.")
-        x = [module(xi) for module, xi in zip(self.enets, x)]
-        return torch.cat(x, axis=1)
-
-
 def create_enet_with_projection_layer_and_dense_resnet(
     input_dims: List[int],
     # n_rb: int,
@@ -206,7 +166,6 @@ def create_enet_with_projection_layer_and_dense_resnet(
     activation: str = "elu",
     dropout: float = 0.0,
     norm: Optional[str] = "BatchNorm",
-    added_context: bool = False,
 ):
     """
     Builder function for 2-stage embedding network for 1D data with multiple
@@ -221,23 +180,10 @@ def create_enet_with_projection_layer_and_dense_resnet(
     may be contained in channels with indices => 2. In GW use case a block
     corresponds to a detector and channel 2 is used for ASD information.
 
-    If added_context = True, the 2-stage embedding network described above is
-    merged with an identity mapping via ModuleMerger. Then, the expected input
-    is not x with x.shape = (batch_size, num_blocks, num_channels, num_bins),
-    but rather the tuple *(x, z), where z is additional context information. The
-    output of the full module is then the concatenation of enet(x) and z. In
-    GW use case, this is used to concatenate the applied time shifts z to the
-    embedded feature vector of the strain data enet(x).
-
     Module specs
     --------
-    For added_context == False:
         input dimension:    (batch_size, num_blocks, num_channels, num_bins)
         output dimension:   (batch_size, output_dim)
-    For added_context == True:
-        input dimension:    (batch_size, num_blocks, num_channels, num_bins),
-                            (batch_size, N)
-        output dimension:   (batch_size, output_dim + N)
 
     Parameters
     ----------
@@ -264,10 +210,6 @@ def create_enet_with_projection_layer_and_dense_resnet(
     :param norm: str or None
         normalization used in the residual blocks: "BatchNorm", "LayerNorm" or
         None
-    :param added_context: bool
-        if set to True, additional context z is concatenated to the embedded
-        feature vector enet(x); note that in this case, the expected input is
-        a tuple with 2 elements, input = (x, z) rather than just the tensor x.
 
     Returns
     -------
@@ -283,12 +225,7 @@ def create_enet_with_projection_layer_and_dense_resnet(
         dropout=dropout,
         norm=norm,
     )
-    enet = nn.Sequential(module_1, module_2)
-
-    if not added_context:
-        return enet
-    else:
-        return ModuleMerger((enet, nn.Identity()))
+    return nn.Sequential(module_1, module_2)
 
 
 if __name__ == "__main__":
