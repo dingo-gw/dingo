@@ -307,3 +307,40 @@ def test_tokenization_with_cropping_is_refused(tmp_path):
             data_settings,
             _toy_asd_file(tmp_path / "asds.hdf5"),
         )
+
+
+def test_distance_prior_conditioning(tmp_path):
+    """The network conditions on log_luminosity_distance_max, and luminosity_distance
+    is standardized on the conditioned training distribution (the transform redraws
+    it below the sampled bound), not on its base prior."""
+    np.random.seed(0)
+    wfd = _toy_waveform_dataset(num_samples=200)
+    data_settings = {"waveform_dataset_path": None, **copy.deepcopy(DATA_SETTINGS)}
+    data_settings["extrinsic_prior"]["luminosity_distance"] = (
+        "bilby.gw.prior.UniformComovingVolume(minimum=10.0, maximum=5000.0, "
+        "name='luminosity_distance')"
+    )
+    data_settings["inference_parameters"] = ["chirp_mass", "luminosity_distance"]
+    data_settings["distance_prior_conditioning"] = {
+        "luminosity_distance_max": "bilby.core.prior.LogUniform(minimum=50.0, "
+        "maximum=5000.0)"
+    }
+    set_train_transforms(wfd, data_settings, _toy_asd_file(tmp_path / "asds.hdf5"))
+
+    assert data_settings["context_parameters"] == ["log_luminosity_distance_max"]
+    *_, context = wfd[0]
+    assert context.shape == (1,)
+    # The base UCV mean is ~3.4 Gpc; the conditioned marginal mean is ~0.8 Gpc.
+    assert data_settings["standardization"]["mean"]["luminosity_distance"] < 2000.0
+
+    data_settings["distance_prior_conditioning"]["log_uniform_fractoin"] = 0.1
+    with pytest.raises(ValueError, match="log_uniform_fractoin"):
+        set_train_transforms(wfd, data_settings, _toy_asd_file(tmp_path / "a.hdf5"))
+    del data_settings["distance_prior_conditioning"]["log_uniform_fractoin"]
+    data_settings["gnpe_time_shifts"] = {
+        "kernel": "bilby.core.prior.Uniform(minimum=-0.001, maximum=0.001)",
+        "exact_equiv": True,
+    }
+    del data_settings["tokenization"]
+    with pytest.raises(NotImplementedError, match="gnpe_time_shifts"):
+        set_train_transforms(wfd, data_settings, _toy_asd_file(tmp_path / "b.hdf5"))

@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 import copy
+import warnings
 from pathlib import Path
-from typing import Optional
-from bilby.core.prior import DeltaFunction
+from typing import Optional, Sequence, Union
+
+import numpy as np
+import pandas as pd
+from bilby.core.prior import DeltaFunction, PriorDict
 from dingo.core.inference.composer import ChainComposer, ComposedSampler, GibbsBlock
 from dingo.core.inference.steps import (
     DeltaFactor,
@@ -211,7 +215,10 @@ class GWComposedSampler(ComposedSampler):
             Per-event metadata.
         fixed_context_parameters : dict, optional
             Pinned values for the model's `context_parameters`, e.g.
-            `{"chirp_mass_proxy": 1.1975, "ra": 3.446, "dec": -0.408}`.
+            `{"chirp_mass_proxy": 1.1975, "ra": 3.446, "dec": -0.408}`. A model
+            with distance prior conditioning takes `log_luminosity_distance_max`,
+            the logarithm of the upper bound (in Mpc) of the luminosity-distance
+            prior the network assumes.
 
         Returns
         -------
@@ -220,8 +227,9 @@ class GWComposedSampler(ComposedSampler):
         Raises
         ------
         ValueError
-            For a time-GNPE model, or when the pinned keys do not match the
-            model's `context_parameters`.
+            For a time-GNPE model, when the pinned keys do not match the
+            model's `context_parameters`, or when a pinned luminosity-distance
+            bound is outside the trained range.
         """
         context = GWSamplerContext.from_model(model, event_data, event_metadata)
         data_settings = model.base_metadata["train_settings"]["data"]
@@ -238,6 +246,26 @@ class GWComposedSampler(ComposedSampler):
                 f"fixed_context_parameters with exactly these keys, got "
                 f"{sorted(fixed_context_parameters or {})}."
             )
+        if "distance_prior_conditioning" in data_settings:
+            hyperprior = PriorDict(
+                {
+                    "luminosity_distance_max": data_settings[
+                        "distance_prior_conditioning"
+                    ]["luminosity_distance_max"]
+                }
+            )["luminosity_distance_max"]
+            log_d_max = fixed_context_parameters["log_luminosity_distance_max"]
+            # Compared in log space, so that a bound pinned at np.log(minimum) passes.
+            if (
+                not np.log(hyperprior.minimum)
+                <= log_d_max
+                <= np.log(hyperprior.maximum)
+            ):
+                raise ValueError(
+                    f"The pinned luminosity_distance_max {np.exp(log_d_max):.6g} (from "
+                    f"log_luminosity_distance_max) is outside the trained range "
+                    f"[{hyperprior.minimum}, {hyperprior.maximum}]."
+                )
         steps = single_network_steps(model, context.prior)
         if context_parameters:
             steps = [DeltaFactor(fixed_context_parameters)] + steps
@@ -347,6 +375,27 @@ class GWComposedSampler(ComposedSampler):
             + _delta_prior_steps(context.prior, inference_parameters)
         )
         return cls(ChainComposer(steps), context)
+
+    def run_sampler(
+        self, num_samples: Union[int, Sequence[int]], batch_size: Optional[int] = None
+    ) -> pd.DataFrame:
+        """Draw samples (see `ComposedSampler.run_sampler`). For a model with distance
+        prior conditioning, warn if the luminosity_distance samples pile up at the
+        pinned bound: the posterior then has mass beyond it, which importance
+        sampling cannot recover, so the bound should be raised. (A bound far above
+        the posterior is not flagged; its cost shows only in the sample efficiency.)
+        """
+        samples = super().run_sampler(num_samples, batch_size)
+        if "log_luminosity_distance_max" in samples:
+            d_max = np.exp(samples["log_luminosity_distance_max"])
+            fraction = np.mean(samples["luminosity_distance"] > 0.9 * d_max)
+            if fraction > 0.01:
+                warnings.warn(
+                    f"{100 * fraction:.1f}% of the luminosity_distance samples lie "
+                    f"within 10% of luminosity_distance_max = {d_max.iloc[0]:.6g}: "
+                    f"the posterior is likely truncated; raise the bound."
+                )
+        return samples
 
     def to_result(self):
         """Export to a gw `Result` (samples + raw event data + metadata), so the

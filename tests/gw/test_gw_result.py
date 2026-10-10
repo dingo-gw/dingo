@@ -153,6 +153,17 @@ def test_f_ref_and_approximant(gw_result):
     assert gw_result.approximant == WAVEFORM_GENERATOR["approximant"]
 
 
+def test_pesummary_samples_drop_pinned_context_columns(gw_result):
+    """Pinned proxies and the distance-prior bound are network context, not physical
+    parameters: they are not exported."""
+    gw_result.samples["chirp_mass_proxy"] = 30.0
+    gw_result.samples["log_luminosity_distance_max"] = np.log(2000.0)
+    samples = gw_result.get_pesummary_samples()
+    assert "chirp_mass_proxy" not in samples
+    assert "log_luminosity_distance_max" not in samples
+    assert "luminosity_distance" in samples
+
+
 def test_t_ref_defaults_to_ref_time(gw_result):
     assert gw_result.t_ref == REF_TIME
 
