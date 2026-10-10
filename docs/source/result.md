@@ -54,6 +54,8 @@ uniform_weight
 num_processes
 : For parallelization of synthetic phase sampling. This is usually the most expensive part of importance sampling, so it is advantageous to perform calculations in parallel.
 
+Which of the phase options to use depends on the approximant and on the spin convention the network was trained in. For a model whose co-precessing-frame content is a single $(2, \pm 2)$ pair, trained with `spin_conversion_phase: null` (Bilby's convention), a phase shift multiplies the waveform by a global $e^{2i\phi}$ factor, so `approximation_22_mode: true` is exact at a single waveform evaluation per sample, and its log likelihood is cached for importance sampling. With a fixed `spin_conversion_phase` it is approximate for precessing signals: precession mixes the inertial-frame $m$-components, placing a spurious phase peak at $\phi + \pi$. The exact mode sum (`approximation_22_mode: false`) costs $2\ell_{\max}+1$ evaluations per sample (5 for $\ell_{\max} = 2$) and needs a fixed `spin_conversion_phase`. For NRTidal models, which have no frequency-domain modes in LALSimulation, it requires the DFT phase decomposition with an explicit `mode_list: [[2, 2], [2, -2]]` in the waveform-generator settings.
+
 ## Importance sampling
 
 Once samples are in the right form---including all relevant parameters *and* the log probability---importance sampling is carried out using the `importance_sample()` method. It allows to specify options for using a marginalized likelihood. (Time and phase marginalization are separately supported; see the documentation of {py:class}`dingo.gw.likelihood.StationaryGaussianGWLikelihood`.)

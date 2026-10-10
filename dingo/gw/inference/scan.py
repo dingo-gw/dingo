@@ -24,6 +24,7 @@ from dingo.core.inference.composer import ChainComposer
 from dingo.core.inference.steps import SampleTableFactor
 from dingo.gw.inference.context import GWSamplerContext
 from dingo.gw.inference.sampler import single_network_steps
+from dingo.gw.transforms import chirp_prior_conditioning_settings
 
 
 def chirp_mass_scan_grid(model_metadata: dict, overlap_factor: int = 2) -> np.ndarray:
@@ -46,9 +47,10 @@ def chirp_mass_scan_grid(model_metadata: dict, overlap_factor: int = 2) -> np.nd
     prior = BBHPriorDict(dict(model_metadata["dataset_settings"]["intrinsic_prior"]))[
         "chirp_mass"
     ]
-    kernel = BBHPriorDict(
-        dict(model_metadata["train_settings"]["data"]["gnpe_chirp"]["kernel"])
-    )["chirp_mass"]
+    chirp_settings = chirp_prior_conditioning_settings(
+        model_metadata["train_settings"]["data"]
+    )
+    kernel = BBHPriorDict(dict(chirp_settings["kernel"]))["chirp_mass"]
     num_points = math.ceil(
         (prior.maximum - prior.minimum)
         / (kernel.maximum - kernel.minimum)
@@ -80,7 +82,7 @@ def chirp_mass_scan(
     Parameters
     ----------
     model : BasePosteriorModel
-        A chirp-mass-conditioned model (trained with `gnpe_chirp`).
+        A chirp-mass-conditioned model (trained with `chirp_prior_conditioning`).
     event_data : dict
         The raw event data (strain + ASDs).
     event_metadata : dict, optional
@@ -112,11 +114,11 @@ def chirp_mass_scan(
     context_parameters = data_settings.get("context_parameters") or []
     if (
         "chirp_mass_proxy" not in context_parameters
-        or "gnpe_chirp" not in data_settings
+        or chirp_prior_conditioning_settings(data_settings) is None
     ):
         raise ValueError(
             "The chirp-mass scan requires a model conditioned on chirp_mass_proxy "
-            "(trained with gnpe_chirp)."
+            "(trained with chirp_prior_conditioning)."
         )
     pins = dict(fixed_context_parameters or {})
     pins.pop("chirp_mass_proxy", None)

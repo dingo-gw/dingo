@@ -7,19 +7,9 @@ binary black holes, and their chirp mass is measured so precisely that a network
 covering the full training prior would spend nearly all of its capacity on parameter
 values excluded by any individual event. DINGO-BNS addresses both with a single
 device: a chirp-mass proxy that simplifies the data (phase heterodyning) and narrows
-the effective prior (prior conditioning). The proxy is fixed per event, so sampling is
-single-step GNPE: one pass through the network, with the density preserved and
-importance sampling available directly.
-
-```{note}
-This page describes inference with a trained chirp-mass-conditioned network.
-Training such a network is not yet supported; the training configuration will be
-documented when it is, and no pre-trained BNS network is distributed yet. Also not
-yet available: the accelerated heterodyned and decimated likelihood of
-{footcite:p}`Dax:2024mcn` (importance sampling uses the exact likelihood), the
-synthetic-phase `compute_likelihood` fast path, and per-event time scans for
-pre-merger networks.
-```
+the effective prior (prior conditioning). The proxy is set per event, so sampling is
+one pass through the network, with the density preserved and importance sampling
+available directly.
 
 ## Phase heterodyning
 
@@ -37,12 +27,17 @@ $\tilde{\mathcal{M}}$ close to the true value. The residual oscillations are slo
 and the multibanded frequency domain can then decimate the data far more
 aggressively.
 
-The reference value is the *chirp-mass proxy*. During training it is drawn by
-blurring the true chirp mass with a narrow kernel, and the network conditions on it;
-this is GNPE with the chirp mass as the proxy parameter (see [GNPE](gnpe.md)). At
-inference the proxy is fixed per event, so a single iteration suffices and the
-density is preserved. A chirp-mass-conditioned model records the kernel and the
-phase order in its metadata under `gnpe_chirp`, and the
+The reference value $\tilde{\mathcal{M}}$ is the *chirp-mass proxy*,
+`chirp_mass_proxy`. Following {footcite:p}`Dax:2024mcn`, the network is trained on a
+family of restricted chirp-mass priors centered on $\tilde{\mathcal{M}}$ and
+conditioned on $\tilde{\mathcal{M}}$ ([prior conditioning](#prior-conditioning)). In
+training, $\tilde{\mathcal{M}} = \mathcal{M} + \epsilon$ with $\epsilon$ drawn from a
+narrow kernel, so the kernel's support is the restricted prior. At inference the proxy
+is set per event, from a search trigger or the
+[chirp-mass scan](#the-chirp-mass-scan), and one network pass gives samples with their
+density. The implementation reuses the proxy machinery of [GNPE](gnpe.md), without
+its Gibbs iteration. A prior-conditioned model records the kernel and the phase order
+in its metadata under `chirp_prior_conditioning`, and the
 [sampler context](sampling_chains.md#sampler-context) reads this to prepare data
 as a function of `chirp_mass_proxy`. Heterodyning is applied to the raw strain before
 decimation (the two operations do not commute).
@@ -57,6 +52,12 @@ event, so one network amortizes over events while retaining the resolution of an
 event-specific narrow prior. The network infers the offset
 `delta_chirp_mass` $= \mathcal{M} - \tilde{\mathcal{M}}$ rather than the chirp mass
 itself; the chain reconstructs the physical value with a `ProxyOffsetReparam` step.
+
+In the notation of {footcite:p}`Dax:2024mcn`, the reference chirp mass
+$\tilde{\mathcal{M}}$ is `chirp_mass_proxy`, the prior half-width
+$\Delta\mathcal{M}$ is the half-width of the kernel, the offset
+$\delta\mathcal{M}$ is `delta_chirp_mass`, and the hyperprior over
+$\tilde{\mathcal{M}}$ is the dataset's chirp-mass prior convolved with the kernel.
 
 The chain:
 
@@ -86,13 +87,9 @@ contract of the [sampler context](sampling_chains.md#sampler-context). Since the
 chain contains no Gibbs block, the samples carry their log probability and
 importance sampling proceeds without a density-recovery step.
 
-A network may condition on further context parameters, and any of them can be pinned
-in the same way. The reference configuration of {footcite:p}`Dax:2024mcn` also fixes
-the sky position: a pinned right ascension is given in the event frame and rotated
-into the network's training frame before conditioning, which inserts an
-`RAToTrainingFrame` step before the network and a trailing `RAToEventFrame` that
-restores the event-frame value in the samples. The rotation is exactly zero when the
-network's reference time equals the trigger time.
+A network may condition on further context parameters, such as the sky position,
+and any of them can be pinned in the same way; the frame handling of a pinned right
+ascension is described under [sampling chains](sampling_chains.md#steps).
 
 ## The chirp-mass scan
 
@@ -110,112 +107,33 @@ value, and the network draws per row. The scan result (trigger value, signal-to-
 ratio, maximum log likelihood, and the scan settings) is recorded in the sampler
 provenance. For a GW170817-like event the scan costs about a minute of CPU time.
 
-## Tidal parameters
+## Multibanding heterodyned data
+
+The Dingo-BNS method combines both heterodyning and multi-banding. Heterodyning factors out the dominant frequency evolution, leaving only slow residual oscillations in the waveform. Multi-banding can then be applied to aggressively coarsen sampling at higher frequencies. Note that since decimation does not commute with heterodyning, decimation nodes must be chosen after heterodyning.
+
+The multi-banding nodes can be specified manually in the waveform dataset config file, or this can be done automatically using the
+[band tool](waveform_dataset.ipynb#generating-a-multibanded-domain). The CLI tool `dingo_generate_multibanded_domain` starts from a uniform frequency domain and decimates
+test waveforms until their mismatch with the originals meets a target. When the dataset settings contain `phase_heterodyning`, the tool heterodynes the waveforms first.
+
+There is one more subtlety. The network never sees data heterodyned at the true chirp mass, only at the proxy, which can sit anywhere within the kernel width of the true value ($\pm 0.005\,M_\odot$ in the example). This matters because the residual oscillation depends not just on how far off the proxy is, but on which side it lies: the offset adds a term to the residual phase that flips sign with it, and this either adds to the post-Newtonian remainder or partially cancels it. One side of the kernel therefore leaves a faster-oscillating residual than the other, and which side is worse can vary with frequency. To make sure the bands work for both, pass `--chirp_mass_proxy_offset` set to the kernel half-width. The tool then heterodynes alternate test waveforms at the chirp mass plus and minus this offset, and enforces the mismatch target on whichever side is worse. The [example](example_bns.md) shows the full command.
+
+## Tidal approximants
 
 Tidal approximants such as `IMRPhenomXP_NRTidalv3` run through the standard LAL
-`WaveformGenerator` in both uniform and multibanded frequency domains: `lambda_1`
-and `lambda_2` are inserted into the LAL parameter dictionary whenever present.
-
-Beyond a BBH setup, a tidal run needs:
-
-- **Dataset, `waveform_generator`**: the tidal `approximant` and
-  `spin_conversion_phase: null` (Bilby's convention). For models with a single
-  co-precessing $(2, \pm 2)$ pair a phase shift is then a global $e^{2i\phi_c}$
-  factor, so the $(2, 2)$ synthetic phase (`approximation_22_mode: true`) is exact.
-  `spin_conversion_phase: 0.0` is needed only for the exact mode sum.
-- **Dataset, `intrinsic_prior`**: BNS-appropriate mass and spin ranges (the
-  `default` entries are tuned to BBH), plus `lambda_1: default` /
-  `lambda_2: default` (`Uniform(0, 5000)`) or explicit prior strings.
-- **Training**: list `inference_parameters` explicitly, including `lambda_1` and
-  `lambda_2` (the `default` list contains only the 15 BBH parameters).
-
-For the synthetic phase, `approximation_22_mode: true` is then both the cheapest
-and the exact choice: one waveform evaluation per sample, and the log likelihood
-at the drawn $\phi_c$ comes with it, so importance sampling reuses it instead of
-regenerating the waveforms. Dingo probes the waveform at the first sample before
-relying on this, and if a phase shift turns out not to be a global factor it warns
-and leaves the likelihood to importance sampling. The exact
-mode sum (`approximation_22_mode: false`) is not an option for the NRTidal
-family: LALSimulation implements no frequency-domain modes for it, and the DFT
-phase decomposition needs the fixed spin convention that we are avoiding here.
-The same holds for a network that marginalizes $\psi$ as well: with
-`approximation_22_mode: true` both angles are recovered from one waveform
-evaluation per sample, the phase drawn exactly rather than on a grid, and the log
-likelihood is cached in the same way (see [Synthetic phase](result.md#synthetic-phase)).
-
-A network trained with `spin_conversion_phase: 0.0` is the other case. There a
-phase shift leaves the in-plane spins behind, so the $(2, 2)$ path is an
-approximation (mismatch $\sim 3 \times 10^{-3}$ for IMRPhenomXP_NRTidalv3 at
-$a \sim 0.3$) and its log likelihood is not cached. The default is then the exact
-mode sum, which for the NRTidal family needs the DFT phase decomposition and
-hence a `mode_list` in the waveform generator settings; without one, Dingo raises
-and asks for `approximation_22_mode: true`. Importance sampling stays unbiased with
-the $(2, 2)$ proposal, since the synthetic phase only shapes the proposal, but the
-sample efficiency is lower.
-
-## Running through dingo_pipe
-
-Two [dingo_pipe](dingo_pipe.md) sampler options control BNS inference:
-
-fixed-context-parameters
-: Dictionary pinning the model's context parameters, e.g.
-  `{chirp_mass_proxy: 1.19786, ra: 3.44616, dec: -0.408084}`. A single-network model
-  with context parameters requires all of them pinned, unless the chirp-mass proxy is
-  supplied by the scan. Cannot be combined with `model-init` (iterative GNPE).
-
-chirp-mass-scan
-: Set to `true` to determine the trigger chirp mass from the data with defaults
-  derived from the model (grid from the training prior and kernel, 10 draws per grid
-  point). A dictionary overrides individual settings, e.g.
-  `{num_samples: 10, overlap_factor: 2, block_size: 32}`; `num_processes` defaults to
-  `request-cpus`. Mutually exclusive with a pinned `chirp_mass_proxy`; the remaining
-  context parameters are still supplied via `fixed-context-parameters`.
-
-```{code-block} ini
----
-caption: Sampler and data sections of a GW170817 configuration.
----
-################################################################################
-##  Sampler arguments
-################################################################################
-
-model = /path/to/bns_model.pt
-device = 'cuda'
-num-samples = 50000
-batch-size = 50000
-fixed-context-parameters = {chirp_mass_proxy: 1.19786, ra: 3.44616, dec: -0.408084}
-# Alternatively, determine the chirp mass from the data:
-# chirp-mass-scan = true
-# fixed-context-parameters = {ra: 3.44616, dec: -0.408084}
-
-importance-sample = true
-importance-sampling-settings = {synthetic_parameters: {approximation_22_mode: true, uniform_weight: 0.01}}
-
-################################################################################
-## Data generation arguments
-################################################################################
-
-trigger-time = 1187008882.4
-label = GW170817
-outdir = outdir_GW170817
-channel-dict = {H1:GWOSC, L1:GWOSC, V1:GWOSC}
-psd-length = 128
-```
-
-Importance sampling follows the standard [workflow](result.md). For a multibanded
-model the likelihood is evaluated on the undecimated base domain by default
-(`use_base_domain`, set automatically and adjustable in
-`importance-sampling-settings`). Phase-marginalized networks reconstruct the phase
-synthetically before reweighting. For a network trained in Bilby's spin
-convention the defaults take the exact $(2, 2)$ path; one trained with
-`spin_conversion_phase: 0.0` needs `approximation_22_mode: true`, as in the
-example above. See [Tidal parameters](#tidal-parameters).
-
-As an indication of expected performance, analyses of GW170817 on public data with a
-development network reach sample efficiencies of roughly 10% and a log Bayes factor
-relative to noise of about +500. A scan run recovers the trigger chirp mass and
-matches the evidence of the pinned run within Monte Carlo uncertainty, as expected
-from the prior-conditioning construction.
+`WaveformGenerator` in both the uniform and the multibanded frequency domain: the
+tidal deformabilities `lambda_1` and `lambda_2` are inserted into the LAL parameter
+dictionary whenever present, and they are ordinary inference parameters, listed with
+the others (see the [example](example_bns.md)). The network is phase marginalized, so
+the phase is reconstructed synthetically before importance sampling. For these models,
+train with `spin_conversion_phase: null` (Bilby's convention): a phase shift is then a
+global factor $e^{2i\phi_c}$, so the synthetic phase with `approximation_22_mode: true`
+is exact, and importance sampling reuses its log likelihood. The same holds for a
+network that also marginalizes $\psi$: both angles are then recovered from one waveform
+evaluation per sample, with the phase drawn exactly. For a network trained with
+`spin_conversion_phase: 0.0` the default is the exact mode sum, which for these models
+needs a `mode_list` in the waveform generator settings; `approximation_22_mode: true`
+gives an approximate proposal instead, and importance sampling stays unbiased, at a
+lower efficiency. See the [synthetic phase](result.md#synthetic-phase) section.
 
 ```{eval-rst}
 .. footbibliography::
