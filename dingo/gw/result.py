@@ -855,7 +855,7 @@ class Result(CoreResult):
             inplace=True,
         )
         for col in samples.columns:
-            if col.endswith("_proxy"):
+            if col.endswith("_proxy") or col == "log_luminosity_distance_max":
                 samples.drop(col, axis=1, inplace=True)
 
         # Shift times. This requires double precision. There *should* be no non-numeric

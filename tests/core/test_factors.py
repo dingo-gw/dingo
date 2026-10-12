@@ -236,6 +236,23 @@ def test_gibbs_block_runs_as_a_density_free_step():
     assert torch.equal(out["theta"], torch.arange(6, dtype=torch.float32))
 
 
+def test_gibbs_block_reads_pins_from_the_chain():
+    # A column a factor conditions on but no factor in the block produces is the
+    # block's conditioning: it runs num_samples walkers per row, and every sweep sees
+    # that row's value.
+    block = GibbsBlock(
+        init_factor=_ConstFactor("proxy"),
+        factors=[_ConstFactor("theta", conditioning=["proxy", "pin"])],
+        num_iterations=3,
+    )
+    assert block.conditioning == ["pin"]
+    table = SampleTableFactor({"pin": torch.tensor([10.0, 20.0])})
+    out = ChainComposer([table, block]).sample(3, context=None)
+    # Walkers of a row are adjacent; the seed is arange over all 6 walkers.
+    assert torch.equal(out["pin"], torch.tensor([10.0, 10, 10, 20, 20, 20]))
+    assert torch.equal(out["theta"], torch.tensor([10.0, 11, 12, 23, 24, 25]))
+
+
 def test_sample_table_root_feeds_chain_and_sums_log_prob():
     # A chain continuing from existing samples: the table root emits the rows with
     # their stored log-prob, a 1:1 factor adds a block, and the ordinary fold yields

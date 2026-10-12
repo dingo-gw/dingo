@@ -1559,7 +1559,9 @@ def create_parser(top_level=True, usage=None):
         "single-network models conditioned on context parameters (single-step "
         "GNPE, e.g. binary neutron stars): proxy entries parameterize the data "
         "preparation (chirp-mass heterodyning), and all pinned values are "
-        "recorded with the samples.",
+        "recorded with the samples. With model-init (iterative GNPE), pins the "
+        "context other than the GNPE proxies, e.g. {log_luminosity_distance_max: "
+        "8.29} for a network with distance prior conditioning.",
     )
     sampler_parser.add(
         "--chirp-mass-scan",

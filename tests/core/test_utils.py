@@ -1,3 +1,4 @@
+import copy
 from pathlib import Path
 from typing import get_args
 
@@ -82,6 +83,36 @@ def test_update_model_config_no_embedding_type_without_embedding_kwargs():
     settings = {"posterior_model_type": "normalizing_flow"}
     update_model_config(settings)
     assert "embedding_type" not in settings
+
+
+def test_update_model_config_converts_added_context():
+    """Old resnet configs with context parameters set added_context; the number of
+    context parameters is recovered from the context dim. Idempotent."""
+    settings = {
+        "posterior_model_type": "normalizing_flow",
+        "posterior_kwargs": {"context_dim": 131},
+        "embedding_kwargs": {"output_dim": 128, "added_context": True},
+    }
+    update_model_config(settings)
+    assert settings["num_context_parameters"] == 3
+    assert "added_context" not in settings["embedding_kwargs"]
+    converted = copy.deepcopy(settings)
+    update_model_config(converted)
+    assert converted == settings
+
+    # Without context parameters the flag is just dropped.
+    settings = {"embedding_kwargs": {"output_dim": 128, "added_context": False}}
+    update_model_config(settings)
+    assert settings["embedding_kwargs"] == {"output_dim": 128}
+    assert "num_context_parameters" not in settings
+
+    # Unconditional models may store embedding_kwargs=None, or none at all.
+    settings = {"embedding_kwargs": None}
+    update_model_config(settings)
+    assert settings == {"embedding_kwargs": None, "embedding_type": "resnet"}
+    settings = {"embedding_type": "resnet"}
+    update_model_config(settings)
+    assert settings == {"embedding_type": "resnet"}
 
 
 # ---------------------------------------------------------------------------

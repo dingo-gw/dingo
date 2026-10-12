@@ -3,9 +3,10 @@
 Everything the training pipeline does before the first gradient step, on a fabricated
 dataset: set_train_transforms with a full tokenization block, model autocompletion
 from a sample, model construction, and one loss/backward pass, for both the
-normalizing-flow and the flow-matching posterior model. The detector list is
-deliberately not in H1, L1, V1 order so that list-position indexing is exercised.
-Tokenization combined with GNPE must be refused up front.
+normalizing-flow and the flow-matching posterior model, with and without a context
+parameter. The detector list is deliberately not in H1, L1, V1 order so that
+list-position indexing is exercised. Tokenization combined with GNPE must be refused
+up front.
 """
 
 import copy
@@ -148,8 +149,11 @@ def _toy_asd_file(path):
     return str(path)
 
 
+@pytest.mark.parametrize("with_context", [False, True])
 @pytest.mark.parametrize("posterior_model_type", ["normalizing_flow", "flow_matching"])
-def test_transformer_training_path_builder_to_loss(tmp_path, posterior_model_type):
+def test_transformer_training_path_builder_to_loss(
+    tmp_path, posterior_model_type, with_context
+):
     np.random.seed(0)
     torch.manual_seed(0)
     wfd = _toy_waveform_dataset()
@@ -157,8 +161,15 @@ def test_transformer_training_path_builder_to_loss(tmp_path, posterior_model_typ
     model_settings["posterior_model_type"] = posterior_model_type
     if posterior_model_type == "flow_matching":
         model_settings["posterior_kwargs"] = dict(FMPE_POSTERIOR_KWARGS)
+    data_settings = copy.deepcopy(DATA_SETTINGS)
+    if with_context:
+        # Condition on the (sampled) luminosity distance.
+        data_settings["extrinsic_prior"][
+            "luminosity_distance"
+        ] = "bilby.core.prior.Uniform(minimum=100.0, maximum=1000.0)"
+        data_settings["context_parameters"] = ["luminosity_distance"]
     train_settings = {
-        "data": {"waveform_dataset_path": None, **DATA_SETTINGS},
+        "data": {"waveform_dataset_path": None, **data_settings},
         "model": model_settings,
         "training": {
             "stage_0": {"asd_dataset_path": _toy_asd_file(tmp_path / "asds.hdf5")}
@@ -170,7 +181,8 @@ def test_transformer_training_path_builder_to_loss(tmp_path, posterior_model_typ
         train_settings["training"]["stage_0"]["asd_dataset_path"],
     )
 
-    theta, waveform, position, token_mask = wfd[0]
+    theta, waveform, position, token_mask, *context = wfd[0]
+    assert [c.shape for c in context] == ([(1,)] if with_context else [])
     num_tokens_per_detector = wfd.domain.frequency_mask_length // TOKEN_SIZE + 1
     assert waveform.shape == (len(DETECTORS) * num_tokens_per_detector, 3 * TOKEN_SIZE)
     assert position.shape == (len(DETECTORS) * num_tokens_per_detector, 3)
@@ -181,6 +193,10 @@ def test_transformer_training_path_builder_to_loss(tmp_path, posterior_model_typ
     assert np.array_equal(position[:, 2], expected)
 
     autocomplete_model_kwargs(train_settings["model"], wfd[0])
+    assert train_settings["model"].get("num_context_parameters", 0) == len(context)
+    assert train_settings["model"]["posterior_kwargs"]["context_dim"] == 16 + len(
+        context
+    )
     tokenizer_kwargs = train_settings["model"]["embedding_kwargs"]["tokenizer_kwargs"]
     assert tokenizer_kwargs["position_category_sizes"] == [len(DETECTORS)]
     assert tokenizer_kwargs["position_continuous_dim"] == 2
@@ -207,6 +223,13 @@ def test_transformer_training_path_builder_to_loss(tmp_path, posterior_model_typ
     assert samples.shape == (1, 3, len(DATA_SETTINGS["inference_parameters"]))
     assert log_prob.shape == (1, 3)
     assert torch.isfinite(log_prob).all()
+
+    if with_context:
+        # The context parameter reaches the flow: shifting it changes the density.
+        with torch.no_grad():
+            log_prob = pm.log_prob(data[0], *data[1:])
+            shifted = pm.log_prob(data[0], *data[1:-1], data[-1] + 1.0)
+        assert not torch.allclose(log_prob, shifted)
 
 
 def test_normalize_position_runs_after_masking(tmp_path):
@@ -284,6 +307,79 @@ def test_tokenization_with_cropping_is_refused(tmp_path):
             data_settings,
             _toy_asd_file(tmp_path / "asds.hdf5"),
         )
+
+
+def test_distance_prior_conditioning(tmp_path):
+    """The network conditions on log_luminosity_distance_max, and luminosity_distance
+    is standardized on the conditioned training distribution (the transform redraws
+    it below the sampled bound), not on its base prior."""
+    np.random.seed(0)
+    wfd = _toy_waveform_dataset(num_samples=200)
+    data_settings = {"waveform_dataset_path": None, **copy.deepcopy(DATA_SETTINGS)}
+    data_settings["extrinsic_prior"]["luminosity_distance"] = (
+        "bilby.gw.prior.UniformComovingVolume(minimum=10.0, maximum=5000.0, "
+        "name='luminosity_distance')"
+    )
+    data_settings["inference_parameters"] = ["chirp_mass", "luminosity_distance"]
+    data_settings["distance_prior_conditioning"] = {
+        "luminosity_distance_max": "bilby.core.prior.LogUniform(minimum=50.0, "
+        "maximum=5000.0)"
+    }
+    set_train_transforms(wfd, data_settings, _toy_asd_file(tmp_path / "asds.hdf5"))
+
+    assert data_settings["context_parameters"] == ["log_luminosity_distance_max"]
+    *_, context = wfd[0]
+    assert context.shape == (1,)
+    # The base UCV mean is ~3.4 Gpc; the conditioned marginal mean is ~0.8 Gpc.
+    assert data_settings["standardization"]["mean"]["luminosity_distance"] < 2000.0
+
+    data_settings["distance_prior_conditioning"]["log_uniform_fractoin"] = 0.1
+    with pytest.raises(ValueError, match="log_uniform_fractoin"):
+        set_train_transforms(wfd, data_settings, _toy_asd_file(tmp_path / "a.hdf5"))
+
+
+def test_distance_prior_conditioning_with_gnpe_time_shifts(tmp_path):
+    """With time GNPE, the network conditions on the relative proxy and the distance
+    bound, in that order; the bound truncates luminosity_distance as without GNPE,
+    and the proxies blur the detector times as without the bound."""
+    np.random.seed(0)
+    wfd = _toy_waveform_dataset(num_samples=200)
+    data_settings = {"waveform_dataset_path": None, **copy.deepcopy(DATA_SETTINGS)}
+    del data_settings["tokenization"]
+    data_settings["extrinsic_prior"]["luminosity_distance"] = (
+        "bilby.gw.prior.UniformComovingVolume(minimum=10.0, maximum=5000.0, "
+        "name='luminosity_distance')"
+    )
+    data_settings["extrinsic_prior"]["geocent_time"] = (
+        "bilby.core.prior.Uniform(minimum=-0.01, maximum=0.01)"
+    )
+    data_settings["inference_parameters"] = [
+        "chirp_mass",
+        "luminosity_distance",
+        "geocent_time",
+    ]
+    data_settings["gnpe_time_shifts"] = {
+        "kernel": "bilby.core.prior.Uniform(minimum=-0.001, maximum=0.001)",
+        "exact_equiv": True,
+    }
+    data_settings["distance_prior_conditioning"] = {
+        "luminosity_distance_max": "bilby.core.prior.LogUniform(minimum=50.0, "
+        "maximum=5000.0)"
+    }
+    set_train_transforms(wfd, data_settings, _toy_asd_file(tmp_path / "asds.hdf5"))
+
+    # DETECTORS = [V1, H1]: V1 is the preferred proxy, so H1's is the relative one.
+    assert data_settings["context_parameters"] == [
+        "H1_time_proxy_relative",
+        "log_luminosity_distance_max",
+    ]
+    std = data_settings["standardization"]
+    assert std["mean"]["luminosity_distance"] < 2000.0
+    # The relative proxy spreads over the detector separation, not the bound's range.
+    assert std["std"]["H1_time_proxy_relative"] < 0.05
+    assert 4.0 < std["mean"]["log_luminosity_distance_max"] < 8.5
+    *_, context = wfd[0]
+    assert context.shape == (2,)
 
 
 def test_chirp_prior_conditioning_training_transforms(tmp_path):
