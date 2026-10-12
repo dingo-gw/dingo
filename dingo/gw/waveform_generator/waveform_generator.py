@@ -982,6 +982,9 @@ class WaveformGenerator:
         """
         # TD approximants that are implemented in J frame. Currently tested for:
         #   101: IMRPhenomXPHM
+        # IMRPhenomXPNR (118) is deliberately left out: built from its modes this
+        # way, the sum of its m-components differs from its polarizations by a
+        # mismatch of ~1e-3, so it uses the DFT phase decomposition only.
         if self.approximant in [101]:
             parameters_lal_fd_modes = self._convert_parameters(
                 {**parameters, "f_ref": self.f_ref},
