@@ -167,13 +167,10 @@ def set_train_transforms(
             raise ValueError(
                 f"Unknown distance_prior_conditioning settings: {sorted(unknown)}."
             )
-        if "gnpe_time_shifts" in data_settings:
-            raise NotImplementedError(
-                "distance_prior_conditioning with gnpe_time_shifts is not supported: "
-                "GNPE inference builds the context parameters from the proxies only."
-            )
         # Truncate the luminosity_distance prior at a sampled upper bound, on whose
-        # logarithm the network conditions.
+        # logarithm the network conditions. With gnpe_time_shifts, the bound follows
+        # the time proxies in context_parameters; the two are independent (the bound
+        # redraws only luminosity_distance, the proxies blur only detector times).
         transforms.append(
             DistancePriorConditioning(
                 extrinsic_prior_dict["luminosity_distance"],

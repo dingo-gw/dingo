@@ -110,6 +110,47 @@ def single_network_steps(model, prior) -> list:
     )
 
 
+def _check_distance_bound(data_settings: dict, fixed_context_parameters: dict):
+    """For a model with distance prior conditioning, raise if the pinned
+    `log_luminosity_distance_max` is outside the range of the training hyperprior.
+    Does nothing for other models."""
+    if "distance_prior_conditioning" not in data_settings:
+        return
+    hyperprior = PriorDict(
+        {
+            "luminosity_distance_max": data_settings["distance_prior_conditioning"][
+                "luminosity_distance_max"
+            ]
+        }
+    )["luminosity_distance_max"]
+    log_d_max = fixed_context_parameters["log_luminosity_distance_max"]
+    # Compared in log space, so that a bound pinned at np.log(minimum) passes.
+    if not np.log(hyperprior.minimum) <= log_d_max <= np.log(hyperprior.maximum):
+        raise ValueError(
+            f"The pinned luminosity_distance_max {np.exp(log_d_max):.6g} (from "
+            f"log_luminosity_distance_max) is outside the trained range "
+            f"[{hyperprior.minimum}, {hyperprior.maximum}]."
+        )
+
+
+def _gnpe_pin_step(
+    models: list, pinned_parameters: list[str], fixed_context_parameters
+) -> list:
+    """The root `DeltaFactor` of a GNPE chain's pins (none without pins), after
+    checking that `fixed_context_parameters` pins exactly `pinned_parameters` and that
+    a distance bound is in every model's trained range."""
+    pins = dict(fixed_context_parameters or {})
+    if set(pins) != set(pinned_parameters):
+        raise ValueError(
+            f"Besides the GNPE proxies, the networks condition on "
+            f"{pinned_parameters}; provide fixed_context_parameters with exactly these "
+            f"keys, got {sorted(pins)}."
+        )
+    for model in models:
+        _check_distance_bound(model.base_metadata["train_settings"]["data"], pins)
+    return [DeltaFactor(pins)] if pins else []
+
+
 def _assert_consistent_gnpe_data_prep(init_model, main_model):
     """Assert the init and main GNPE models agree on the data-preprocessing view.
 
@@ -246,26 +287,7 @@ class GWComposedSampler(ComposedSampler):
                 f"fixed_context_parameters with exactly these keys, got "
                 f"{sorted(fixed_context_parameters or {})}."
             )
-        if "distance_prior_conditioning" in data_settings:
-            hyperprior = PriorDict(
-                {
-                    "luminosity_distance_max": data_settings[
-                        "distance_prior_conditioning"
-                    ]["luminosity_distance_max"]
-                }
-            )["luminosity_distance_max"]
-            log_d_max = fixed_context_parameters["log_luminosity_distance_max"]
-            # Compared in log space, so that a bound pinned at np.log(minimum) passes.
-            if (
-                not np.log(hyperprior.minimum)
-                <= log_d_max
-                <= np.log(hyperprior.maximum)
-            ):
-                raise ValueError(
-                    f"The pinned luminosity_distance_max {np.exp(log_d_max):.6g} (from "
-                    f"log_luminosity_distance_max) is outside the trained range "
-                    f"[{hyperprior.minimum}, {hyperprior.maximum}]."
-                )
+        _check_distance_bound(data_settings, fixed_context_parameters)
         steps = single_network_steps(model, context.prior)
         if context_parameters:
             steps = [DeltaFactor(fixed_context_parameters)] + steps
@@ -279,6 +301,7 @@ class GWComposedSampler(ComposedSampler):
         event_data: dict,
         event_metadata: Optional[dict] = None,
         num_iterations: int = 30,
+        fixed_context_parameters: Optional[dict] = None,
     ) -> "GWComposedSampler":
         """Build a multi-iteration time-GNPE sampler from an init + main model pair.
 
@@ -288,6 +311,11 @@ class GWComposedSampler(ComposedSampler):
         the main model; the init model must share its data preprocessing
         (asserted). The chain is density-free: the samples carry no log_prob,
         and the density must be recovered before importance sampling.
+
+        A main network with distance prior conditioning (or an init network
+        conditioned on context parameters) requires `fixed_context_parameters`
+        pinning them: the chain is then rooted in a `DeltaFactor` of the pins,
+        which every Gibbs sweep conditions on.
 
         Parameters
         ----------
@@ -302,10 +330,20 @@ class GWComposedSampler(ComposedSampler):
             Per-event metadata.
         num_iterations : int, default 30
             Number of Gibbs sweeps.
+        fixed_context_parameters : dict, optional
+            Pinned values for the context parameters other than the GNPE proxies,
+            e.g. `{"log_luminosity_distance_max": np.log(4000.0)}`.
 
         Returns
         -------
         GWComposedSampler
+
+        Raises
+        ------
+        ValueError
+            When the pinned keys do not match the networks' non-proxy context
+            parameters, or a pinned luminosity-distance bound is outside the
+            trained range.
         """
         _assert_consistent_gnpe_data_prep(init_model, main_model)
         # Build the context from the main model: it owns the analysis (likelihood,
@@ -322,7 +360,10 @@ class GWComposedSampler(ComposedSampler):
         )
         gibbs = GibbsBlock(init_factor, [kernel_factor, flow_factor], num_iterations)
         steps = (
-            [gibbs]
+            _gnpe_pin_step(
+                [init_model, main_model], gibbs.conditioning, fixed_context_parameters
+            )
+            + [gibbs]
             + _ra_to_event_steps(inference_parameters)
             + _delta_prior_steps(context.prior, inference_parameters)
         )
@@ -335,6 +376,7 @@ class GWComposedSampler(ComposedSampler):
         proxy_source: Factor,
         event_data: dict,
         event_metadata: Optional[dict] = None,
+        fixed_context_parameters: Optional[dict] = None,
     ) -> "GWComposedSampler":
         """Build a single-step (density-preserving) time-GNPE sampler.
 
@@ -343,7 +385,9 @@ class GWComposedSampler(ComposedSampler):
         the main network draws conditioned on them, and the kernel correction
         emits the `delta_log_prob_target` column that importance sampling adds
         to the target. Every step has a tractable density, so the samples carry
-        a log_prob.
+        a log_prob. A main network with distance prior conditioning requires
+        `fixed_context_parameters`, pinned by a `DeltaFactor` at the root (zero
+        log_prob, as in `from_model`).
 
         Parameters
         ----------
@@ -356,6 +400,9 @@ class GWComposedSampler(ComposedSampler):
             The raw event data (strain + ASDs).
         event_metadata : dict, optional
             Per-event metadata.
+        fixed_context_parameters : dict, optional
+            Pinned values for the context parameters other than the GNPE proxies
+            (see `from_gnpe_models`).
 
         Returns
         -------
@@ -370,7 +417,10 @@ class GWComposedSampler(ComposedSampler):
         )
         kernel_factor = GNPEKernelFactor(main_model)
         steps = (
-            [proxy_source, flow_factor, GNPEKernelCorrection(kernel_factor)]
+            _gnpe_pin_step(
+                [main_model], flow_factor.pinned_parameters, fixed_context_parameters
+            )
+            + [proxy_source, flow_factor, GNPEKernelCorrection(kernel_factor)]
             + _ra_to_event_steps(inference_parameters)
             + _delta_prior_steps(context.prior, inference_parameters)
         )
