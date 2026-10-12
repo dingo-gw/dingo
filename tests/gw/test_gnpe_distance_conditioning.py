@@ -7,6 +7,7 @@ through every sweep, and the builders check the pins.
 
 import copy
 import math
+import types
 
 import numpy as np
 import pytest
@@ -342,3 +343,78 @@ def test_gnpe_builders_reject_a_bound_outside_the_trained_range(d_max):
         GWComposedSampler.from_gnpe_models(
             INIT, MAIN, _event_data(), num_iterations=1, fixed_context_parameters=pins
         )
+
+
+# ---------------------------------------------------------------------------
+# dingo_pipe: SamplingInput passes fixed-context-parameters to the GNPE builders
+# ---------------------------------------------------------------------------
+
+
+def _sampling_input(monkeypatch, pins):
+    """The attributes `SamplingInput._load_sampler` reads, with the model files
+    resolved to the stub models (the real builders run on them)."""
+    from dingo.pipe import sampling
+
+    models = {"main.pt": MAIN, "init.pt": INIT}
+    monkeypatch.setattr(
+        sampling, "build_model_from_kwargs", lambda filename, **kw: models[filename]
+    )
+    obj = types.SimpleNamespace(
+        model="main.pt",
+        model_init="init.pt",
+        device="cpu",
+        chirp_mass_scan_settings=None,
+        fixed_context_parameters=pins,
+        context=_event_data(),
+        event_metadata=None,
+        num_gnpe_iterations=2,
+        batch_size=None,
+    )
+    obj._model_paths = lambda: sampling.SamplingInput._model_paths(obj)
+    return obj
+
+
+def test_sampling_input_pins_reach_the_iterative_gnpe_chain(monkeypatch):
+    from dingo.pipe.sampling import SamplingInput
+
+    obj = _sampling_input(monkeypatch, dict(PINS))
+    SamplingInput._load_sampler(obj)
+    assert obj.gnpe
+    assert _step_names(obj.dingo_sampler)[:2] == ["DeltaFactor", "GibbsBlock"]
+    assert obj.dingo_sampler.composer.steps[0].values == PINS
+    assert obj.dingo_sampler.provenance_extra["models"] == {
+        "model": "main.pt",
+        "model_init": "init.pt",
+    }
+
+
+@pytest.mark.parametrize("pins", [None, {"chirp_mass_proxy": 1.2}])
+def test_sampling_input_requires_exactly_the_pins(monkeypatch, pins):
+    from dingo.pipe.sampling import SamplingInput
+
+    obj = _sampling_input(monkeypatch, pins)
+    with pytest.raises(ValueError, match="exactly these keys"):
+        SamplingInput._load_sampler(obj)
+
+
+def test_sampling_input_density_recovery_keeps_the_pins(monkeypatch):
+    """After density recovery, the single-step sampler is rooted in the same pins.
+    The Gibbs run and the NDE training are stubbed; the NDE is replaced by a pinned
+    proxy source."""
+    from dingo.pipe import sampling
+
+    obj = _sampling_input(monkeypatch, dict(PINS))
+    sampling.SamplingInput._load_sampler(obj)
+    result = types.SimpleNamespace(train_unconditional_flow=lambda *a, **kw: None)
+    obj.dingo_sampler = types.SimpleNamespace(
+        run_sampler=lambda *a, **kw: None,
+        sampler_provenance=lambda: {"chain": []},
+        to_result=lambda: result,
+    )
+    obj.density_recovery_settings = {"num_samples": 10, "nde_settings": {"training": {}}}
+    proxies = DeltaFactor({"H1_time_proxy": 0.0, "L1_time_proxy": 0.0})
+    monkeypatch.setattr(sampling, "FlowFactor", lambda model: proxies)
+    sampling.SamplingInput._recover_log_prob_composed(obj)
+    names = _step_names(obj.dingo_sampler)
+    assert names[:3] == ["DeltaFactor", "DeltaFactor", "GNPEFlowFactor"]
+    assert obj.dingo_sampler.composer.steps[0].values == PINS
