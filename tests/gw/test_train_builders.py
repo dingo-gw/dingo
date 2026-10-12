@@ -336,14 +336,50 @@ def test_distance_prior_conditioning(tmp_path):
     data_settings["distance_prior_conditioning"]["log_uniform_fractoin"] = 0.1
     with pytest.raises(ValueError, match="log_uniform_fractoin"):
         set_train_transforms(wfd, data_settings, _toy_asd_file(tmp_path / "a.hdf5"))
-    del data_settings["distance_prior_conditioning"]["log_uniform_fractoin"]
+
+
+def test_distance_prior_conditioning_with_gnpe_time_shifts(tmp_path):
+    """With time GNPE, the network conditions on the relative proxy and the distance
+    bound, in that order; the bound truncates luminosity_distance as without GNPE,
+    and the proxies blur the detector times as without the bound."""
+    np.random.seed(0)
+    wfd = _toy_waveform_dataset(num_samples=200)
+    data_settings = {"waveform_dataset_path": None, **copy.deepcopy(DATA_SETTINGS)}
+    del data_settings["tokenization"]
+    data_settings["extrinsic_prior"]["luminosity_distance"] = (
+        "bilby.gw.prior.UniformComovingVolume(minimum=10.0, maximum=5000.0, "
+        "name='luminosity_distance')"
+    )
+    data_settings["extrinsic_prior"]["geocent_time"] = (
+        "bilby.core.prior.Uniform(minimum=-0.01, maximum=0.01)"
+    )
+    data_settings["inference_parameters"] = [
+        "chirp_mass",
+        "luminosity_distance",
+        "geocent_time",
+    ]
     data_settings["gnpe_time_shifts"] = {
         "kernel": "bilby.core.prior.Uniform(minimum=-0.001, maximum=0.001)",
         "exact_equiv": True,
     }
-    del data_settings["tokenization"]
-    with pytest.raises(NotImplementedError, match="gnpe_time_shifts"):
-        set_train_transforms(wfd, data_settings, _toy_asd_file(tmp_path / "b.hdf5"))
+    data_settings["distance_prior_conditioning"] = {
+        "luminosity_distance_max": "bilby.core.prior.LogUniform(minimum=50.0, "
+        "maximum=5000.0)"
+    }
+    set_train_transforms(wfd, data_settings, _toy_asd_file(tmp_path / "asds.hdf5"))
+
+    # DETECTORS = [V1, H1]: V1 is the preferred proxy, so H1's is the relative one.
+    assert data_settings["context_parameters"] == [
+        "H1_time_proxy_relative",
+        "log_luminosity_distance_max",
+    ]
+    std = data_settings["standardization"]
+    assert std["mean"]["luminosity_distance"] < 2000.0
+    # The relative proxy spreads over the detector separation, not the bound's range.
+    assert std["std"]["H1_time_proxy_relative"] < 0.05
+    assert 4.0 < std["mean"]["log_luminosity_distance_max"] < 8.5
+    *_, context = wfd[0]
+    assert context.shape == (2,)
 
 
 def test_chirp_prior_conditioning_training_transforms(tmp_path):
