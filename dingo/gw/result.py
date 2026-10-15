@@ -274,9 +274,11 @@ class Result(CoreResult):
             self.phase_prior = prior_update.pop("phase")
         if self.psi_prior is not None and "psi" in prior_update:
             self.psi_prior = prior_update.pop("psi")
-        self.prior.update(
-            prior_update
-        )  # TODO: Does this update cached constraint ratio?
+        self.prior.update(prior_update)
+        # Bilby caches the constraint normalization by the tuple of parameter names, so
+        # it would keep the factor of the old prior (e.g. off by a nat for a new chirp-
+        # mass prior under component-mass constraints). Re-estimate it.
+        self.prior._cached_normalizations = {}
 
         # Evaluate new prior.
         log_prior = self._log_prior()

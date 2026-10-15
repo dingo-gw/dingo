@@ -630,11 +630,11 @@ def test_update_prior_reweights_samples_before_importance_sampling():
     result.update_prior(dict(_LD_PRIOR_UPDATE))
 
     delta = _ld_log_prior_delta(result)
-    # The log_prior column reflects the evolved prior: it shifts by exactly the
-    # luminosity-distance ln-prob difference.
-    np.testing.assert_allclose(
-        result.samples["log_prior"].to_numpy() - log_prior_before, delta, rtol=1e-8
-    )
+    # The log_prior column reflects the evolved prior: it shifts by the
+    # luminosity-distance ln-prob difference, up to a constant (the constraint
+    # normalization is re-estimated after an update, by Monte Carlo).
+    shift = result.samples["log_prior"].to_numpy() - log_prior_before - delta
+    assert np.ptp(shift) < 1e-8 and abs(shift[0]) < 0.05
     # Weights are the normalized (mean 1) exponential of that shift -- and the
     # update genuinely reweights (the PowerLaw is not flat over the samples).
     expected = np.exp(delta - delta.max())
@@ -643,6 +643,29 @@ def test_update_prior_reweights_samples_before_importance_sampling():
     np.testing.assert_allclose(weights, expected, rtol=1e-8)
     assert weights.mean() == pytest.approx(1.0)
     assert weights.std() > 0.1
+
+
+def test_update_prior_renormalizes_constrained_prior():
+    # A new chirp-mass prior changes the fraction of draws that pass the component-
+    # mass constraints; the updated log_prior must use the new normalization, not the
+    # one bilby cached for the old prior.
+    result = _seeded_result()
+    param_keys = [k for k, v in result.prior.items() if not isinstance(v, Constraint)]
+    result.prior.ln_prob(result.samples[param_keys], axis=0)  # caches the factor
+    update = {
+        "chirp_mass": "bilby.core.prior.LogUniform(minimum=15.0, maximum=100.0, "
+        "name='chirp_mass')"
+    }
+    result.update_prior(dict(update))
+    fresh = build_prior_with_defaults(
+        {
+            **INTRINSIC_PRIOR,
+            **get_extrinsic_prior_dict(EXTRINSIC_PRIOR),
+            **update,
+        }
+    )
+    expected = fresh.ln_prob(result.samples[param_keys], axis=0)
+    np.testing.assert_allclose(result.samples["log_prior"], expected, atol=0.05)
 
 
 def test_update_prior_reweights_importance_sampled_result():
