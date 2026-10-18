@@ -968,8 +968,10 @@ class RAToEventFrame(Reparametrization):
         correction = self._correction(context)
         if correction == 0.0:
             return {"ra@t_ref": params["ra"]}
-        ra_tref = (params["ra"].double() - correction) % (2 * np.pi)
-        return {"ra@t_ref": ra_tref.float()}
+        ra_tref = ((params["ra"].double() - correction) % (2 * np.pi)).float()
+        # The float32 cast can round a value just below 2 pi up to 2 pi, which `forward`
+        # would reject; on the circle it is 0.
+        return {"ra@t_ref": ra_tref.masked_fill(ra_tref >= 2 * np.pi, 0.0)}
 
 
 class RAToTrainingFrame(RAToEventFrame):
