@@ -261,6 +261,11 @@ class DingoPipeline(Pipeline):
         return f_min_match and f_max_match
 
     @staticmethod
+    def _is_transformer(metadata):
+        model = metadata["train_settings"].get("model", {})
+        return (model.get("embedding_type") or "").lower() == "transformer"
+
+    @staticmethod
     def _net_max_luminosity_distance(metadata):
         prior = metadata["train_settings"]["data"]["extrinsic_prior"][
             "luminosity_distance"
@@ -273,6 +278,39 @@ class DingoPipeline(Pipeline):
         """Check if a network's metadata is compatible with the production in prod_meta."""
         duration = prod_meta["data"]["segment length"]
         ifos = prod_meta["interferometers"]
+
+        if self._is_transformer(net_meta):
+            from copy import deepcopy
+
+            from dingo.core.utils.backward_compatibility import update_data_config
+            from dingo.gw.domains import build_domain_from_model_metadata
+            from dingo.gw.frequency_updates import (
+                check_detector_update,
+                check_frequency_updates,
+            )
+
+            net_meta = deepcopy(net_meta)
+            update_data_config(net_meta)
+            domain = build_domain_from_model_metadata(net_meta, base=True)
+            if round(domain.duration) != duration:
+                self.logger.info(
+                    f"Transformer duration {domain.duration} does not match {duration}."
+                )
+                return False
+
+            bounds = []
+            for key in ("minimum frequency", "maximum frequency"):
+                bound = prod_meta.get("quality", {}).get(key)
+                if isinstance(bound, dict):
+                    bound = {ifo: bound[ifo] for ifo in ifos if ifo in bound}
+                bounds.append(bound)
+            try:
+                check_detector_update(net_meta, ifos)
+                check_frequency_updates(net_meta, *bounds, detectors=ifos)
+            except ValueError as err:
+                self.logger.info(f"Transformer network is incompatible: {err}")
+                return False
+            return True
 
         net_duration = round(
             1 / net_meta["dataset_settings"]["domain"]["base_domain"]["delta_f"]
@@ -309,6 +347,8 @@ class DingoPipeline(Pipeline):
                 raise PipelineException(msg, production=self.production.name) from err
 
             if self.network_is_compatible(prod_meta, net_meta):
+                if self._is_transformer(net_meta):
+                    networks = {**networks, "model init": None}
                 compatible_networks.append((networks, net_meta))
 
         if not compatible_networks:
@@ -327,6 +367,13 @@ class DingoPipeline(Pipeline):
 
         Returns the selected network config.
         """
+        if len({self._is_transformer(meta) for _, meta in compatible_networks}) > 1:
+            raise PipelineException(
+                "Both transformer and GNPE/legacy networks match this production. "
+                "Set 'networks' explicitly or restrict 'available networks' "
+                "to one architecture.",
+                production=self.production.name,
+            )
         if len(compatible_networks) == 1:
             return compatible_networks[0][0]
 
@@ -362,11 +409,10 @@ class DingoPipeline(Pipeline):
                 "metadata. Set one of these in the analysis or configuration blueprint."
             )
 
-        # Placeholder in case of error
-        meta["networks"] = {"model": "", "model init": ""}
-
         compatible_networks = self._filter_compatible_networks(meta)
-        meta["networks"] = self._select_preferred_network(meta, compatible_networks)
+        meta["networks"] = self._select_preferred_network(
+            meta, compatible_networks
+        ).copy()
 
         # Update the ledger
         if not dryrun:

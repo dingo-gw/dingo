@@ -64,6 +64,18 @@ of your network .pt files.
 asimov apply -f ../../analysis_dingo.yaml -e GW150914_095045
 ```
 
+Alternatively, provide an `available networks` list of mappings containing `model`
+and, for GNPE, `model init`. Transformer checkpoints are identified from their
+metadata and checked for matching duration and supported detector/frequency masking.
+Their selected `model init` is cleared, even if supplied, so the INI uses
+`model-init = None`. GNPE checkpoints retain their existing compatibility checks.
+If both architectures have compatible candidates, selection raises an error; use
+an explicit `networks` override or restrict the list to one architecture. Within
+either architecture, selection prefers the smallest maximum luminosity distance
+covering the production prior, falling back to the largest available maximum.
+Duplicate maxima are ambiguous and raise an error. An explicit `networks` override
+bypasses automatic selection; set `model init` to `None` yourself for a transformer.
+
 We have now applied all the settings to GW150914 and are ready 
 to begin the asimov run! Start by creating the .ini file using 
 
@@ -130,4 +142,4 @@ htgettoken
 Now you can run `condor_store_cred query-oauth` and you should 
 see there are two credentials `igwn.top` and `igwn.use`. If 
 you only see one credential, contact your sys admin or
-upgrade to the latest version of condor. 
+upgrade to the latest version of condor.
