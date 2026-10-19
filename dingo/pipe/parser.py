@@ -1582,9 +1582,10 @@ def create_parser(top_level=True, usage=None):
     )
     sampler_parser.add(
         "--num-gnpe-iterations",
-        type=int,
+        type=noneint,
         default=30,
-        help="Number of GNPE iterations to perform when using a GNPE model. Default 30.",
+        help="Number of GNPE iterations to perform when using a GNPE model. Default 30. "
+        "May be None for non-GNPE models, which ignore this setting.",
     )
     sampler_parser.add(
         "--num-samples",
