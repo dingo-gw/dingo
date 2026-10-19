@@ -213,7 +213,7 @@ class DingoPipeline(Pipeline):
                 )
         return messages
 
-    def _fmin_max_are_compatible(self, prod_meta, net_meta):
+    def _fmin_max_are_compatible(self, prod_meta, net_meta, reasons):
         """
         Check if the network min/max frequencies are compatible with the data.
 
@@ -258,6 +258,18 @@ class DingoPipeline(Pipeline):
         else:
             f_max_match = (min(f_max) >= net_f_max_lower) and (max(f_max) <= net_f_max)
 
+        if not f_min_match:
+            upper = net_f_min if net_f_min_upper is None else net_f_min_upper
+            reasons.append(
+                f"minimum frequencies {prod_meta['quality']['minimum frequency']} "
+                f"outside allowed range [{net_f_min}, {upper}] Hz"
+            )
+        if not f_max_match:
+            lower = net_f_max if net_f_max_lower is None else net_f_max_lower
+            reasons.append(
+                f"maximum frequencies {prod_meta['quality']['maximum frequency']} "
+                f"outside allowed range [{lower}, {net_f_max}] Hz"
+            )
         return f_min_match and f_max_match
 
     @staticmethod
@@ -274,8 +286,9 @@ class DingoPipeline(Pipeline):
         assert match
         return int(match[0].split("=")[-1])
 
-    def network_is_compatible(self, prod_meta, net_meta):
-        """Check if a network's metadata is compatible with the production in prod_meta."""
+    def network_is_compatible(self, prod_meta, net_meta, reasons=None):
+        """Check compatibility, optionally appending rejection reasons to a list."""
+        reasons = [] if reasons is None else reasons
         duration = prod_meta["data"]["segment length"]
         ifos = prod_meta["interferometers"]
 
@@ -293,10 +306,9 @@ class DingoPipeline(Pipeline):
             update_data_config(net_meta)
             domain = build_domain_from_model_metadata(net_meta, base=True)
             if round(domain.duration) != duration:
-                self.logger.info(
-                    f"Transformer duration {domain.duration} does not match {duration}."
+                reasons.append(
+                    f"duration {domain.duration} s does not match requested {duration} s"
                 )
-                return False
 
             bounds = []
             for key in ("minimum frequency", "maximum frequency"):
@@ -308,22 +320,22 @@ class DingoPipeline(Pipeline):
                 check_detector_update(net_meta, ifos)
                 check_frequency_updates(net_meta, *bounds, detectors=ifos)
             except ValueError as err:
-                self.logger.info(f"Transformer network is incompatible: {err}")
-                return False
-            return True
+                reasons.append(str(err))
+            return not reasons
 
         net_duration = round(
             1 / net_meta["dataset_settings"]["domain"]["base_domain"]["delta_f"]
         )
         net_ifos = net_meta["train_settings"]["data"]["detectors"]
 
-        if (
-            net_duration == duration
-            and sorted(net_ifos) == sorted(ifos)
-            and self._fmin_max_are_compatible(prod_meta, net_meta)
-        ):
-            return True
-        return False
+        if net_duration != duration:
+            reasons.append(
+                f"duration {net_duration} s does not match requested {duration} s"
+            )
+        if sorted(net_ifos) != sorted(ifos):
+            reasons.append(f"detectors {net_ifos} do not match requested {ifos}")
+        self._fmin_max_are_compatible(prod_meta, net_meta, reasons)
+        return not reasons
 
     def _filter_compatible_networks(self, prod_meta):
         """Load available networks and return those compatible with the production.
@@ -333,6 +345,7 @@ class DingoPipeline(Pipeline):
         import torch
 
         compatible_networks = []
+        rejections = []
         for networks in prod_meta["available networks"]:
             try:
                 f = torch.load(
@@ -346,14 +359,20 @@ class DingoPipeline(Pipeline):
                 msg = "Could not load metadata from network: '{networks['model']}'.."
                 raise PipelineException(msg, production=self.production.name) from err
 
-            if self.network_is_compatible(prod_meta, net_meta):
+            reasons = []
+            if self.network_is_compatible(prod_meta, net_meta, reasons):
                 if self._is_transformer(net_meta):
                     networks = {**networks, "model init": None}
                 compatible_networks.append((networks, net_meta))
+            else:
+                rejection = f"  {networks['model']}: " + "; ".join(reasons)
+                rejections.append(rejection)
+                self.logger.info(rejection)
 
         if not compatible_networks:
             raise PipelineException(
-                "No compatible DINGO network found for this production..",
+                "No compatible DINGO network found for this production.\n"
+                + "\n".join(rejections),
                 production=self.production.name,
             )
 
