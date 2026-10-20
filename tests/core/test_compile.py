@@ -15,7 +15,7 @@ from dingo.core.nn.compile_utils import (
     is_compiled,
     reset_graphs_if_requires_grad_changes,
 )
-from dingo.core.nn.nsf import create_nsf_model
+from dingo.core.nn.nsf import create_linear_transform, create_nsf_model
 from dingo.core.posterior_models.normalizing_flow import NormalizingFlowPosteriorModel
 from dingo.core.utils.torchutils import get_ddp_module, unwrap_network
 
@@ -153,6 +153,48 @@ class TestCompileNetwork:
             flow.log_prob, fullgraph=True, backend="aot_eager"
         )
         assert torch.allclose(compiled_log_prob(theta, context), eager, atol=1e-5)
+
+
+class TestLinearTransformGraphInputs:
+    """``create_linear_transform`` uses ``DingoLULinear``, which keeps the LU index
+    arrays as buffers. As the numpy attributes nflows uses, Dynamo lifts them as
+    non-static CPU graph inputs, which CUDA graphs (torch_compile_mode:
+    reduce-overhead) fail to record."""
+
+    def test_graph_inputs_are_only_parameters_buffers_and_data(self):
+        import torch._dynamo
+
+        torch._dynamo.reset()
+        transform = create_linear_transform(5)
+        num_graph_inputs = []
+
+        def backend(gm, example_inputs):
+            num_graph_inputs.append(len(example_inputs))
+            return gm
+
+        with torch._dynamo.config.patch(inline_inbuilt_nn_modules=True):
+            torch.compile(transform, backend=backend, fullgraph=True)(torch.randn(3, 5))
+        # Every graph input is a parameter or buffer of the module, or the data;
+        # a numpy index array would appear as an extra input.
+        num_static = len(list(transform.parameters())) + len(list(transform.buffers()))
+        assert num_graph_inputs == [num_static + 1]
+
+    def test_state_dict_and_values_match_nflows(self):
+        from glasflow.nflows import transforms
+
+        torch.manual_seed(0)
+        lu = create_linear_transform(5)._transforms[1]
+        with torch.no_grad():
+            for p in lu.parameters():
+                p.normal_()
+        assert not any("indices" in k for k in lu.state_dict())  # checkpoints unchanged
+        reference = transforms.LULinear(5, identity_init=True)
+        reference.load_state_dict(lu.state_dict())
+        x = torch.randn(3, 5)
+        for ours, theirs in zip(lu(x), reference(x)):
+            assert torch.equal(ours, theirs)
+        for ours, theirs in zip(lu.inverse(x), reference.inverse(x)):
+            assert torch.equal(ours, theirs)
 
 
 class TestCompileMode:
