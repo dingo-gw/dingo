@@ -121,11 +121,17 @@ python -m pip install python-nds2-client
 conda install python-ldas-tools-framecpp==2.6.14
 ```
 
-Then, before running `asimov manage build` make sure to run 
+Asimov-generated Dingo configurations use `https://datafind.igwn.org` by default;
+you do not need to export `GWDATAFIND_SERVER`. To use a different server, set
+the production metadata before running `asimov manage build`:
 
+```yaml
+data:
+  data find url: https://your-datafind-server.example.org
 ```
-export GWDATAFIND_SERVER=datafind.igwn.org
-```
+
+The generated `data-find-url` takes precedence over `GWDATAFIND_SERVER`.
+Rebuild existing INI files with `asimov manage build` to apply this default.
 
 You will now need to authenticate with scitokens and 
 store your credentials in the condor vault. To do this 
