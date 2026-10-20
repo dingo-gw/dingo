@@ -3,7 +3,10 @@ import os
 from bilby_pipe.job_creation.nodes import GenerationNode as BilbyGenerationNode
 from bilby_pipe.utils import BilbyPipeError
 
-from dingo.pipe.utils import _strip_unwanted_submission_keys
+from dingo.pipe.utils import (
+    BILBY_PIPE_USES_CONTAINER_UNIVERSE,
+    _strip_unwanted_submission_keys,
+)
 
 
 class GenerationNode(BilbyGenerationNode):
@@ -69,7 +72,7 @@ class GenerationNode(BilbyGenerationNode):
 
             input_files_to_transfer.extend(network_files)
 
-            if self.transfer_container:
+            if not BILBY_PIPE_USES_CONTAINER_UNIVERSE and self.transfer_container:
                 input_files_to_transfer.append(self.inputs.container)
             for value in [
                 self.inputs.psd_dict,

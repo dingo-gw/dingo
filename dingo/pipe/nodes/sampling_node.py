@@ -2,7 +2,10 @@ import os
 
 from bilby_pipe.job_creation.nodes import AnalysisNode
 
-from dingo.pipe.utils import _strip_unwanted_submission_keys
+from dingo.pipe.utils import (
+    BILBY_PIPE_USES_CONTAINER_UNIVERSE,
+    _strip_unwanted_submission_keys,
+)
 
 
 class SamplingNode(AnalysisNode):
@@ -66,7 +69,7 @@ class SamplingNode(AnalysisNode):
 
                 input_files_to_transfer.extend(network_files)
 
-                if self.transfer_container:
+                if not BILBY_PIPE_USES_CONTAINER_UNIVERSE and self.transfer_container:
                     input_files_to_transfer.append(self.inputs.container)
 
                 # Credentials are needed to access any OSDF files
