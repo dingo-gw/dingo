@@ -2,7 +2,10 @@ import os
 
 from bilby_pipe.job_creation.nodes import PlotNode as BilbyPlotNode
 
-from dingo.pipe.utils import _strip_unwanted_submission_keys
+from dingo.pipe.utils import (
+    BILBY_PIPE_USES_CONTAINER_UNIVERSE,
+    _strip_unwanted_submission_keys,
+)
 
 
 class PlotNode(BilbyPlotNode):
@@ -22,7 +25,7 @@ class PlotNode(BilbyPlotNode):
             input_files_to_transfer = [
                 self._relative_topdir(merged_node.result_file, self.inputs.initialdir),
             ] + inputs.additional_transfer_paths
-            if self.transfer_container:
+            if not BILBY_PIPE_USES_CONTAINER_UNIVERSE and self.transfer_container:
                 input_files_to_transfer.append(self.inputs.container)
 
             input_files_to_transfer, need_scitokens = self.job_needs_authentication(

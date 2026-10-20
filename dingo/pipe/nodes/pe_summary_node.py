@@ -2,6 +2,8 @@ import os
 from bilby_pipe.job_creation.nodes import PESummaryNode as BilbyPESummaryNode
 from bilby_pipe.utils import BilbyPipeError, logger
 
+from dingo.pipe.utils import BILBY_PIPE_USES_CONTAINER_UNIVERSE
+
 logger.name = "dingo_pipe"
 
 
@@ -38,7 +40,7 @@ class PESummaryNode(BilbyPESummaryNode):
                 self.inputs.spline_calibration_envelope_dict,
             ]:
                 input_files_to_transfer.extend(self.extract_paths_from_dict(value))
-            if self.transfer_container:
+            if not BILBY_PIPE_USES_CONTAINER_UNIVERSE and self.transfer_container:
                 input_files_to_transfer.append(self.inputs.container)
 
             input_files_to_transfer, need_scitokens = self.job_needs_authentication(

@@ -1,3 +1,12 @@
+import bilby_pipe
+from packaging.version import Version
+
+
+# Since 1.9.0, Bilby uses container_image, which HTCondor transfers automatically.
+# Only older versions need the image explicitly added to transfer_input_files.
+BILBY_PIPE_USES_CONTAINER_UNIVERSE = Version(bilby_pipe.__version__) >= Version("1.9.0")
+
+
 def _strip_unwanted_submission_keys(job):
     job.getenv = None
     job.universe = None
