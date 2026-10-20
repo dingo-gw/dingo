@@ -201,8 +201,9 @@ PyTorch runs float32 matrix multiplications at full precision by default, which 
 tensor cores of Ampere and newer GPUs unused. Setting
 
 ```yaml
-local:
-  float32_matmul_precision: high   # default: highest
+training:
+  stage_0:
+    float32_matmul_precision: high   # default: highest
 ```
 
 lets them use TensorFloat-32: matmul inputs are rounded to 10 mantissa bits (the range of
@@ -212,15 +213,22 @@ and combines with `torch_compile`: with both (and the fused optimizer below) the
 drops from 0.85 s to 0.28 s per 4096 samples on an A100, a 3× gain in GPU time. All non-matmul
 operations (splines, normalization, the optimizer) are unaffected.
 
-TF32 and `automatic_mixed_precision` are alternatives, not a stack: under AMP the matmuls
-already run in float16, so `float32_matmul_precision: high` changes nothing there. On the
-`npe_model` network TF32 alone and AMP alone give the same speedup (0.90 to 0.47 s per step);
-TF32 is the option for trainings that stay in float32. The value in effect is stored in the
-checkpoint metadata (`float32_matmul_precision`).
+TF32 and `automatic_mixed_precision` are alternatives, not a stack: under AMP the large
+matmuls already run in float16. The flow's LU linear transforms stay in float32 under AMP (the
+flow variable is not rounded to float16), so with AMP keep `float32_matmul_precision: highest`:
+`high` would round their inputs to TF32. On the `npe_model` network TF32 alone and AMP alone
+give the same speedup (0.90 to 0.47 s per step); TF32 is the option for trainings that stay in
+float32.
+
+Like `automatic_mixed_precision`, the setting belongs to a training stage, since it changes the
+numerics of training; a stage that does not set it uses `highest`. The value in effect is
+recorded in the stage settings and hence in the checkpoint metadata. The former
+`local.float32_matmul_precision` still applies to stages that do not set the key. Inference
+runs at PyTorch's default (full float32) regardless of the training precision.
 
 ### Fused optimizer (`fused`)
 
-Unlike the settings above, this one is not in the `local` section: it belongs to the
+Like `float32_matmul_precision`, this one is not in the `local` section: it belongs to the
 `optimizer` block of an individual training stage, and is passed straight through to the
 PyTorch optimizer. Setting `fused: true` selects the fused CUDA kernel, which performs the
 whole optimizer update in one kernel instead of one per step of the update math, and is about

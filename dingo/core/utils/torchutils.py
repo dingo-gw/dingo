@@ -37,24 +37,44 @@ def seed_generators(seed_sequence: np.random.SeedSequence, all_devices=False):
         torch.default_generator.manual_seed(torch_seed)
 
 
-def set_float32_matmul_precision(local_settings: dict) -> None:
-    """Apply ``local.float32_matmul_precision`` (``highest`` | ``high`` | ``medium``).
+def set_float32_matmul_precision(
+    stage: dict, local_settings: dict, print_output: bool = True
+) -> str:
+    """Apply a training stage's ``float32_matmul_precision`` (``highest`` | ``high`` |
+    ``medium``) and record it in the stage settings, hence in the model metadata.
 
     ``high`` lets float32 matrix multiplications use TensorFloat-32 on Ampere and
     newer GPUs (10-bit mantissa inputs, fp32 accumulation), roughly doubling the
     speed of the network's linear layers; ``medium`` additionally allows bfloat16
-    inputs. PyTorch's default, ``highest``, keeps full fp32 and is left unchanged
-    when the setting is absent.
+    inputs. ``highest``, PyTorch's default and used when the stage does not set it,
+    keeps full fp32. Under automatic mixed precision the large matrix products run in
+    float16 anyway, and ``highest`` keeps the remaining float32 ones exact.
+
+    The former ``local.float32_matmul_precision`` still applies to stages that do not
+    set the key; setting both to different values raises. Returns the precision.
     """
-    precision = local_settings.get("float32_matmul_precision")
-    if precision is None:
-        return
+    precision = stage.get("float32_matmul_precision")
+    legacy = local_settings.get("float32_matmul_precision")
+    if legacy is not None:
+        if precision is not None and precision != legacy:
+            raise ValueError(
+                f"float32_matmul_precision is {precision!r} in the training stage but "
+                f"{legacy!r} in the local settings; set it in the stage only."
+            )
+        if print_output:
+            print(
+                "local.float32_matmul_precision is deprecated: set "
+                "float32_matmul_precision in the training stages instead."
+            )
+    precision = precision or legacy or "highest"
     if precision not in ("highest", "high", "medium"):
         raise ValueError(
             f"float32_matmul_precision must be 'highest', 'high' or 'medium', "
             f"got {precision!r}."
         )
     torch.set_float32_matmul_precision(precision)
+    stage["float32_matmul_precision"] = precision
+    return precision
 
 
 def get_cuda_info() -> dict[str, Any]:

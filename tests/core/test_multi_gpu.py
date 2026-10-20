@@ -102,22 +102,47 @@ class TestGetNumGpus:
 
 
 class TestSetFloat32MatmulPrecision:
-    def test_default_leaves_torch_setting_unchanged(self):
-        before = torch.get_float32_matmul_precision()
-        set_float32_matmul_precision({})
-        assert torch.get_float32_matmul_precision() == before
+    """The per-stage training setting, recorded in the stage settings; the former
+    local setting is a fallback."""
 
-    def test_applies_setting(self):
+    @pytest.fixture(autouse=True)
+    def restore_precision(self):
         before = torch.get_float32_matmul_precision()
-        try:
-            set_float32_matmul_precision({"float32_matmul_precision": "high"})
-            assert torch.get_float32_matmul_precision() == "high"
-        finally:
-            torch.set_float32_matmul_precision(before)
+        yield
+        torch.set_float32_matmul_precision(before)
+
+    def test_stage_setting_is_applied_and_recorded(self):
+        stage = {"float32_matmul_precision": "high"}
+        assert set_float32_matmul_precision(stage, {}) == "high"
+        assert torch.get_float32_matmul_precision() == "high"
+        assert stage["float32_matmul_precision"] == "high"
+
+    def test_default_is_highest_per_stage(self):
+        # No inheritance from an earlier stage: an unset stage resets to highest.
+        torch.set_float32_matmul_precision("high")
+        stage = {}
+        assert set_float32_matmul_precision(stage, {}) == "highest"
+        assert torch.get_float32_matmul_precision() == "highest"
+        assert stage["float32_matmul_precision"] == "highest"
+
+    def test_local_setting_is_a_fallback(self):
+        stage = {}
+        set_float32_matmul_precision(stage, {"float32_matmul_precision": "high"})
+        assert torch.get_float32_matmul_precision() == "high"
+        # Recorded, so a resume with the same local setting is consistent.
+        assert stage["float32_matmul_precision"] == "high"
+        set_float32_matmul_precision(stage, {"float32_matmul_precision": "high"})
+
+    def test_conflicting_settings_raise(self):
+        with pytest.raises(ValueError, match="local settings"):
+            set_float32_matmul_precision(
+                {"float32_matmul_precision": "highest"},
+                {"float32_matmul_precision": "high"},
+            )
 
     def test_rejects_unknown_value(self):
         with pytest.raises(ValueError, match="float32_matmul_precision"):
-            set_float32_matmul_precision({"float32_matmul_precision": "fast"})
+            set_float32_matmul_precision({"float32_matmul_precision": "fast"}, {})
 
 
 class TestGetCudaInfo:

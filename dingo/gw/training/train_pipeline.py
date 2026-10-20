@@ -391,6 +391,9 @@ def train_stages(
     num_starting_stage = np.searchsorted(end_epochs, pm.epoch + 1)
     for n in range(num_starting_stage, num_stages):
         stage = stages[n]
+        # Per stage, like automatic_mixed_precision; recorded in the stage settings.
+        # Dynamo guards on the precision, so a change recompiles the network.
+        set_float32_matmul_precision(stage, local_settings, print_output=print_primary)
 
         if pm.epoch == end_epochs[n] - stage["epochs"]:
             if print_primary:
@@ -539,13 +542,6 @@ def get_num_gpus(local_settings: dict) -> int:
     return 1
 
 
-def _record_float32_matmul_precision(pm: BasePosteriorModel) -> None:
-    """Store the matmul precision in the checkpoint metadata: unlike torch_compile
-    it changes the numerics of training, so it belongs with the model."""
-    if isinstance(pm.metadata, dict):
-        pm.metadata["float32_matmul_precision"] = torch.get_float32_matmul_precision()
-
-
 def run_training(
     train_settings: Optional[dict],
     local_settings: dict,
@@ -570,12 +566,10 @@ def run_training(
     -------
     (complete, resume, epoch) : (bool, bool, int)
     """
-    set_float32_matmul_precision(local_settings)
     if not resume:
         pm, wfd = prepare_training_new(train_settings, train_dir, local_settings)
     else:
         pm, wfd = prepare_training_resume(ckpt_file, local_settings, train_dir)
-    _record_float32_matmul_precision(pm)
 
     if local_settings.get("torch_compile", False):
         pm.network = compile_network(
@@ -634,7 +628,6 @@ def run_training_ddp(
         # avoid collisions between their process groups.
         setup_ddp(rank, world_size, port=local_settings.get("ddp_port", 12355))
         set_seed_based_on_rank(rank)
-        set_float32_matmul_precision(local_settings)
 
         if rank == 0:
             document_gpus(train_dir)
@@ -689,8 +682,6 @@ def run_training_ddp(
                     )
                 except ImportError:
                     print("WandB is enabled but not installed.")
-
-        _record_float32_matmul_precision(pm)
 
         if contains_BatchNorm(pm.network):
             if rank == 0:

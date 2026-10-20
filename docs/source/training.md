@@ -83,6 +83,7 @@ training:
     batch_size: 512          # Total effective batch size across all GPUs.
 #   gradient_updates_per_optimizer_step: 1
 #   automatic_mixed_precision: False
+#   float32_matmul_precision: highest  # 'high' enables TensorFloat-32 matmuls (A100+); see the multi-GPU guide.
 
   stage_1:
     epochs: 150
@@ -97,6 +98,7 @@ training:
     batch_size: 512
 #   gradient_updates_per_optimizer_step: 1
 #   automatic_mixed_precision: False
+#   float32_matmul_precision: highest  # 'high' enables TensorFloat-32 matmuls (A100+); see the multi-GPU guide.
 
 # Local settings that have no impact on the final trained network.
 local:
@@ -108,7 +110,6 @@ local:
 # ddp_port: 12355  # Rendezvous port for DDP; change when running several jobs on one node.
 # torch_compile: False  # Fuse the network kernels with torch.compile; see the multi-GPU guide.
 # torch_compile_mode: reduce-overhead  # Replay the compiled step as CUDA graphs; see the multi-GPU guide.
-# float32_matmul_precision: highest  # 'high' enables TensorFloat-32 matmuls (A100+); see the multi-GPU guide.
 # log_interval: 10  # Print a progress line (and read the loss from the GPU) every this many steps.
 #  wandb:
 #    project: dingo
