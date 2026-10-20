@@ -376,6 +376,17 @@ def train_stages(
             break
     end_epochs = list(np.cumsum([stage["epochs"] for stage in stages]))
 
+    if local_settings.get("torch_compile_mode") == "reduce-overhead":
+        # Not validated: DDP splits the graph at its gradient buckets, and with
+        # gradient accumulation the .grad tensors may alias graph-owned memory.
+        if (world_size is not None and world_size > 1) or any(
+            s.get("gradient_updates_per_optimizer_step", 1) > 1 for s in stages
+        ):
+            raise NotImplementedError(
+                "torch_compile_mode: reduce-overhead (CUDA graphs) is not supported "
+                "with multi-GPU training or gradient_updates_per_optimizer_step > 1."
+            )
+
     resume_training = False
     num_starting_stage = np.searchsorted(end_epochs, pm.epoch + 1)
     for n in range(num_starting_stage, num_stages):
@@ -436,6 +447,7 @@ def train_stages(
             ),
             automatic_mixed_precision=stage.get("automatic_mixed_precision", False),
             world_size=world_size if world_size is not None else 1,
+            log_interval=local_settings.get("log_interval", 10),
         )
 
         # if test_only, model should not be saved, and run is complete
@@ -567,7 +579,9 @@ def run_training(
 
     if local_settings.get("torch_compile", False):
         pm.network = compile_network(
-            pm.network, cache_dir=local_settings.get("torch_compile_cache_dir")
+            pm.network,
+            cache_dir=local_settings.get("torch_compile_cache_dir"),
+            mode=local_settings.get("torch_compile_mode"),
         )
 
     with threadpool_limits(limits=1, user_api="blas"):
@@ -697,6 +711,7 @@ def run_training_ddp(
                 pm.network,
                 rank=rank,
                 cache_dir=local_settings.get("torch_compile_cache_dir"),
+                mode=local_settings.get("torch_compile_mode"),
             )
 
         with threadpool_limits(limits=1, user_api="blas"):

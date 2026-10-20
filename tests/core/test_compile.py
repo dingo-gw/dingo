@@ -155,6 +155,44 @@ class TestCompileNetwork:
         assert torch.allclose(compiled_log_prob(theta, context), eager, atol=1e-5)
 
 
+class TestCompileMode:
+    """``local.torch_compile_mode`` (CUDA graphs cannot run on this CPU-only CI; the
+    mode is checked to reach torch.compile, and the unsupported combinations to
+    raise before training starts)."""
+
+    def test_mode_is_passed_to_torch_compile(self):
+        from unittest import mock
+
+        with mock.patch.object(torch, "compile", wraps=torch.compile) as compile:
+            compile_network(nn.Linear(2, 2), mode="reduce-overhead")
+        assert compile.call_args.kwargs == {"mode": "reduce-overhead", "dynamic": False}
+        with mock.patch.object(torch, "compile", wraps=torch.compile) as compile:
+            compile_network(nn.Linear(2, 2))
+        assert compile.call_args.kwargs == {"mode": None, "dynamic": None}
+
+    def test_unknown_mode_is_rejected(self):
+        with pytest.raises(RuntimeError, match="Unrecognized mode"):
+            compile_network(nn.Linear(2, 2), mode="fast")
+
+    def test_train_stages_rejects_cuda_graphs_with_ddp_or_accumulation(self):
+        import types
+
+        from dingo.gw.training.train_pipeline import train_stages
+
+        stage = {"epochs": 1, "gradient_updates_per_optimizer_step": 2}
+        pm = types.SimpleNamespace(
+            epoch=0,
+            device=torch.device("cpu"),
+            metadata={"train_settings": {"training": {"stage_0": stage}}},
+        )
+        local = {"runtime_limits": {}, "torch_compile_mode": "reduce-overhead"}
+        with pytest.raises(NotImplementedError, match="reduce-overhead"):
+            train_stages(pm, None, "", local)
+        stage.pop("gradient_updates_per_optimizer_step")
+        with pytest.raises(NotImplementedError, match="reduce-overhead"):
+            train_stages(pm, None, "", {**local, "world_size": 2})
+
+
 class TestResetGraphsOnRequiresGradChange:
     """Dynamo does not guard on requires_grad of parameters: a graph traced with a
     frozen layer is reused after unfreezing and never produces its gradient."""
@@ -167,7 +205,9 @@ class TestResetGraphsOnRequiresGradChange:
 
     @staticmethod
     def _set_rb(net, requires_grad):
-        for p in net[0].parameters():  # parameters "0.weight", "0.bias" play the RB layer
+        for p in net[
+            0
+        ].parameters():  # parameters "0.weight", "0.bias" play the RB layer
             p.requires_grad_(requires_grad)
 
     def test_unfreeze_without_reset_gives_no_gradient(self):

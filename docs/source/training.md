@@ -107,7 +107,9 @@ local:
                 # dingo_train_condor, request_gpus is set automatically.
 # ddp_port: 12355  # Rendezvous port for DDP; change when running several jobs on one node.
 # torch_compile: False  # Fuse the network kernels with torch.compile; see the multi-GPU guide.
+# torch_compile_mode: reduce-overhead  # Replay the compiled step as CUDA graphs; see the multi-GPU guide.
 # float32_matmul_precision: highest  # 'high' enables TensorFloat-32 matmuls (A100+); see the multi-GPU guide.
+# log_interval: 10  # Print a progress line (and read the loss from the GPU) every this many steps.
 #  wandb:
 #    project: dingo
 #    group: my_project
@@ -190,6 +192,9 @@ runtime_limits
 
 checkpoint_epochs
 : Dingo saves a temporary checkpoint in `model_latest.py` after every epoch, but this is later overwritten by the next checkpoint. This setting saves a permanent checkpoint after the specified number of epochs. Having these checkpoints can help in recovering from training failures that do not result in program termination.
+
+log_interval
+: (Optional, default 10) Print a progress line every this many optimizer steps (and at the end of each epoch). Between lines the loss stays on the GPU, so this also sets how often the host waits for the GPU; reading the loss after every step would leave the GPU idle while the next batch is fetched and launched. See [](training_multi_gpu.md#reading-the-training-log) for the line format.
 
 leave_waveforms_on_disk
 : To improve memory efficiency during training, the waveforms are not loaded into memory at the beginning of training, but separately for each batch during training. When training on a cluster, it is highly recommended to include a local path where the dataset is cached at the beginning of training (see `local_cache_path`). If RAM is not an issue, the default `leave_waveforms_on_disk=True` can be set to `False`. 

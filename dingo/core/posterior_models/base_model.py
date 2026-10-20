@@ -413,6 +413,7 @@ class BasePosteriorModel(ABC):
         gradient_updates_per_optimizer_step: int = 1,
         automatic_mixed_precision: bool = False,
         world_size: int = 1,
+        log_interval: int = 10,
     ):
         """
         Train the network for one or more epochs.
@@ -441,6 +442,9 @@ class BasePosteriorModel(ABC):
             FP32 parameter updates).
         world_size : int
             Number of GPUs (used only for logging the effective batch size).
+        log_interval : int
+            Print a progress line, and read the loss from the device, every this
+            many optimizer steps.
         """
         is_primary = self.rank is None or self.rank == 0
 
@@ -449,6 +453,7 @@ class BasePosteriorModel(ABC):
                 self,
                 dataloader=test_loader,
                 automatic_mixed_precision=automatic_mixed_precision,
+                log_interval=log_interval,
             )
             if is_primary:
                 print(f"test loss: {test_loss:.3f}")
@@ -480,6 +485,7 @@ class BasePosteriorModel(ABC):
                     automatic_mixed_precision=automatic_mixed_precision,
                     world_size=world_size,
                     scaler=scaler,
+                    log_interval=log_interval,
                 )
                 self.iteration += n_iter
 
@@ -504,6 +510,7 @@ class BasePosteriorModel(ABC):
                     gradient_updates_per_optimizer_step=gradient_updates_per_optimizer_step,
                     automatic_mixed_precision=automatic_mixed_precision,
                     world_size=world_size,
+                    log_interval=log_interval,
                 )
                 if self.rank is not None:
                     dist.all_reduce(time_start, op=dist.ReduceOp.MIN)
@@ -616,6 +623,7 @@ def train_epoch(
     automatic_mixed_precision: bool = False,
     world_size: int = 1,
     scaler=None,
+    log_interval: int = 10,
 ) -> Tuple[float, int]:
     """
     Train the network for one epoch.
@@ -635,6 +643,10 @@ def train_epoch(
         Loss scaler for mixed precision training. Should persist across epochs
         so that its calibrated loss scale is not lost; if None and
         ``automatic_mixed_precision`` is set, a fresh one is created.
+    log_interval : int
+        Print a progress line, and read the loss from the device, every this many
+        optimizer steps (the only host-device synchronization of the loop; with
+        AMP the GradScaler adds one per step).
 
     Returns
     -------
@@ -642,6 +654,7 @@ def train_epoch(
         Average loss over the epoch and number of optimizer steps performed.
     """
     pm.network.train()
+    is_primary = pm.rank is None or pm.rank == 0
 
     if pm.rank is None:
         effective_bs = dataloader.batch_size
@@ -653,7 +666,7 @@ def train_epoch(
         len_dataset=_dataset_len(dataloader),
         batch_size_per_grad_update=effective_bs,
         mode="Train",
-        print_freq=1,
+        log_interval=log_interval,
         device=pm.device,
     )
 
@@ -665,7 +678,10 @@ def train_epoch(
     ddp_module = get_ddp_module(pm.network)
 
     for batch_idx, data in enumerate(dataloader):
-        loss_info.update_timer("Dataloader")
+        loss_info.update_timer()
+        # With torch_compile_mode: reduce-overhead, lets CUDA-graph trees reuse the
+        # previous step's output memory; otherwise a counter increment.
+        torch.compiler.cudagraph_mark_step_begin()
 
         if batch_idx % gradient_updates_per_optimizer_step == 0:
             pm.optimizer.zero_grad(set_to_none=True)
@@ -704,10 +720,12 @@ def train_epoch(
             else:
                 pm.optimizer.step()
 
-            loss_info.update()
-            if pm.rank is None or pm.rank == 0:
+            # update() and flush() run on every rank (DDP collectives); rank 0 prints.
+            if loss_info.update() and is_primary:
                 loss_info.print_info(batch_idx)
 
+    if loss_info.flush() and is_primary:  # the last, partial window
+        loss_info.print_info(batch_idx)
     return loss_info.get_avg(), loss_info.get_iteration()
 
 
@@ -717,6 +735,7 @@ def test_epoch(
     gradient_updates_per_optimizer_step: int = 1,
     automatic_mixed_precision: bool = False,
     world_size: int = 1,
+    log_interval: int = 10,
 ) -> float:
     """
     Evaluate the network on the test set.
@@ -735,6 +754,9 @@ def test_epoch(
         numerically consistent with the train loss.
     world_size : int
         Number of GPUs, used only for logging.
+    log_interval : int
+        Print a progress line, and read the loss from the device, every this many
+        (effective) batches.
 
     Returns
     -------
@@ -745,6 +767,7 @@ def test_epoch(
     # full compilation, which a short test epoch never amortizes.
     with torch.no_grad(), eager_mode():
         pm.network.eval()
+        is_primary = pm.rank is None or pm.rank == 0
 
         if pm.rank is None:
             effective_bs = dataloader.batch_size
@@ -752,7 +775,7 @@ def test_epoch(
             effective_bs = dataloader.batch_size * world_size
 
         if _dataset_len(dataloader) < effective_bs:
-            if pm.rank is None or pm.rank == 0:
+            if is_primary:
                 print(
                     f"Warning: test dataset (len {_dataset_len(dataloader)}) is smaller "
                     f"than effective_batch_size={effective_bs}. "
@@ -766,7 +789,7 @@ def test_epoch(
             len_dataset=_dataset_len(dataloader),
             batch_size_per_grad_update=effective_bs,
             mode="Test",
-            print_freq=1,
+            log_interval=log_interval,
             device=pm.device,
         )
 
@@ -782,8 +805,9 @@ def test_epoch(
                 loss = pm.loss(data[0], *data[1:])
             loss_info.cache_loss(loss, len(data[0]))
             if (batch_idx + 1) % gradient_updates_per_optimizer_step == 0:
-                loss_info.update()
-                if pm.rank is None or pm.rank == 0:
+                if loss_info.update() and is_primary:
                     loss_info.print_info(batch_idx)
 
+        if loss_info.flush() and is_primary:  # the last, partial window
+            loss_info.print_info(batch_idx)
         return loss_info.get_avg()

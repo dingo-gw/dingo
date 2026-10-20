@@ -285,7 +285,7 @@ class TestLossInfoSingleGPU:
             device=torch.device("cpu"),
         )
         loss = torch.tensor(2.0)
-        info.update_timer("Dataloader")
+        info.update_timer()
         info.cache_loss(loss, n=10)
         info.update()
         assert abs(info.get_avg() - 2.0) < 1e-5
@@ -293,7 +293,7 @@ class TestLossInfoSingleGPU:
     def test_iteration_count(self):
         info = LossInfo(1, 100, 10, device=torch.device("cpu"))
         for _ in range(3):
-            info.update_timer("Dataloader")
+            info.update_timer()
             info.cache_loss(torch.tensor(1.0), n=10)
             info.update()
         assert info.get_iteration() == 3
@@ -321,13 +321,27 @@ def _worker_loss_info(rank, world_size, port, result_queue):
     info = LossInfo(1, 100, 10, device=device)
     # Simulate two optimizer steps with different losses per rank.
     for i in range(2):
-        info.update_timer("Dataloader")
+        info.update_timer()
         loss = torch.tensor(float(rank + 1) * (i + 1))
         info.cache_loss(loss, n=10)
         info.update()
     avg = info.get_avg()
     n_iter = info.get_iteration()
     result_queue.put((rank, avg, n_iter))
+    _cleanup()
+
+
+def _worker_loss_info_window(rank, world_size, port, result_queue):
+    """Worker for LossInfo with log_interval=2: three steps, so that the last
+    window is partial and closed by the final flush in get_avg()."""
+    _setup_gloo(rank, world_size, port)
+    info = LossInfo(1, 100, 10, device=torch.device("cpu"), log_interval=2)
+    synced = []
+    for i in range(3):
+        info.update_timer()
+        info.cache_loss(torch.tensor(float(rank + 1) * (i + 1)), n=10 * (rank + 1))
+        synced.append(info.update())
+    result_queue.put((rank, info.loss, info.get_avg(), synced))
     _cleanup()
 
 
@@ -422,6 +436,20 @@ class TestGlooDDP:
         # mean over ranks of (1, 2) and (2, 4), averaged over the two steps.
         assert results[0][0] == pytest.approx(2.25)
         assert results[1][0] == pytest.approx(2.25)
+
+    def test_loss_info_window_aggregation(self, free_port):
+        """With log_interval=2 the window sums are all-reduced only at the sync
+        points; the sample-weighted epoch average is identical on both ranks."""
+        world_size = 2
+        results = _run_workers(_worker_loss_info_window, world_size, free_port)
+        for rank in (0, 1):
+            window_loss, avg, synced = results[rank]
+            assert synced == [False, True, False]
+            # First window: rank 0 contributes losses 1, 2 (n=10 each), rank 1
+            # losses 2, 4 (n=20 each): (10 + 20 + 40 + 80) / 60.
+            assert window_loss == pytest.approx(150 / 60)
+            # Epoch: plus the third step, losses 3 (n=10) and 6 (n=20).
+            assert avg == pytest.approx((150 + 30 + 120) / 90)
 
     def test_network_to_device_sets_rank(self, free_port):
         """Inside a process group, the device index becomes the rank."""
