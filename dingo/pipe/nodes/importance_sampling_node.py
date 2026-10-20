@@ -2,7 +2,10 @@ import os
 
 from bilby_pipe.job_creation.nodes import AnalysisNode
 
-from dingo.pipe.utils import _strip_unwanted_submission_keys
+from dingo.pipe.utils import (
+    BILBY_PIPE_USES_CONTAINER_UNIVERSE,
+    _strip_unwanted_submission_keys,
+)
 
 
 class ImportanceSamplingNode(AnalysisNode):
@@ -50,7 +53,7 @@ class ImportanceSamplingNode(AnalysisNode):
                     self.extra_lines.append(f'MY.DESIRED_Sites = "{sites}"')
                 self.requirements.append("IS_GLIDEIN=?=True")
 
-                if self.transfer_container:
+                if not BILBY_PIPE_USES_CONTAINER_UNIVERSE and self.transfer_container:
                     input_files_to_transfer.append(self.inputs.container)
 
             # Credentials are needed to access any OSDF files
