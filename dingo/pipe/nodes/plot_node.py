@@ -62,6 +62,11 @@ class PlotNode(BilbyPlotNode):
         if self.inputs.simple_submission:
             _strip_unwanted_submission_keys(self.job)
 
+    @BilbyPlotNode.universe.setter
+    def universe(self, universe):
+        # Keep the inherited local_plot behavior while allowing container jobs.
+        self._universe = universe
+
     @property
     def executable(self):
         return self._get_executable_path("dingo_pipe_plot")
@@ -87,6 +92,11 @@ class PlotPPNode(BilbyPlotNode):
 
         if self.inputs.simple_submission:
             _strip_unwanted_submission_keys(self.job)
+
+    @BilbyPlotNode.universe.setter
+    def universe(self, universe):
+        # Keep the inherited local_plot behavior while allowing container jobs.
+        self._universe = universe
 
     @property
     def executable(self):
