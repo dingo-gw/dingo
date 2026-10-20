@@ -18,12 +18,17 @@ from typing import Union, Callable, Tuple, Optional
 
 
 class DingoLULinear(transforms.LULinear):
-    """glasflow's LULinear with the LU index arrays held as buffers.
+    """glasflow's LULinear with the LU index arrays held as buffers, run in fp32.
 
     nflows keeps the index arrays as numpy attributes, which Dynamo lifts as CPU graph
     inputs that CUDA graphs cannot record (torch_compile_mode: reduce-overhead). As
     buffers they live on the device and are static graph inputs. They are
     non-persistent, so the state dict, and hence checkpoints, are unchanged.
+
+    The transform runs with autocast disabled on fp32 inputs. Autocast would run its
+    matrix product in reduced precision, and since the spline transforms return the
+    dtype of their inputs, the flow variable and the log-determinant would then stay
+    in reduced precision through the rest of the flow.
     """
 
     def __init__(self, features: int, **kwargs):
@@ -32,6 +37,16 @@ class DingoLULinear(transforms.LULinear):
             indices = torch.as_tensor(np.stack(getattr(self, name)))
             delattr(self, name)
             self.register_buffer(name, indices, persistent=False)
+
+    def forward(self, inputs, context=None):
+        """Forward transform in fp32, also under autocast."""
+        with torch.autocast(inputs.device.type, enabled=False):
+            return super().forward(inputs.float(), context)
+
+    def inverse(self, inputs, context=None):
+        """Inverse transform in fp32, also under autocast."""
+        with torch.autocast(inputs.device.type, enabled=False):
+            return super().inverse(inputs.float(), context)
 
 
 def create_linear_transform(param_dim: int):

@@ -196,6 +196,26 @@ class TestLinearTransformGraphInputs:
         for ours, theirs in zip(lu.inverse(x), reference.inverse(x)):
             assert torch.equal(ours, theirs)
 
+    def test_fp32_under_autocast(self):
+        from glasflow.nflows import transforms
+
+        torch.manual_seed(0)
+        lu = create_linear_transform(5)._transforms[1]
+        with torch.no_grad():
+            for p in lu.parameters():
+                p.normal_()
+        reference = transforms.LULinear(5, identity_init=True)
+        reference.load_state_dict(lu.state_dict())
+        x = torch.randn(3, 5)
+        with torch.autocast("cpu", dtype=torch.bfloat16):
+            outputs, logabsdet = lu(x)
+            reference_outputs, _ = reference(x)
+        assert (
+            reference_outputs.dtype == torch.bfloat16
+        )  # what autocast does to F.linear
+        assert outputs.dtype == logabsdet.dtype == torch.float32
+        assert torch.equal(outputs, lu(x)[0])
+
 
 class TestCompileMode:
     """``local.torch_compile_mode`` (CUDA graphs cannot run on this CPU-only CI; the
