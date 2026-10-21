@@ -217,6 +217,9 @@ class Result(CoreResult):
         if prior_update is not None:
             prior_update = PriorDict(prior_update.copy())
             self.prior.update(prior_update)
+            # The copied prior carries the context prior's cached constraint
+            # normalization; re-estimate it for the updated prior (see update_prior).
+            self.prior._cached_normalizations = {}
 
         # Split off prior over geocent_time if samples appear to be time-marginalized.
         # This needs to be saved to initialize the likelihood.

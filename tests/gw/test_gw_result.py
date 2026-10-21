@@ -669,6 +669,33 @@ def test_update_prior_renormalizes_constrained_prior():
     np.testing.assert_allclose(result.samples["log_prior"], expected, atol=0.05)
 
 
+def test_build_prior_renormalizes_constrained_prior_after_update():
+    # _build_prior (on load, and again after sample_proposal_extensions) copies the
+    # context's prior, whose cached constraint normalization belongs to the prior
+    # before the stored prior update.
+    result = _seeded_result()
+    param_keys = [k for k, v in result.prior.items() if not isinstance(v, Constraint)]
+    result.sampler_context.prior.ln_prob(result.samples[param_keys], axis=0)
+    update = {
+        "chirp_mass": "bilby.core.prior.LogUniform(minimum=15.0, maximum=100.0, "
+        "name='chirp_mass')"
+    }
+    result.importance_sampling_metadata["prior_update"] = dict(update)
+    result._build_prior()
+    fresh = build_prior_with_defaults(
+        {
+            **INTRINSIC_PRIOR,
+            **get_extrinsic_prior_dict(EXTRINSIC_PRIOR),
+            **update,
+        }
+    )
+    np.testing.assert_allclose(
+        result.prior.ln_prob(result.samples[param_keys], axis=0),
+        fresh.ln_prob(result.samples[param_keys], axis=0),
+        atol=0.05,
+    )
+
+
 def test_update_prior_reweights_importance_sampled_result():
     # After importance sampling (log_evidence set), update_prior recomputes the
     # weights and evidence. The importance-sampled state is fabricated from the
