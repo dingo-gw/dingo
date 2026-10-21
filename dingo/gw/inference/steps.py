@@ -77,19 +77,24 @@ def _log_phase_marginal(
     """Log of `q(phase)` for one sample, before the floor: the likelihood on the
     (phase, psi) grid summed over psi. The endpoint psi = pi is dropped: psi has period
     pi, so it repeats the phase-dependent psi = 0 column and would double-count it."""
-    grid = likelihood.log_likelihood_from_phase_grid_terms(
-        {
-            **terms,
-            "kappa2_modes": kappa2_modes,
-            "rho2opt_const": rho2opt_const,
-            "rho2opt_crossterms": rho2opt_crossterms,
-        },
-        phases,
-        psis,
-    )[:, :-1]
-    # A plain numpy logsumexp: scipy.special.logsumexp is ~4x slower here.
-    peak = grid.max(axis=-1)
-    return peak + np.log(np.exp(grid - peak[:, None]).sum(axis=-1))
+    terms = {
+        **terms,
+        "kappa2_modes": kappa2_modes,
+        "rho2opt_const": rho2opt_const,
+        "rho2opt_crossterms": rho2opt_crossterms,
+    }
+    # Blocks of ~65k grid points keep the temporaries in cache: with every worker
+    # streaming whole fine grids through memory, the step is bandwidth-bound.
+    block = max(1, 2**16 // len(psis))
+    log_marginal = []
+    for start in range(0, len(phases), block):
+        grid = likelihood.log_likelihood_from_phase_grid_terms(
+            terms, phases[start : start + block], psis
+        )[:, :-1]
+        # A plain numpy logsumexp: scipy.special.logsumexp is ~4x slower here.
+        peak = grid.max(axis=-1)
+        log_marginal.append(peak + np.log(np.exp(grid - peak[:, None]).sum(axis=-1)))
+    return np.concatenate(log_marginal)
 
 
 def _floored_density(log_density, uniform_weight):
