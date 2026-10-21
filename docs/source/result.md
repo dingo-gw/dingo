@@ -46,7 +46,7 @@ n_grid_phase
 : Number of points of the phase grid on which the likelihoods are evaluated (`dingo_pipe` uses 5001 in `PhaseRecoveryDefault`, and 4096 in `PhasePsiRecoveryDefault` when $\psi$ is drawn as well). Not used with `approximation_22_mode: true`, where the phase is drawn exactly.
 
 n_grid_psi
-: Number of $\psi$ grid points on $[0, \pi]$. Only used if the samples lack `psi` as well, see above (1024 in `PhasePsiRecoveryDefault`). The grids only shape the proposal, so importance sampling is unbiased for any size, but they should resolve the likelihood peak, whose width in either angle is about 1 / (2 SNR): the 4096 × 1024 default resolves it up to SNR ≈ 100, and 512 × 128 suffices for SNR ≲ 20. The joint grid costs about 20 ms of CPU time per sample at the default (proportional to `n_grid_phase` × `n_grid_psi`), so about 15 core-minutes per 50 000 samples, and needs about 2 × (samples) × `n_grid_phase` × 8 bytes of memory (3.3 GB for 50 000 samples).
+: Number of $\psi$ grid points on $[0, \pi]$. Only used if the samples lack `psi` as well, see above (1024 in `PhasePsiRecoveryDefault`). The grids only shape the proposal, so importance sampling is unbiased for any size, but they should resolve the likelihood peak, whose width in either angle is about 1 / (2 SNR): the 4096 × 1024 default resolves it up to SNR ≈ 100, and 512 × 128 suffices for SNR ≲ 20. The joint grid costs about 20 ms of CPU time per sample at the default (proportional to `n_grid_phase` × `n_grid_psi`), so about 15 core-minutes per 50 000 samples, and needs memory proportional to (samples) × `n_grid_phase`, about 4 GB for 50 000 samples.
 
 uniform_weight
 : Base probability level to add to ensure mass coverage.

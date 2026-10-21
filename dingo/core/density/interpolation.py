@@ -34,8 +34,7 @@ def interpolated_sample_and_log_prob_multi(sample_points, values):
         pdf, cdf = _cell_mean_histogram(edges, values[start : start + chunk])
         # Inverse CDF, as scipy's ppf (np.interp(u, cdf, edges)) row by row: the last
         # edge j with cdf[j] <= u, then linear within cell j, whose mass is then
-        # nonzero unless u is at or beyond the end of the CDF (handled below, as is
-        # u = 0).
+        # nonzero unless u is at or beyond the end of the CDF (handled below).
         j = np.minimum((cdf <= u[:, None]).sum(axis=1) - 1, len(edges) - 2)
         rows = np.arange(len(u))
         lower, upper = cdf[rows, j], cdf[rows, j + 1]
@@ -43,7 +42,6 @@ def interpolated_sample_and_log_prob_multi(sample_points, values):
             slope = (edges[j + 1] - edges[j]) / (upper - lower)
             sample = slope * (u - lower) + edges[j]
         sample = np.where(u >= cdf[:, -1], edges[-1], sample)
-        sample = np.where(u == 0, edges[0], sample)
         samples.append(sample)
         log_probs.append(_log_pdf(edges, pdf, sample))
     return np.concatenate(samples), np.concatenate(log_probs)

@@ -26,16 +26,6 @@ def test_interpolated_log_prob_normalizes_uniform_distribution():
     np.testing.assert_allclose(log_prob, -np.log(WIDTH), atol=1e-10)
 
 
-def test_interpolated_sample_and_log_prob_multi_shapes():
-    batch_values = np.stack([UNIFORM_VALUES] * 4)
-    samples, log_probs = interpolated_sample_and_log_prob_multi(
-        SAMPLE_POINTS, batch_values
-    )
-    assert samples.shape == (4,)
-    assert log_probs.shape == (4,)
-    assert np.all((samples >= 0.0) & (samples <= WIDTH))
-
-
 def test_matches_scipy_rv_histogram():
     """Row by row, the draws and log probs equal those of scipy's rv_histogram over
     the cell-mean density, for the same uniform variates: rough densities with

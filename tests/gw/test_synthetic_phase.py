@@ -347,7 +347,7 @@ def test_phase_psi_profile_marginal_matches_formula(n_grid_psi):
     # q(phase) is the psi-marginal of exp(log L) over the psi grid without its
     # duplicated endpoint psi = pi (plus the floor), the same with a pool (70 rows:
     # more than one 32-row chunk, so that the pool is used). With 4097 psi points the
-    # phase grid is evaluated in blocks of 15 phases.
+    # phase grid is evaluated in blocks of 16 phases.
     n, weight = 70, 0.01
     given = _given(n)
     profiles = []

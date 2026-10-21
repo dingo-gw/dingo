@@ -114,8 +114,7 @@ def _phase_density(
 def _phase_densities(likelihood, terms, phases, uniform_weight, psis, num_processes):
     """`_phase_density` for every sample of the stacked `terms`, one sample per pool
     task: `psis` is either one psi grid shared by all samples, or one psi per sample
-    (shape (N, 1)). The phasors of the phase grid are computed once, for all samples.
-    Returns an array of shape (N, len(phases))."""
+    (shape (N, 1)). Returns an array of shape (N, len(phases))."""
     per_row = (
         terms["kappa2_modes"],
         terms["rho2opt_const"],

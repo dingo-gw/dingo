@@ -675,9 +675,9 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         psis = np.asarray(psis)
         # Basis weights of shape (..., H, K) with K = 2.
         w = np.stack([np.cos(2 * psis), np.sin(2 * psis)], axis=-1)
-        # Phasors of shape (..., orders, G), contracted with the coefficients of shape
-        # (..., K, orders) over the orders, leaving the basis axes: (..., K, G) and
-        # (..., K, K, G).
+        # Phasors exp(-i * order * phase) of shape (..., orders, G), contracted with the
+        # coefficients of shape (..., K, orders) over the orders, leaving the basis
+        # axes: (..., K, G) and (..., K, K, G).
         if phasors is None:
             phasors = phase_grid_phasors(terms, phases)
         phasor_m, phasor_delta = phasors
@@ -902,10 +902,8 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
 
 
 def phase_grid_phasors(terms: dict, phases: np.ndarray) -> tuple:
-    """The phasors exp(-i m phase) and exp(-i delta phase) for the mode orders
-    `terms["m_vals"]` and `terms["deltas"]` of `phase_grid_terms`, of shapes
-    (..., orders, G) for phases of shape (..., G), as
-    `StationaryGaussianGWLikelihood.log_likelihood_from_phase_grid_terms` uses them."""
+    """exp(-i m phase) and exp(-i delta phase) for the mode orders of
+    `phase_grid_terms`, of shape (..., orders, G) for phases of shape (..., G)."""
     phases = np.asarray(phases)
     return (
         np.exp(-1j * terms["m_vals"][:, None] * phases[..., None, :]),
