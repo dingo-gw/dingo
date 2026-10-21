@@ -924,10 +924,11 @@ class RAToEventFrame(Reparametrization):
     produces the event-frame `ra`, `inverse` recovers `ra@t_ref`. The sidereal
     correction is read from the shared context (`t_ref` and the event time).
 
-    The modulo makes the map a bijection on the circle, while the flow's density lives
-    on the real line: a sample drawn outside `[0, 2 pi)` is wrapped, so `inverse`
-    recovers its principal-branch representative and a re-evaluated `log_prob` refers
-    to that branch. Only tail samples outside the bounded `ra` prior are affected.
+    The flow's density lives on the real line, not the circle. A draw outside
+    `[0, 2 pi)` would be wrapped onto a point the flow also reaches in-range, while its
+    `log_prob` counts only its own branch, which overweights it in importance sampling.
+    `forward` therefore sets such rows to NaN (weight 0), as the `ra` prior does when
+    no rotation is applied.
     """
 
     def __init__(self):
@@ -958,15 +959,19 @@ class RAToEventFrame(Reparametrization):
             return {"ra": given["ra@t_ref"]}
         # ra is a bounded angle -> float32 is plenty. The correction is a difference of
         # absolute GPS times, so compute it in float64, but store the wrapped angle float32.
-        ra = (given["ra@t_ref"].double() + correction) % (2 * np.pi)
-        return {"ra": ra.float()}
+        ra_tref = given["ra@t_ref"]
+        ra = ((ra_tref.double() + correction) % (2 * np.pi)).float()
+        outside = (ra_tref < 0) | (ra_tref >= 2 * np.pi)
+        return {"ra": ra.masked_fill(outside, float("nan"))}
 
     def inverse(self, params, context, given=None):
         correction = self._correction(context)
         if correction == 0.0:
             return {"ra@t_ref": params["ra"]}
-        ra_tref = (params["ra"].double() - correction) % (2 * np.pi)
-        return {"ra@t_ref": ra_tref.float()}
+        ra_tref = ((params["ra"].double() - correction) % (2 * np.pi)).float()
+        # The float32 cast can round a value just below 2 pi up to 2 pi, which `forward`
+        # would reject; on the circle it is 0.
+        return {"ra@t_ref": ra_tref.masked_fill(ra_tref >= 2 * np.pi, 0.0)}
 
 
 class RAToTrainingFrame(RAToEventFrame):

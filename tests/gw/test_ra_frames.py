@@ -60,6 +60,38 @@ def test_ra_reparam_matches_sidereal_shift():
     assert torch.all((ra >= 0) & (ra < 2 * np.pi))
 
 
+def test_ra_reparam_rejects_draws_outside_the_box():
+    """A flow draw outside [0, 2 pi) must not be wrapped into the prior (its log_prob
+    covers one branch only): it becomes NaN, so importance sampling gives it weight 0.
+    In-range rows are unchanged."""
+    rp = RAToEventFrame()
+    ctx = _context(t_ref=1126259462.4, t_event=1264316116.4)
+    ra_tref = torch.tensor([-0.1, 0.0, 3.0, 2 * np.pi - 1e-3, 2 * np.pi, 6.5])
+
+    ra = rp.forward({"ra@t_ref": ra_tref}, ctx)["ra"]
+
+    outside = torch.tensor([True, False, False, False, True, True])
+    assert torch.all(torch.isnan(ra[outside]))
+    inside = rp.forward({"ra@t_ref": ra_tref[~outside]}, ctx)["ra"]
+    assert torch.equal(ra[~outside], inside)
+    assert torch.all((inside >= 0) & (inside < 2 * np.pi))
+
+
+def test_ra_reparam_inverse_stays_below_two_pi():
+    """An event-frame ra whose training-frame image lies just below 2 pi must not round
+    up to 2 pi in float32: a pinned ra would then be rejected by `forward` (every row
+    NaN)."""
+    rp = RAToEventFrame()
+    ctx = _context(t_ref=1126259462.4, t_event=1264316117.4)
+    # Its float64 image is 6.28318526 (2 pi - 5e-8), which float32 rounds to 2 pi.
+    ra = torch.tensor([1.5881884098052979], dtype=torch.float32)
+
+    ra_tref = rp.inverse({"ra": ra}, ctx)["ra@t_ref"]
+
+    assert torch.all((ra_tref >= 0) & (ra_tref < 2 * np.pi))
+    assert not torch.any(torch.isnan(rp.forward({"ra@t_ref": ra_tref}, ctx)["ra"]))
+
+
 def test_ra_reparam_is_noop_without_a_distinct_event_time():
     rp = RAToEventFrame()
     ra_tref = torch.rand(100, dtype=torch.float32) * (2 * np.pi)
