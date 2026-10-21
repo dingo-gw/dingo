@@ -183,3 +183,21 @@ def test_mfd_time_translation_torch(mfd):
     assert torch.allclose(result[..., 1, :], torch.tensor(0.0), atol=1e-2)
     assert torch.allclose(result[..., 2, :], torch.tensor(constant_value))
 
+
+def test_mfd_time_shift_bin_average(mfd):
+    """For data constant across each bin, shifting on the base domain and decimating
+    equals decimating, shifting at the band centres and applying the bin-average
+    factor; without the factor the two differ (top bins are 2 Hz wide here)."""
+    dt = np.array([0.03, -0.11])
+    base = mfd.base_domain
+    expected = mfd.decimate(
+        base.time_translate_data(np.ones((2, len(base)), dtype=complex), dt)
+    )
+    shifted = mfd.time_translate_data(np.ones((2, len(mfd)), dtype=complex), dt)
+    assert np.allclose(shifted * mfd.time_shift_bin_average(dt), expected)
+    assert not np.allclose(shifted, expected, rtol=1e-3)
+    # The default is not written to the settings; False round-trips.
+    assert mfd.bin_averaged_time_shifts
+    assert "bin_averaged_time_shifts" not in mfd.domain_dict
+    off = build_domain({**mfd.domain_dict, "bin_averaged_time_shifts": False})
+    assert build_domain(off.domain_dict).bin_averaged_time_shifts is False

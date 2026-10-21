@@ -388,10 +388,11 @@ class WaveformGenerator:
                 Distance: one of (luminosity_distance, redshift, comoving_distance)
                 Inclination: theta_jn
                 Reference phase: phase
-                Geocentric time: geocent_time (GPS time)
-            The following parameters are not required:
+            The following parameters are not required, and are ignored if present:
                 Sky location: ra, dec,
-                Polarization angle: psi
+                Polarization angle: psi,
+                Geocentric time: geocent_time (the coalescence is returned at t = 0;
+                    the time shift is applied in ProjectOntoDetectors)
             Units:
                 Masses should be given in units of solar masses.
                 Distance should be given in megaparsecs (Mpc).

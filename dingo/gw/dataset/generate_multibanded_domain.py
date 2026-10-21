@@ -39,6 +39,7 @@ from dingo.gw.dataset._multibanded_domain_utils import (
     build_extreme_prior,
     heterodyne_polarizations,
     print_mismatch_stats,
+    time_shift_polarizations,
 )
 from dingo.gw.dataset.generate_dataset import \
     generate_parameters_and_polarizations
@@ -453,7 +454,8 @@ def _generate_whitened_waveforms(
         num_processes=num_processes,
     )
 
-    # Heterodyning is pointwise, so the 1x waveforms are a subsample of the 2x ones.
+    # Both are pointwise, so the 1x waveforms are a subsample of the 2x ones.
+    polarizations_2x = time_shift_polarizations(polarizations_2x, ufd_2x, parameters)
     polarizations_2x = heterodyne_polarizations(
         polarizations_2x, ufd_2x, parameters, settings, chirp_mass_proxy_offset
     )
