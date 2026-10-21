@@ -66,6 +66,41 @@ def print_mismatch_stats(mismatches: np.ndarray, num_samples: int) -> None:
     print(f"    99.99 -> {np.percentile(mismatches, 99.99)}")
 
 
+def time_shift_polarizations(
+    polarizations: Dict[str, np.ndarray], domain, parameters
+) -> Dict[str, np.ndarray]:
+    """Time-shift the generated waveforms by their ``geocent_time`` on ``domain``.
+
+    The waveform generator returns polarizations with the merger at t = 0; the time
+    shift is applied later, in the detector projection. Without this step the
+    boundary ``geocent_time`` of :func:`build_extreme_prior` would not reach the
+    waveforms. On a uniform domain this is the shift real data carry before they are
+    decimated; on a multibanded domain it is the shift applied in training, by
+    ProjectOntoDetectors (band-centre phase, times the bin-average factor if the
+    domain has ``bin_averaged_time_shifts``).
+
+    Parameters
+    ----------
+    polarizations : Dict[str, np.ndarray]
+        Waveforms on ``domain``, shape ``(num_samples, len(domain()))`` per key.
+    domain
+        Frequency domain of the waveforms.
+    parameters : pd.DataFrame
+        Waveform parameters, one row per sample, with ``geocent_time``.
+
+    Returns
+    -------
+    Dict[str, np.ndarray]
+        Time-shifted waveforms.
+    """
+    dt = parameters["geocent_time"].to_numpy(dtype=float)
+    shifted = {k: domain.time_translate_data(v, dt) for k, v in polarizations.items()}
+    if getattr(domain, "bin_averaged_time_shifts", False):
+        factor = domain.time_shift_bin_average(dt)
+        shifted = {k: v * factor for k, v in shifted.items()}
+    return shifted
+
+
 def heterodyne_polarizations(
     polarizations: Dict[str, np.ndarray],
     domain,

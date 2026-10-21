@@ -388,10 +388,15 @@ class WaveformGenerator:
                 Distance: one of (luminosity_distance, redshift, comoving_distance)
                 Inclination: theta_jn
                 Reference phase: phase
-                Geocentric time: geocent_time (GPS time)
-            The following parameters are not required:
+            The following parameters are not required, and are ignored if present:
                 Sky location: ra, dec,
-                Polarization angle: psi
+                Polarization angle: psi,
+                Geocentric time: geocent_time. The polarizations are returned with
+                the model's coalescence time (LAL's t = 0 reference) at t = 0; the
+                time shift is applied in the detector projection (GetDetectorTimes,
+                ProjectOntoDetectors). Waveform dataset priors nevertheless set
+                geocent_time: 0.0, which ProjectOntoDetectors reads as the reference
+                time of the stored polarizations and requires to be 0.
             Units:
                 Masses should be given in units of solar masses.
                 Distance should be given in megaparsecs (Mpc).

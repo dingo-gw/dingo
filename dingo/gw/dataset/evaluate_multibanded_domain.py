@@ -9,6 +9,7 @@ from dingo.gw.dataset._multibanded_domain_utils import (
     build_extreme_prior,
     heterodyne_polarizations,
     print_mismatch_stats,
+    time_shift_polarizations,
 )
 from dingo.gw.domains import MultibandedFrequencyDomain, build_domain
 from dingo.gw.gwutils import get_mismatch
@@ -71,6 +72,12 @@ def _evaluate_multibanding_main(
     # Generate UFD waveforms, re-using the parameter choices from before.
     polarizations_ufd = generate_waveforms_parallel(waveform_generator_ufd, parameters)
 
+    # The training path shifts at the band centres, real data are shifted before any
+    # decimation.
+    polarizations_mfd = time_shift_polarizations(polarizations_mfd, domain, parameters)
+    polarizations_ufd = time_shift_polarizations(
+        polarizations_ufd, domain.base_domain, parameters
+    )
     polarizations_mfd = heterodyne_polarizations(
         polarizations_mfd, domain, parameters, settings, chirp_mass_proxy_offset
     )

@@ -39,6 +39,7 @@ from dingo.gw.dataset._multibanded_domain_utils import (
     build_extreme_prior,
     heterodyne_polarizations,
     print_mismatch_stats,
+    time_shift_polarizations,
 )
 from dingo.gw.dataset.generate_dataset import \
     generate_parameters_and_polarizations
@@ -340,7 +341,7 @@ def _load_asd(
     clips local maxima leaving monotonic stretches of the ASD untouched. This way the broadband shape 
     of the PSD is still taken into account while the ASD specific spectral lines are not. 
     We do the smoothing in this function rather than hard coding the location 
-    of the spectral line in ``aLIGO_ZERO_DET_high_P_asd.txt``since that is ASD-agnostic. 
+    of the spectral line in ``aLIGO_ZERO_DET_high_P_asd.txt``since that is ASD-agnostic.
 
     Parameters
     ----------
@@ -453,7 +454,9 @@ def _generate_whitened_waveforms(
         num_processes=num_processes,
     )
 
-    # Heterodyning is pointwise, so the 1x waveforms are a subsample of the 2x ones.
+    # Time shifting and heterodyning are pointwise, so the 1x waveforms are a
+    # subsample of the 2x ones.
+    polarizations_2x = time_shift_polarizations(polarizations_2x, ufd_2x, parameters)
     polarizations_2x = heterodyne_polarizations(
         polarizations_2x, ufd_2x, parameters, settings, chirp_mass_proxy_offset
     )

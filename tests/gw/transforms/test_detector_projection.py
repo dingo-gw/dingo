@@ -82,3 +82,48 @@ def test_time_delay_from_geocenter():
             assert np.allclose(
                 td_idx, time_delay_from_geocenter(ifo, ra_idx, dec_idx, ref_time)
             )
+
+
+@pytest.mark.parametrize("bin_averaged", [True, False])
+def test_projection_on_mfd_matches_shift_then_decimate(bin_averaged):
+    """Projecting onto a multibanded domain with bin_averaged_time_shifts reproduces
+    projecting on the base domain (time shift there) and then decimating, for
+    polarizations constant across each bin; without the option it does not."""
+    ref_time = 1126259462.391
+    ifo_list = InterferometerList(["H1", "L1"])
+    ufd = build_domain(
+        {"type": "UniformFrequencyDomain", "f_min": 20.0, "f_max": 1024.0, "delta_f": 0.125}
+    )
+    mfd = build_domain(
+        {
+            "type": "MultibandedFrequencyDomain",
+            "nodes": [20.0, 64.0, 256.0, 1024.0],
+            "delta_f_initial": 0.5,
+            "base_domain": ufd.domain_dict,
+            "bin_averaged_time_shifts": bin_averaged,
+        }
+    )
+
+    def project(domain):
+        n = len(domain)
+        sample = {
+            "parameters": {"luminosity_distance": 100.0, "geocent_time": 0.0},
+            "waveform": {
+                "h_plus": np.full(n, 1.0 + 0.5j),
+                "h_cross": np.full(n, 0.3 - 1.0j),
+            },
+            "extrinsic_parameters": {
+                "luminosity_distance": 200.0,
+                "ra": 1.0,
+                "dec": 0.3,
+                "psi": 0.5,
+                "geocent_time": 0.09,
+            },
+        }
+        sample = GetDetectorTimes(ifo_list, ref_time)(sample)
+        return ProjectOntoDetectors(ifo_list, domain, ref_time)(sample)["waveform"]
+
+    on_mfd, on_ufd = project(mfd), project(ufd)
+    for ifo in ["H1", "L1"]:
+        expected = mfd.decimate(on_ufd[ifo])
+        assert np.allclose(on_mfd[ifo], expected) == bin_averaged
