@@ -31,6 +31,7 @@ from dingo.core.posterior_models import BasePosteriorModel
 from dingo.core.transforms import RenameKey
 from dingo.gw.conversion import change_spin_conversion_phase
 from dingo.gw.domains import build_domain
+from dingo.gw.likelihood import phase_grid_phasors
 from dingo.gw.transforms import (
     CopyToExtrinsicParameters,
     GetDetectorTimes,
@@ -75,6 +76,7 @@ def _phase_density(
     likelihood,
     terms,
     phases,
+    phasors,
     uniform_weight,
     psis,
     kappa2_modes,
@@ -98,7 +100,10 @@ def _phase_density(
     log_marginal = []
     for start in range(0, len(phases), block):
         grid = likelihood.log_likelihood_from_phase_grid_terms(
-            terms, phases[start : start + block], psis
+            terms,
+            phases[start : start + block],
+            psis,
+            phasors=[p[:, start : start + block] for p in phasors],
         )
         # A plain numpy logsumexp: scipy.special.logsumexp is ~4x slower here.
         peak = grid.max(axis=-1)
@@ -109,17 +114,20 @@ def _phase_density(
 def _phase_densities(likelihood, terms, phases, uniform_weight, psis, num_processes):
     """`_phase_density` for every sample of the stacked `terms`, one sample per pool
     task: `psis` is either one psi grid shared by all samples, or one psi per sample
-    (shape (N, 1)). Returns an array of shape (N, len(phases))."""
+    (shape (N, 1)). The phasors of the phase grid are computed once, for all samples.
+    Returns an array of shape (N, len(phases))."""
     per_row = (
         terms["kappa2_modes"],
         terms["rho2opt_const"],
         terms["rho2opt_crossterms"],
     )
     shared = {"m_vals": terms["m_vals"], "deltas": terms["deltas"]}
+    phasors = phase_grid_phasors(shared, phases)
+    args = (likelihood, shared, phases, phasors, uniform_weight)
     if psis.ndim == 1:
-        func = partial(_phase_density, likelihood, shared, phases, uniform_weight, psis)
+        func = partial(_phase_density, *args, psis)
     else:
-        func = partial(_phase_density, likelihood, shared, phases, uniform_weight)
+        func = partial(_phase_density, *args)
         per_row = (psis, *per_row)
     return apply_func_with_multiprocessing(func, per_row, num_processes)
 
