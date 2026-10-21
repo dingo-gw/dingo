@@ -5,6 +5,7 @@ from the uci.py example from https://github.com/bayesiains/nsf.
 
 import copy
 
+import numpy as np
 import torch
 import torch.nn as nn
 import glasflow.nflows as nflows  # nflows not maintained, so use this maintained fork
@@ -16,6 +17,40 @@ from dingo.core.nn.resnet import DenseResidualNet, check_norm_option
 from typing import Union, Callable, Tuple, Optional
 
 
+class DingoLULinear(transforms.LULinear):
+    """glasflow's LULinear with the LU index arrays held as buffers, run in fp32.
+
+    nflows keeps the index arrays as numpy attributes: indexing the weight matrices with
+    them copies them to the device at every forward (a synchronous copy in eager mode),
+    and Dynamo lifts them as CPU graph inputs that CUDA graphs cannot record
+    (torch_compile_mode: reduce-overhead). As buffers they live on the device and are
+    static graph inputs. They are non-persistent, so the state dict, and hence
+    checkpoints, are unchanged.
+
+    The transform runs with autocast disabled on fp32 inputs. Autocast would run its
+    matrix product in reduced precision, and since the spline transforms return the
+    dtype of their inputs, the flow variable and the log-determinant would then stay
+    in reduced precision through the rest of the flow.
+    """
+
+    def __init__(self, features: int, **kwargs):
+        super().__init__(features, **kwargs)
+        for name in ("lower_indices", "upper_indices", "diag_indices"):
+            indices = torch.as_tensor(np.stack(getattr(self, name)))
+            delattr(self, name)
+            self.register_buffer(name, indices, persistent=False)
+
+    def forward(self, inputs, context=None):
+        """Forward transform in the parameter dtype (fp32), also under autocast."""
+        with torch.autocast(inputs.device.type, enabled=False):
+            return super().forward(inputs.to(self.bias.dtype), context)
+
+    def inverse(self, inputs, context=None):
+        """Inverse transform in the parameter dtype (fp32), also under autocast."""
+        with torch.autocast(inputs.device.type, enabled=False):
+            return super().inverse(inputs.to(self.bias.dtype), context)
+
+
 def create_linear_transform(param_dim: int):
     """
     Create the composite linear transform PLU.
@@ -25,11 +60,10 @@ def create_linear_transform(param_dim: int):
     :return: nde.Transform
         the linear transform PLU
     """
-
     return transforms.CompositeTransform(
         [
             transforms.RandomPermutation(features=param_dim),
-            transforms.LULinear(param_dim, identity_init=True),
+            DingoLULinear(param_dim, identity_init=True),
         ]
     )
 

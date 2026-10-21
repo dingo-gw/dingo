@@ -7,6 +7,7 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
 
+from dingo.core.posterior_models import base_model
 from dingo.core.posterior_models.base_model import train_epoch
 
 
@@ -118,6 +119,39 @@ class TestTrainEpochWithoutAmp:
             automatic_mixed_precision=False,
         )
         assert n_iter == 1
+
+
+class TestLogInterval:
+    def test_epoch_average_independent_of_log_interval(self, capsys):
+        """The epoch-average loss and the trained weights do not depend on how often
+        the loss is read from the device; the partial last window is printed too."""
+        torch.manual_seed(0)
+        theta = torch.randn(40, 4)  # 5 batches of 8; accumulate 2 -> 2 steps + tail
+        results = {}
+        for log_interval in (1, 3):
+            torch.manual_seed(1)
+            pm = _make_mock_pm()
+            avg, n_iter = train_epoch(
+                pm,
+                DataLoader(TensorDataset(theta), batch_size=8),
+                gradient_updates_per_optimizer_step=2,
+                log_interval=log_interval,
+            )
+            # base_model.test_epoch: importing the name would make pytest collect it.
+            test_avg = base_model.test_epoch(
+                pm,
+                DataLoader(TensorDataset(theta), batch_size=8),
+                log_interval=log_interval,
+            )
+            lines = [
+                l for l in capsys.readouterr().out.splitlines() if l.startswith("Train")
+            ]
+            assert n_iter == 2 and len(lines) == {1: 2, 3: 1}[log_interval]
+            results[log_interval] = (avg, test_avg, list(pm.network.parameters()))
+        assert results[1][0] == results[3][0]  # same float64 sums -> identical
+        assert results[1][1] == results[3][1]
+        assert all(torch.equal(a, b) for a, b in zip(results[1][2], results[3][2]))
+        assert "Time per step" in lines[-1] and "mean over 2 steps" in lines[-1]
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")

@@ -35,7 +35,7 @@ from dingo.core.utils.torchutils import (
     contains_BatchNorm,
     document_gpus,
     replace_BatchNorm_with_SyncBatchNorm,
-    set_float32_matmul_precision,
+    resolve_float32_matmul_precision,
     set_seed_based_on_rank,
     setup_ddp,
 )
@@ -375,11 +375,30 @@ def train_stages(
         except KeyError:
             break
     end_epochs = list(np.cumsum([stage["epochs"] for stage in stages]))
+    resolve_float32_matmul_precision(
+        stages, local_settings, pm.metadata, print_output=print_primary
+    )
+
+    if (
+        local_settings.get("torch_compile")
+        and local_settings.get("torch_compile_mode") == "reduce-overhead"
+    ):
+        # Not validated: DDP splits the graph at its gradient buckets, and with
+        # gradient accumulation the .grad tensors may alias graph-owned memory.
+        if (world_size is not None and world_size > 1) or any(
+            s.get("gradient_updates_per_optimizer_step", 1) > 1 for s in stages
+        ):
+            raise NotImplementedError(
+                "torch_compile_mode: reduce-overhead (CUDA graphs) is not supported "
+                "with multi-GPU training or gradient_updates_per_optimizer_step > 1."
+            )
 
     resume_training = False
     num_starting_stage = np.searchsorted(end_epochs, pm.epoch + 1)
     for n in range(num_starting_stage, num_stages):
         stage = stages[n]
+        # Dynamo guards on the precision, so a change recompiles the network.
+        torch.set_float32_matmul_precision(stage["float32_matmul_precision"])
 
         if pm.epoch == end_epochs[n] - stage["epochs"]:
             if print_primary:
@@ -436,6 +455,7 @@ def train_stages(
             ),
             automatic_mixed_precision=stage.get("automatic_mixed_precision", False),
             world_size=world_size if world_size is not None else 1,
+            log_interval=local_settings.get("log_interval", 10),
         )
 
         # if test_only, model should not be saved, and run is complete
@@ -527,13 +547,6 @@ def get_num_gpus(local_settings: dict) -> int:
     return 1
 
 
-def _record_float32_matmul_precision(pm: BasePosteriorModel) -> None:
-    """Store the matmul precision in the checkpoint metadata: unlike torch_compile
-    it changes the numerics of training, so it belongs with the model."""
-    if isinstance(pm.metadata, dict):
-        pm.metadata["float32_matmul_precision"] = torch.get_float32_matmul_precision()
-
-
 def run_training(
     train_settings: Optional[dict],
     local_settings: dict,
@@ -558,16 +571,16 @@ def run_training(
     -------
     (complete, resume, epoch) : (bool, bool, int)
     """
-    set_float32_matmul_precision(local_settings)
     if not resume:
         pm, wfd = prepare_training_new(train_settings, train_dir, local_settings)
     else:
         pm, wfd = prepare_training_resume(ckpt_file, local_settings, train_dir)
-    _record_float32_matmul_precision(pm)
 
     if local_settings.get("torch_compile", False):
         pm.network = compile_network(
-            pm.network, cache_dir=local_settings.get("torch_compile_cache_dir")
+            pm.network,
+            cache_dir=local_settings.get("torch_compile_cache_dir"),
+            mode=local_settings.get("torch_compile_mode"),
         )
 
     with threadpool_limits(limits=1, user_api="blas"):
@@ -620,7 +633,6 @@ def run_training_ddp(
         # avoid collisions between their process groups.
         setup_ddp(rank, world_size, port=local_settings.get("ddp_port", 12355))
         set_seed_based_on_rank(rank)
-        set_float32_matmul_precision(local_settings)
 
         if rank == 0:
             document_gpus(train_dir)
@@ -676,8 +688,6 @@ def run_training_ddp(
                 except ImportError:
                     print("WandB is enabled but not installed.")
 
-        _record_float32_matmul_precision(pm)
-
         if contains_BatchNorm(pm.network):
             if rank == 0:
                 warnings.warn(
@@ -697,6 +707,7 @@ def run_training_ddp(
                 pm.network,
                 rank=rank,
                 cache_dir=local_settings.get("torch_compile_cache_dir"),
+                mode=local_settings.get("torch_compile_mode"),
             )
 
         with threadpool_limits(limits=1, user_api="blas"):

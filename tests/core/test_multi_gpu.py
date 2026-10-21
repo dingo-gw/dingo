@@ -22,7 +22,7 @@ from torch.utils.data import TensorDataset
 from dingo.core.utils.torchutils import (
     build_train_and_test_loaders,
     get_cuda_info,
-    set_float32_matmul_precision,
+    resolve_float32_matmul_precision,
     set_seed_based_on_rank,
 )
 from dingo.core.utils.trainutils import LossInfo, RuntimeLimits
@@ -101,23 +101,46 @@ class TestGetNumGpus:
         assert isinstance(get_num_gpus({"num_gpus": "2"}), int)
 
 
-class TestSetFloat32MatmulPrecision:
-    def test_default_leaves_torch_setting_unchanged(self):
-        before = torch.get_float32_matmul_precision()
-        set_float32_matmul_precision({})
-        assert torch.get_float32_matmul_precision() == before
+class TestResolveFloat32MatmulPrecision:
+    """Every stage's precision is fixed in the stage settings when the run starts:
+    the stage's own value, else the former local setting, else the run-level value
+    that older checkpoints recorded, else highest."""
 
-    def test_applies_setting(self):
-        before = torch.get_float32_matmul_precision()
-        try:
-            set_float32_matmul_precision({"float32_matmul_precision": "high"})
-            assert torch.get_float32_matmul_precision() == "high"
-        finally:
-            torch.set_float32_matmul_precision(before)
+    def test_local_setting_is_recorded_in_every_stage(self, capsys):
+        stages = [{"float32_matmul_precision": "high"}, {}]
+        resolve_float32_matmul_precision(
+            stages, {"float32_matmul_precision": "high"}, {}
+        )
+        assert "deprecated" in capsys.readouterr().out
+        # A resume without the local key, also before stage 1, keeps the precision.
+        resolve_float32_matmul_precision(stages, {}, {})
+        assert [s["float32_matmul_precision"] for s in stages] == ["high", "high"]
+
+    def test_run_level_value_of_older_checkpoints_is_kept(self):
+        stages = [{}, {"float32_matmul_precision": "medium"}]
+        resolve_float32_matmul_precision(
+            stages, {}, {"float32_matmul_precision": "high"}
+        )
+        assert [s["float32_matmul_precision"] for s in stages] == ["high", "medium"]
+
+    def test_default_is_highest(self):
+        stages = [{}]
+        resolve_float32_matmul_precision(stages, {}, {})
+        assert stages == [{"float32_matmul_precision": "highest"}]
+
+    def test_conflicting_settings_raise(self):
+        with pytest.raises(ValueError, match="remove the local setting"):
+            resolve_float32_matmul_precision(
+                [{}, {"float32_matmul_precision": "highest"}],
+                {"float32_matmul_precision": "high"},
+                {},
+            )
 
     def test_rejects_unknown_value(self):
         with pytest.raises(ValueError, match="float32_matmul_precision"):
-            set_float32_matmul_precision({"float32_matmul_precision": "fast"})
+            resolve_float32_matmul_precision(
+                [{"float32_matmul_precision": "fast"}], {}, {}
+            )
 
 
 class TestGetCudaInfo:
@@ -285,7 +308,7 @@ class TestLossInfoSingleGPU:
             device=torch.device("cpu"),
         )
         loss = torch.tensor(2.0)
-        info.update_timer("Dataloader")
+        info.update_timer()
         info.cache_loss(loss, n=10)
         info.update()
         assert abs(info.get_avg() - 2.0) < 1e-5
@@ -293,7 +316,7 @@ class TestLossInfoSingleGPU:
     def test_iteration_count(self):
         info = LossInfo(1, 100, 10, device=torch.device("cpu"))
         for _ in range(3):
-            info.update_timer("Dataloader")
+            info.update_timer()
             info.cache_loss(torch.tensor(1.0), n=10)
             info.update()
         assert info.get_iteration() == 3
@@ -321,13 +344,27 @@ def _worker_loss_info(rank, world_size, port, result_queue):
     info = LossInfo(1, 100, 10, device=device)
     # Simulate two optimizer steps with different losses per rank.
     for i in range(2):
-        info.update_timer("Dataloader")
+        info.update_timer()
         loss = torch.tensor(float(rank + 1) * (i + 1))
         info.cache_loss(loss, n=10)
         info.update()
     avg = info.get_avg()
     n_iter = info.get_iteration()
     result_queue.put((rank, avg, n_iter))
+    _cleanup()
+
+
+def _worker_loss_info_window(rank, world_size, port, result_queue):
+    """Worker for LossInfo with log_interval=2: three steps, so that the last
+    window is partial and closed by the final flush in get_avg()."""
+    _setup_gloo(rank, world_size, port)
+    info = LossInfo(1, 100, 10, device=torch.device("cpu"), log_interval=2)
+    synced = []
+    for i in range(3):
+        info.update_timer()
+        info.cache_loss(torch.tensor(float(rank + 1) * (i + 1)), n=10 * (rank + 1))
+        synced.append(info.update())
+    result_queue.put((rank, info.loss, info.get_avg(), synced))
     _cleanup()
 
 
@@ -422,6 +459,20 @@ class TestGlooDDP:
         # mean over ranks of (1, 2) and (2, 4), averaged over the two steps.
         assert results[0][0] == pytest.approx(2.25)
         assert results[1][0] == pytest.approx(2.25)
+
+    def test_loss_info_window_aggregation(self, free_port):
+        """With log_interval=2 the window sums are all-reduced only at the sync
+        points; the sample-weighted epoch average is identical on both ranks."""
+        world_size = 2
+        results = _run_workers(_worker_loss_info_window, world_size, free_port)
+        for rank in (0, 1):
+            window_loss, avg, synced = results[rank]
+            assert synced == [False, True, False]
+            # First window: rank 0 contributes losses 1, 2 (n=10 each), rank 1
+            # losses 2, 4 (n=20 each): (10 + 20 + 40 + 80) / 60.
+            assert window_loss == pytest.approx(150 / 60)
+            # Epoch: plus the third step, losses 3 (n=10) and 6 (n=20).
+            assert avg == pytest.approx((150 + 30 + 120) / 90)
 
     def test_network_to_device_sets_rank(self, free_port):
         """Inside a process group, the device index becomes the rank."""

@@ -99,84 +99,124 @@ class EarlyStopping:
 
 
 class LossInfo:
+    """Track the epoch loss and per-step timings, reading them from the device only
+    every ``log_interval`` optimizer steps (see ``log_interval`` in the training
+    docs for why not every step)."""
+
     def __init__(
         self,
         epoch: int,
         len_dataset: int,
         batch_size_per_grad_update: int,
         mode: str = "Train",
-        print_freq: int = 1,
+        log_interval: int = 1,
         device: torch.device = torch.device("cuda"),
     ):
+        if log_interval < 1:
+            raise ValueError(f"log_interval must be positive, got {log_interval}.")
         # data for print statements
         self.epoch = epoch
         self.iteration = 0
         self.len_dataset = len_dataset
         self.batch_size_per_grad_update = batch_size_per_grad_update
         self.mode = mode
-        self.print_freq = print_freq
+        self.log_interval = log_interval
         self.device = device
         # track loss
         self.loss_tracker = AvgTracker()
         self.loss = None
         self.cached_losses: list = []
         self.cached_n: list = []
+        # Window sums [Σ loss·n, Σ n] on the device (float64 where available; MPS
+        # has none), read into loss_tracker at each sync.
+        dtype = torch.float32 if self.device.type == "mps" else torch.float64
+        self.window_sums = torch.zeros(2, device=device, dtype=dtype)
+        self.synced_iteration = 0
         # Use dist.is_initialized() so that LossInfo is DDP-aware only when a
         # process group has actually been set up.
         self.is_ddp = dist.is_initialized()
         if self.is_ddp:
             self.num_gpus = dist.get_world_size()
-            self.times = {
-                "Dataloader": AvgTracker(),
-                "Network": AvgTracker(),
-                "Aggregation": AvgTracker(),
-            }
-        else:
-            self.times = {"Dataloader": AvgTracker(), "Network": AvgTracker()}
-        self.t = time.time()
+        # Times per step: wall clock, host time waiting for the dataloader, and the
+        # device time between CUDA events recorded around each step.
+        self.use_cuda_events = self.device.type == "cuda"
+        self.times = {"wall": AvgTracker(), "data wait": AvgTracker()}
+        if self.use_cuda_events:
+            self.times["gpu"] = AvgTracker()
+        self.events: list = []
+        self.data_wait = 0.0
+        self.t = self.t_window = time.perf_counter()
 
     def cache_loss(self, loss: torch.Tensor, n: int) -> None:
-        """Cache *loss* from one gradient-accumulation step."""
+        """Cache *loss* (on the device) from one gradient-accumulation step."""
         self.cached_losses.append(loss.detach())
         self.cached_n.append(n)
-        self.update_timer(timer_mode="Network")
+        self.t = time.perf_counter()
 
     def _reset_cached_losses(self) -> None:
         self.cached_losses = []
         self.cached_n = []
 
-    def update_timer(self, timer_mode: str = "Dataloader") -> None:
-        if self.is_ddp:
-            dt = torch.tensor(time.time() - self.t, device=self.device)
-            dist.reduce(dt, dst=0, op=dist.ReduceOp.MAX)
-            dt = dt.item()
-        else:
-            dt = time.time() - self.t
-        self.times[timer_mode].update(dt)
-        self.t = time.time()
+    def update_timer(self) -> None:
+        """Mark the arrival of a batch: ends the data wait and, on the first
+        mini-batch of a step, starts the device timer."""
+        now = time.perf_counter()
+        self.data_wait += now - self.t
+        self.t = now
+        if self.use_cuda_events and not self.cached_losses:
+            self.step_start = torch.cuda.Event(enable_timing=True)
+            self.step_start.record()
 
-    def update(self) -> None:
-        """Aggregate cached losses across gradient-accumulation steps (and across GPUs in DDP)."""
+    def update(self) -> bool:
+        """Fold the cached losses of one optimizer step into the window sums (on the
+        device) and, every ``log_interval`` steps, read the window; True if read."""
         self.iteration += 1
-        loss = torch.mean(torch.tensor(self.cached_losses, device=self.device))
-        n = torch.tensor(sum(self.cached_n), device=self.device, dtype=torch.float32)
+        n = sum(self.cached_n)
+        loss = torch.stack(self.cached_losses).mean().to(self.window_sums.dtype)
+        self.window_sums[0] += loss * n
+        self.window_sums[1] += n
+        self._reset_cached_losses()
+        if self.use_cuda_events:
+            end = torch.cuda.Event(enable_timing=True)
+            end.record()
+            self.events.append((self.step_start, end))
+        synced = self.iteration % self.log_interval == 0 and self.flush()
+        self.t = time.perf_counter()
+        return synced
 
+    def flush(self) -> bool:
+        """Read the pending window from the device, the one host-device
+        synchronization per window; False if there is none."""
+        if self.iteration == self.synced_iteration:
+            return False
+        if self.use_cuda_events:
+            self.events[-1][1].synchronize()
+            gpu = sum(s.elapsed_time(e) for s, e in self.events) / 1000
+            self.events = []
         if self.is_ddp:
-            # All-reduce the absolute loss across GPUs so that normalization is
+            # All-reduce the window sums across GPUs so that normalization is
             # correct even when GPUs process different numbers of samples, and so
             # that every rank ends up with the same loss (the LR scheduler steps
             # on it, so ranks must not diverge).
-            abs_loss = loss * n
-            dist.all_reduce(abs_loss)
-            dist.all_reduce(n)
-            loss = abs_loss / n
-            self.update_timer(timer_mode="Aggregation")
-
-        self.loss = loss.item()
-        self.loss_tracker.update(self.loss * n.item(), n.item())
-        self._reset_cached_losses()
+            dist.all_reduce(self.window_sums)
+        loss_n, n = self.window_sums.tolist()
+        self.window_sums.zero_()
+        now = time.perf_counter()
+        self.loss = loss_n / n
+        self.loss_tracker.update(loss_n, n)
+        self.window_steps = self.iteration - self.synced_iteration
+        self.times["wall"].update(now - self.t_window, self.window_steps)
+        self.times["data wait"].update(self.data_wait, self.window_steps)
+        if self.use_cuda_events:
+            self.times["gpu"].update(gpu, self.window_steps)
+        self.synced_iteration = self.iteration
+        self.t_window = now
+        self.data_wait = 0.0
+        return True
 
     def get_avg(self) -> float:
+        """Average loss over the epoch so far (reads the pending window first)."""
+        self.flush()
         return self.loss_tracker.get_avg()
 
     def get_iteration(self) -> int:
@@ -196,39 +236,37 @@ class LossInfo:
         return self.iteration
 
     def print_info(self, batch_idx: int) -> None:
-        if batch_idx % self.print_freq == 0:
-            print(
-                "{} Epoch: {} [{}/{} ({:.0f}%)]".format(
-                    self.mode,
-                    self.epoch,
-                    min(
-                        (batch_idx + 1) * self.batch_size_per_grad_update,
-                        self.len_dataset,
-                    ),
+        """Print the last window: its mean loss and mean times per step, with the
+        epoch means in parentheses. ``gpu`` is the device time from the copy of the
+        batch to the end of the optimizer step; ``data wait`` the host time blocked
+        on the dataloader."""
+        print(
+            "{} Epoch: {} [{}/{} ({:.0f}%)]".format(
+                self.mode,
+                self.epoch,
+                min(
+                    (batch_idx + 1) * self.batch_size_per_grad_update,
                     self.len_dataset,
-                    min(
-                        100.0
-                        * (batch_idx + 1)
-                        * self.batch_size_per_grad_update
-                        / self.len_dataset,
-                        100,
-                    ),
                 ),
-                end="\t\t",
-            )
-            print(f"Loss: {self.loss:.3f} ({self.get_avg():.3f})", end="\t\t")
-            td, td_avg = self.times["Dataloader"].x, self.times["Dataloader"].get_avg()
-            tn, tn_avg = self.times["Network"].x, self.times["Network"].get_avg()
-            print(f"Time Dataloader: {td:.3f} ({td_avg:.3f})", end="\t\t")
-            if self.is_ddp:
-                ta, ta_avg = (
-                    self.times["Aggregation"].x,
-                    self.times["Aggregation"].get_avg(),
-                )
-                print(f"Time Network: {tn:.3f} ({tn_avg:.3f})", end="\t\t")
-                print(f"Time Loss Aggregation: {ta:.3f} ({ta_avg:.3f})")
-            else:
-                print(f"Time Network: {tn:.3f} ({tn_avg:.3f})")
+                self.len_dataset,
+                min(
+                    100.0
+                    * (batch_idx + 1)
+                    * self.batch_size_per_grad_update
+                    / self.len_dataset,
+                    100,
+                ),
+            ),
+            end="\t\t",
+        )
+        print(f"Loss: {self.loss:.3f} ({self.loss_tracker.get_avg():.3f})", end="\t\t")
+        times = ", ".join(
+            f"{name} {t.x / self.window_steps:.3f} ({t.get_avg():.3f})"
+            for name, t in self.times.items()
+        )
+        print(f"Time per step: {times}; mean over {self.window_steps} steps")
+        # Printing is host work, not part of the next batch's data wait.
+        self.t = time.perf_counter()
 
 
 class RuntimeLimits:
