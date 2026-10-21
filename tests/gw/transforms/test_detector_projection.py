@@ -92,7 +92,12 @@ def test_projection_on_mfd_matches_shift_then_decimate(bin_averaged):
     ref_time = 1126259462.391
     ifo_list = InterferometerList(["H1", "L1"])
     ufd = build_domain(
-        {"type": "UniformFrequencyDomain", "f_min": 20.0, "f_max": 1024.0, "delta_f": 0.125}
+        {
+            "type": "UniformFrequencyDomain",
+            "f_min": 20.0,
+            "f_max": 1024.0,
+            "delta_f": 0.125,
+        }
     )
     mfd = build_domain(
         {

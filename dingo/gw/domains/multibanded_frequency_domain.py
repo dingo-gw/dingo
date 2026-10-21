@@ -59,9 +59,10 @@ class MultibandedFrequencyDomain(BaseFrequencyDomain):
             for the decimation. This determines the decimation details and the noise_std.
             Either provided as dict for build_domain, or as domain_object.
         bin_averaged_time_shifts: bool
-            Whether the detector projection (ProjectOntoDetectors) multiplies the
-            time-shifted strain by time_shift_bin_average(dt), so that it matches data
-            shifted on the base domain and then decimated. Default: True.
+            Whether ProjectOntoDetectors multiplies the time-shifted strain by
+            time_shift_bin_average(dt), to match data shifted on the base domain and
+            then decimated. Not applied by TimeShiftStrain (GNPE), which shifts data
+            that are already decimated. Default: True.
         """
         super().__init__()
         if isinstance(base_domain, dict):
@@ -190,28 +191,20 @@ class MultibandedFrequencyDomain(BaseFrequencyDomain):
 
     def time_shift_bin_average(self, dt: float | np.ndarray) -> np.ndarray:
         r"""
-        Real factor per bin that turns a time shift of decimated data into the
-        decimation of data shifted on the base domain, for data constant across each
-        bin.
-
-        A bin is the average of N base-domain bins of width $\delta f$ centred on its
-        sample frequency $\bar f$, so the bin average of $\exp(-2\pi i f\,dt)$ is
+        Real factor that turns the band-centre time shift of time_translate_data()
+        into the decimation of data shifted on the base domain, for data constant
+        across each bin: a bin averages $N$ base bins of width $\delta f$ centred on
+        $\bar f$, so the bin average of $\exp(-2\pi i f\,dt)$ is
         $$
         \exp(-2\pi i \bar f\,dt)\,\frac{\sin(\pi N \delta f\,dt)}{N \sin(\pi
         \delta f\,dt)}.
         $$
-        time_translate_data() applies the phase factor; this method returns the real
-        factor, which differs from 1 when the phase changes appreciably across a bin.
-
-        Parameters
-        ----------
-        dt : float or np.ndarray
-            Time shift(s); an array of shape (B,) gives factors of shape (B, len(self)).
+        The fraction is $\mathrm{sinc}(\Delta f\,dt)/\mathrm{sinc}(\delta f\,dt)$ with
+        $\Delta f = N\delta f$ and numpy's $\mathrm{sinc}(x) = \sin(\pi x)/(\pi x)$.
 
         Returns
         -------
-        np.ndarray
-            Factor of shape (*np.shape(dt), len(self)).
+        Factor of shape (*np.shape(dt), len(self)).
         """
         dt = np.asarray(dt, dtype=float)[..., None]
         return np.sinc(dt * self.delta_f) / np.sinc(dt * self.base_domain.delta_f)
@@ -415,8 +408,7 @@ class MultibandedFrequencyDomain(BaseFrequencyDomain):
             "nodes": self.nodes.tolist(),
             "delta_f_initial": self._delta_f_bands[0].item(),
             "base_domain": self.base_domain.domain_dict,
-            # Only the non-default value is written, so that default domains keep the
-            # settings of domains saved before this option existed.
+            # Written only when False, so that default domains serialize as before.
             **(
                 {}
                 if self.bin_averaged_time_shifts

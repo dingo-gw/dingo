@@ -72,8 +72,7 @@ def _evaluate_multibanding_main(
     # Generate UFD waveforms, re-using the parameter choices from before.
     polarizations_ufd = generate_waveforms_parallel(waveform_generator_ufd, parameters)
 
-    # The training path shifts at the band centres, real data are shifted before any
-    # decimation.
+    # The MFD waveforms get the training-path shift, the UFD ones the real-data shift.
     polarizations_mfd = time_shift_polarizations(polarizations_mfd, domain, parameters)
     polarizations_ufd = time_shift_polarizations(
         polarizations_ufd, domain.base_domain, parameters

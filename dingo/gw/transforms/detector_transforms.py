@@ -9,8 +9,6 @@ from bilby.gw.detector import calibration
 from bilby.gw.prior import CalibrationPriorDict
 from bilby_pipe.utils import CALIBRATION_CORRECTION_TYPE_LOOKUP
 
-from dingo.gw.domains import MultibandedFrequencyDomain
-
 CC = 299792458.0
 
 
@@ -206,14 +204,9 @@ class ProjectOntoDetectors(object):
             # (3) time shift the strain (tc_ref is 0, see above).
             dt = extrinsic_parameters[f"{ifo.name}_time"] - tc_ref
             strain = self.domain.time_translate_data(strain, dt)
-            # Real data are shifted before they are decimated: on a multibanded domain,
-            # include the effect of the shift within each bin.
-            if (
-                isinstance(self.domain, MultibandedFrequencyDomain)
-                and self.domain.bin_averaged_time_shifts
-            ):
-                factor = self.domain.time_shift_bin_average(dt)
-                strain = strain * factor.astype(strain.real.dtype)
+            # Real data are shifted before decimation; match that within each bin.
+            if getattr(self.domain, "bin_averaged_time_shifts", False):
+                strain = strain * self.domain.time_shift_bin_average(dt)
             strains[ifo.name] = strain
 
         # Add extrinsic parameters corresponding to the transformations

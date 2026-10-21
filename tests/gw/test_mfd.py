@@ -184,7 +184,6 @@ def test_mfd_time_translation_torch(mfd):
     assert torch.allclose(result[..., 2, :], torch.tensor(constant_value))
 
 
-
 def test_mfd_time_shift_bin_average(mfd):
     """For data constant across each bin, shifting on the base domain and decimating
     equals decimating, shifting at the band centres and applying the bin-average

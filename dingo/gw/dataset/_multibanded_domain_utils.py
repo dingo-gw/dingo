@@ -69,29 +69,13 @@ def print_mismatch_stats(mismatches: np.ndarray, num_samples: int) -> None:
 def time_shift_polarizations(
     polarizations: Dict[str, np.ndarray], domain, parameters
 ) -> Dict[str, np.ndarray]:
-    """Time-shift the generated waveforms by their ``geocent_time`` on ``domain``.
+    """Time-shift the waveforms (one row per sample) by ``parameters["geocent_time"]``.
 
-    The waveform generator returns polarizations with the merger at t = 0; the time
-    shift is applied later, in the detector projection. Without this step the
-    boundary ``geocent_time`` of :func:`build_extreme_prior` would not reach the
-    waveforms. On a uniform domain this is the shift real data carry before they are
-    decimated; on a multibanded domain it is the shift applied in training, by
-    ProjectOntoDetectors (band-centre phase, times the bin-average factor if the
-    domain has ``bin_averaged_time_shifts``).
-
-    Parameters
-    ----------
-    polarizations : Dict[str, np.ndarray]
-        Waveforms on ``domain``, shape ``(num_samples, len(domain()))`` per key.
-    domain
-        Frequency domain of the waveforms.
-    parameters : pd.DataFrame
-        Waveform parameters, one row per sample, with ``geocent_time``.
-
-    Returns
-    -------
-    Dict[str, np.ndarray]
-        Time-shifted waveforms.
+    The waveform generator ignores ``geocent_time`` (the merger is at t = 0), so the
+    boundary value of :func:`build_extreme_prior` has to be applied here. On a
+    multibanded domain this is the shift of the training path (ProjectOntoDetectors):
+    the band-centre phase, times the bin-average factor if the domain has
+    ``bin_averaged_time_shifts``.
     """
     dt = parameters["geocent_time"].to_numpy(dtype=float)
     shifted = {k: domain.time_translate_data(v, dt) for k, v in polarizations.items()}
