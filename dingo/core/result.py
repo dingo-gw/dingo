@@ -445,6 +445,9 @@ class Result(DingoDataset):
                 )  # NaN = outside prior so no synthetic
                 # phase
             )
+            # A non-finite proposal density gives zero weight (nan_to_num would turn
+            # -inf into a +1.8e308 log-weight); N below still counts the sample.
+            log_weights = log_weights.where(np.isfinite(log_prob_proposal), -np.inf)
             self.log_evidence = logsumexp(log_weights) - np.log(self.num_samples)
 
             # Save the *normalized* weights.

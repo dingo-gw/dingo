@@ -3,6 +3,7 @@ import pandas as pd
 import pytest
 from bilby.core.prior import Constraint, PowerLaw, PriorDict, Uniform
 from bilby.core.utils import random as bilby_random
+from scipy.special import logsumexp
 
 from dingo.gw.domains import UniformFrequencyDomain
 from dingo.gw.gwutils import get_extrinsic_prior_dict
@@ -697,6 +698,25 @@ def test_update_prior_reweights_importance_sampled_result():
     )
     assert result.log_evidence != log_evidence_before
     assert np.isfinite(result.log_evidence)
+
+
+def test_non_finite_proposal_log_prob_gets_zero_weight():
+    # A -inf proposal log_prob must give zero weight (with N unchanged in the
+    # evidence), not a +1.8e308 log-weight that takes all the weight.
+    result = _seeded_result()
+    rng = np.random.default_rng(0)
+    n = len(result.samples)
+    result.samples["log_prior"] = 0.0
+    result.samples["log_likelihood"] = rng.normal(0.0, 1.0, n)
+    result.samples["log_prob"] = rng.normal(0.0, 1.0, n)
+    result.samples.loc[0, "log_prob"] = -np.inf
+    result._calculate_evidence()
+
+    log_weights = (result.samples["log_likelihood"] - result.samples["log_prob"])[1:]
+    assert result.samples["weights"][0] == 0.0
+    np.testing.assert_allclose(
+        result.log_evidence, logsumexp(log_weights) - np.log(n), rtol=1e-12
+    )
 
 
 def test_update_prior_round_trips_through_file(tmp_path):
