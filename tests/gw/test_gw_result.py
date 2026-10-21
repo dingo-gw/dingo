@@ -412,7 +412,7 @@ def test_phase_recovery_default_serves_both_factors():
         assert isinstance(step, cls) and step.cache_log_likelihood
         assert not step.approximation_22_mode
         grid = (step.n_grid_phase, getattr(step, "n_grid_psi", None))
-        assert grid == ((512, 128) if drop_psi else (5001, None))
+        assert grid == ((4096, 1024) if drop_psi else (5001, None))
 
 
 @pytest.mark.parametrize("drop_psi", [False, True])

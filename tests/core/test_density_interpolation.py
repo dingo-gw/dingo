@@ -66,10 +66,11 @@ def test_matches_scipy_rv_histogram():
     )
 
 
-@pytest.mark.parametrize("u", [0.0, np.nextafter(1.0, 0.0)])
+@pytest.mark.parametrize("u", [0.0, np.nextafter(1.0, 0.0), 1.0])
 def test_draw_at_the_ends_of_the_cdf(u, monkeypatch):
-    """u = 0 maps to the lower end of the grid and the largest u below 1 to its upper
-    end, as for scipy's ppf."""
+    """u = 0 maps to the lower end of the grid and u at the end of the CDF to its upper
+    end, as for scipy's ppf. The uniform generator never returns 1, but a row whose
+    CDF ends below 1 by rounding takes the same branch."""
     from types import SimpleNamespace
 
     from bilby.core.utils import random
@@ -94,3 +95,28 @@ def test_samples_follow_the_evaluated_density():
     values = np.exp(-0.5 * ((x - 0.4) / 0.08) ** 2) + 0.05
     _, log_q = interpolated_sample_and_log_prob_multi(x, np.tile(values, (20000, 1)))
     assert abs(np.mean(np.exp(-log_q)) - 1.0) < 0.04
+
+
+def test_chunked_rows_match_unchunked(monkeypatch):
+    """Processing the rows in chunks (here of 7 rows) gives the same draws and log
+    probs as a single chunk."""
+    from bilby.core.utils import random
+
+    import dingo.core.density.interpolation as interpolation
+
+    rng = np.random.default_rng(2)
+    x = np.linspace(0.0, 1.0, 50)
+    values = rng.exponential(size=(30, 50))
+    points = rng.uniform(size=30)
+    out = []
+    for chunk_values in (2**24, 7 * 50):
+        monkeypatch.setattr(interpolation, "_CHUNK_VALUES", chunk_values)
+        random.seed(4)
+        out.append(
+            (
+                *interpolated_sample_and_log_prob_multi(x, values),
+                interpolated_log_prob_multi(x, values, points),
+            )
+        )
+    for single, chunked in zip(*out):
+        np.testing.assert_array_equal(single, chunked)

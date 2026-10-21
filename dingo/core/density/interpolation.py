@@ -1,6 +1,10 @@
 import bilby
 import numpy as np
 
+# Grid values per chunk of rows in the vectorized draws (~16M): bounds their
+# temporaries (densities, CDFs, comparisons) to a few hundred MB.
+_CHUNK_VALUES = 2**24
+
 
 def interpolated_sample_and_log_prob_multi(sample_points, values):
     """
@@ -20,21 +24,29 @@ def interpolated_sample_and_log_prob_multi(sample_points, values):
     -------
     (np.ndarray, np.ndarray) : sample and log_prob arrays, each of length B
     """
+    values = np.asarray(values)
     uniforms = bilby.core.utils.random.rng.uniform(size=len(values))
     edges = np.asarray(sample_points)
-    pdf, cdf = _cell_mean_histogram(edges, values)
-    # Inverse CDF, as scipy's ppf (np.interp(u, cdf, edges)) row by row: the last edge
-    # j with cdf[j] <= u, then linear within cell j, whose mass is then nonzero unless
-    # u is at or beyond the end of the CDF (handled below, as is u = 0).
-    j = np.minimum((cdf <= uniforms[:, None]).sum(axis=1) - 1, len(edges) - 2)
-    rows = np.arange(len(values))
-    lower, upper = cdf[rows, j], cdf[rows, j + 1]
-    with np.errstate(divide="ignore", invalid="ignore"):
-        slope = (edges[j + 1] - edges[j]) / (upper - lower)
-    sample = slope * (uniforms - lower) + edges[j]
-    sample = np.where(uniforms >= cdf[:, -1], edges[-1], sample)
-    sample = np.where(uniforms == 0, edges[0], sample)
-    return sample, _log_pdf(edges, pdf, sample)
+    chunk = max(1, _CHUNK_VALUES // len(edges))
+    samples, log_probs = [], []
+    for start in range(0, max(len(values), 1), chunk):
+        u = uniforms[start : start + chunk]
+        pdf, cdf = _cell_mean_histogram(edges, values[start : start + chunk])
+        # Inverse CDF, as scipy's ppf (np.interp(u, cdf, edges)) row by row: the last
+        # edge j with cdf[j] <= u, then linear within cell j, whose mass is then
+        # nonzero unless u is at or beyond the end of the CDF (handled below, as is
+        # u = 0).
+        j = np.minimum((cdf <= u[:, None]).sum(axis=1) - 1, len(edges) - 2)
+        rows = np.arange(len(u))
+        lower, upper = cdf[rows, j], cdf[rows, j + 1]
+        with np.errstate(divide="ignore", invalid="ignore"):
+            slope = (edges[j + 1] - edges[j]) / (upper - lower)
+            sample = slope * (u - lower) + edges[j]
+        sample = np.where(u >= cdf[:, -1], edges[-1], sample)
+        sample = np.where(u == 0, edges[0], sample)
+        samples.append(sample)
+        log_probs.append(_log_pdf(edges, pdf, sample))
+    return np.concatenate(samples), np.concatenate(log_probs)
 
 
 def interpolated_log_prob_multi(sample_points, values, evaluation_points):
@@ -56,9 +68,19 @@ def interpolated_log_prob_multi(sample_points, values, evaluation_points):
     -------
     np.ndarray : log_prob array of length B
     """
+    values, evaluation_points = np.asarray(values), np.asarray(evaluation_points)
     edges = np.asarray(sample_points)
-    pdf, _ = _cell_mean_histogram(edges, values)
-    return _log_pdf(edges, pdf, np.asarray(evaluation_points))
+    chunk = max(1, _CHUNK_VALUES // len(edges))
+    return np.concatenate(
+        [
+            _log_pdf(
+                edges,
+                _cell_mean_histogram(edges, values[start : start + chunk])[0],
+                evaluation_points[start : start + chunk],
+            )
+            for start in range(0, max(len(values), 1), chunk)
+        ]
+    )
 
 
 def _cell_mean_histogram(edges, values):

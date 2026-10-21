@@ -154,15 +154,31 @@ def test_phase_22_draws_match_the_psi_factor():
     np.testing.assert_allclose(log_prob.numpy(), replug.numpy())
 
 
-def test_profile_exact_mode_runs():
-    n, n_grid = 4, 129
-    factor = SyntheticPhaseFactor(
-        conditioning=["chirp_mass"], n_grid_phase=n_grid, approximation_22_mode=False
+def test_profile_exact_mode_matches_formula():
+    # q(phase) is exp(log L) at each row's own psi on the phase grid, plus the floor,
+    # the same with a pool (70 rows: more than one 32-row chunk, so that the pool is
+    # used).
+    n, n_grid, weight = 70, 129, 0.01
+    given = {**_given(n), "psi": torch.linspace(0.0, 1.0, n, dtype=torch.float64)}
+    profiles = []
+    for num_processes in (1, 2):
+        factor = SyntheticPhaseFactor(
+            conditioning=["chirp_mass", "psi"],
+            n_grid_phase=n_grid,
+            approximation_22_mode=False,
+            uniform_weight=weight,
+            num_processes=num_processes,
+        )
+        phases, profile, _ = factor._phase_profile(given, _MockContext())
+        profiles.append(profile)
+    assert np.array_equal(*profiles)
+    log_l = _MockLikelihood.log_l_phase_psi(
+        given["chirp_mass"].numpy()[:, None], phases, given["psi"].numpy()[:, None]
     )
-    phases, profile, _ = factor._phase_profile(_given(n), _MockContext())
-    assert phases.shape == (n_grid,)
+    expected = np.exp(log_l - log_l.max(axis=1, keepdims=True))
+    expected += expected.mean(axis=1, keepdims=True) * weight
     assert profile.shape == (n, n_grid)
-    assert (profile > 0).all()
+    assert np.allclose(profile, expected)
 
 
 def test_sample_shapes_and_range():
