@@ -4,6 +4,7 @@ synthetic-phase-psi factors, and the coordinate reparametrizations."""
 from __future__ import annotations
 import logging
 import time
+from functools import partial
 from typing import Optional
 import bilby
 import lalsimulation as LS
@@ -68,6 +69,27 @@ def _stacked_phase_grid_terms(likelihood, theta, num_processes):
             for k in ("kappa2_modes", "rho2opt_const", "rho2opt_crossterms")
         },
     }
+
+
+def _log_phase_marginal(
+    likelihood, terms, phases, psis, kappa2_modes, rho2opt_const, rho2opt_crossterms
+):
+    """Log of `q(phase)` for one sample, before the floor: the likelihood on the
+    (phase, psi) grid summed over psi. The endpoint psi = pi is dropped: psi has period
+    pi, so it repeats the phase-dependent psi = 0 column and would double-count it."""
+    grid = likelihood.log_likelihood_from_phase_grid_terms(
+        {
+            **terms,
+            "kappa2_modes": kappa2_modes,
+            "rho2opt_const": rho2opt_const,
+            "rho2opt_crossterms": rho2opt_crossterms,
+        },
+        phases,
+        psis,
+    )[:, :-1]
+    # A plain numpy logsumexp: scipy.special.logsumexp is ~4x slower here.
+    peak = grid.max(axis=-1)
+    return peak + np.log(np.exp(grid - peak[:, None]).sum(axis=-1))
 
 
 def _floored_density(log_density, uniform_weight):
@@ -213,7 +235,7 @@ class SyntheticPhaseFactor(Factor):
         uniform_weight : float, default 0.01
             Weight of the uniform floor added to the phase distribution for mass coverage.
         num_processes : int, default 1
-            Parallel processes for the per-sample likelihood evaluation and phase sampling.
+            Parallel processes for the per-sample likelihood evaluation.
         use_base_domain : bool, default False
             For a multibanded model, evaluate the likelihood on the undecimated base
             domain (passed on to `SamplerContext.likelihood`).
@@ -268,7 +290,7 @@ class SyntheticPhaseFactor(Factor):
         else:
             phases, phase_posterior, terms = self._phase_profile(given, context)
             new_phase, log_prob = interpolated_sample_and_log_prob_multi(
-                phases, phase_posterior, self.num_processes
+                phases, phase_posterior
             )
         samples = {"phase": torch.as_tensor(new_phase, device=device)}
         if self.cache_log_likelihood:
@@ -302,7 +324,7 @@ class SyntheticPhaseFactor(Factor):
         else:
             phases, phase_posterior, _ = self._phase_profile(given, context)
             log_prob = interpolated_log_prob_multi(
-                phases, phase_posterior, phase, self.num_processes
+                phases, phase_posterior, phase
             )
         return torch.as_tensor(log_prob, device=device)
 
@@ -380,7 +402,7 @@ class SyntheticPhasePsiFactor(Factor):
     the waveform generator's `spin_conversion_phase = 0`, see
     `StationaryGaussianGWLikelihood.phase_grid_terms`. The proposal is
     `q(phase) q(psi | phase)`. `q(phase)` is the likelihood on a (phase, psi) grid
-    summed over psi, evaluated in chunks of rows sized by `max_grid_elements`.
+    summed over psi, evaluated one sample per pool task (`num_processes`).
     `q(psi | phase)` is the likelihood on the psi grid at the drawn phase itself,
     not at a phase grid point.
 
@@ -407,9 +429,6 @@ class SyntheticPhasePsiFactor(Factor):
     annotation column `log_likelihood_cache`. As in `SyntheticPhaseFactor`, this
     requires an exact phase dependence, which is checked before the first draw.
     """
-
-    # Upper bound on the (chunk, n_grid_phase, n_grid_psi) grid held at once, in elements.
-    max_grid_elements = 8_000_000
 
     def __init__(
         self,
@@ -440,7 +459,7 @@ class SyntheticPhasePsiFactor(Factor):
             Weight of the uniform floor added to each of the two densities.
         num_processes : int, default 1
             Parallel processes for the per-sample waveform evaluations and the
-            interpolated draws.
+            evaluation of the (phase, psi) grid.
         use_base_domain : bool, default False
             For a multibanded model, evaluate the likelihood on the undecimated base
             domain (passed on to `SamplerContext.likelihood`).
@@ -492,7 +511,7 @@ class SyntheticPhasePsiFactor(Factor):
                 given, context
             )
             new_psi, log_prob_psi = interpolated_sample_and_log_prob_multi(
-                psis, psi_posterior, self.num_processes
+                psis, psi_posterior
             )
             terms_at_psi = {
                 k: v[:, 0]
@@ -507,11 +526,11 @@ class SyntheticPhasePsiFactor(Factor):
                 given, context
             )
             new_phase, log_prob_phase = interpolated_sample_and_log_prob_multi(
-                phases, phase_posterior, self.num_processes
+                phases, phase_posterior
             )
             psis, psi_posterior = self._psi_profile(likelihood, terms, new_phase)
             new_psi, log_prob_psi = interpolated_sample_and_log_prob_multi(
-                psis, psi_posterior, self.num_processes
+                psis, psi_posterior
             )
         samples = {
             "phase": torch.as_tensor(new_phase, device=device),
@@ -544,7 +563,7 @@ class SyntheticPhasePsiFactor(Factor):
                 given, context
             )
             log_prob_psi = interpolated_log_prob_multi(
-                psis, psi_posterior, psi, self.num_processes
+                psis, psi_posterior, psi
             )
             terms_at_psi = {
                 k: v[:, 0]
@@ -558,11 +577,11 @@ class SyntheticPhasePsiFactor(Factor):
                 given, context
             )
             log_prob_phase = interpolated_log_prob_multi(
-                phases, phase_posterior, phase, self.num_processes
+                phases, phase_posterior, phase
             )
             psis, psi_posterior = self._psi_profile(likelihood, terms, phase)
             log_prob_psi = interpolated_log_prob_multi(
-                psis, psi_posterior, psi, self.num_processes
+                psis, psi_posterior, psi
             )
         return torch.as_tensor(log_prob_phase + log_prob_psi, device=device)
 
@@ -596,31 +615,23 @@ class SyntheticPhasePsiFactor(Factor):
         terms = _stacked_phase_grid_terms(likelihood, theta, self.num_processes)
         phases = np.linspace(0, 2 * np.pi, self.n_grid_phase)
         psis = np.linspace(0, np.pi, self.n_grid_psi)
-        n = len(theta)
-        chunk = max(1, self.max_grid_elements // (self.n_grid_phase * self.n_grid_psi))
-        log_marginal = np.empty((n, self.n_grid_phase))
-        for start in range(0, n, chunk):
-            sl = slice(start, start + chunk)
-            grid = likelihood.log_likelihood_from_phase_grid_terms(
-                {
-                    **terms,
-                    **{
-                        k: terms[k][sl]
-                        for k in ("kappa2_modes", "rho2opt_const", "rho2opt_crossterms")
-                    },
-                },
+        # One row per pool task: the grid holds n_grid_phase * n_grid_psi elements per
+        # sample, which dominates the cost of the step on fine grids.
+        log_marginal = apply_func_with_multiprocessing(
+            partial(
+                _log_phase_marginal,
+                likelihood,
+                {"m_vals": terms["m_vals"], "deltas": terms["deltas"]},
                 phases,
                 psis,
-            )
-            # Drop the endpoint psi = pi: psi has period pi, so it repeats the
-            # phase-dependent psi = 0 column and would double-count it.
-            # A plain numpy logsumexp: scipy's is 2-4x slower on this strided grid
-            # when the grid size is small.
-            grid = grid[..., :-1]
-            peak = grid.max(axis=-1)
-            log_marginal[sl] = peak + np.log(
-                np.exp(grid - peak[..., None]).sum(axis=-1)
-            )
+            ),
+            (
+                terms["kappa2_modes"],
+                terms["rho2opt_const"],
+                terms["rho2opt_crossterms"],
+            ),
+            self.num_processes,
+        )
         return (
             likelihood,
             terms,

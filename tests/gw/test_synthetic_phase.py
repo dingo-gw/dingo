@@ -328,14 +328,16 @@ def test_phase_psi_factor_produces_both_angles():
 
 def test_phase_psi_profile_marginal_matches_formula():
     # q(phase) is the psi-marginal of exp(log L) over the psi grid without its
-    # duplicated endpoint psi = pi (plus the floor), computed here in chunks of samples.
-    n, weight = 5, 0.01
-    factor = _psi_factor(uniform_weight=weight)
-    factor.max_grid_elements = (
-        2 * factor.n_grid_phase * factor.n_grid_psi
-    )  # 2 rows/chunk
+    # duplicated endpoint psi = pi (plus the floor), the same with a pool (70 rows:
+    # more than one 32-row chunk, so that the pool is used).
+    n, weight = 70, 0.01
     given = _given(n)
-    _, _, phases, profile = factor._phase_profile(given, _MockContext())
+    profiles = []
+    for num_processes in (1, 2):
+        factor = _psi_factor(uniform_weight=weight, num_processes=num_processes)
+        _, _, phases, profile = factor._phase_profile(given, _MockContext())
+        profiles.append(profile)
+    assert np.array_equal(*profiles)
     psis = np.linspace(0, np.pi, factor.n_grid_psi)
     cm = given["chirp_mass"].numpy()
     log_l = _MockLikelihood.log_l_phase_psi(
