@@ -3,7 +3,7 @@ import os
 from bilby_pipe.job_creation.nodes import PlotNode as BilbyPlotNode
 
 from dingo.pipe.utils import (
-    BILBY_PIPE_USES_CONTAINER_UNIVERSE,
+    configure_file_transfer,
     _strip_unwanted_submission_keys,
 )
 
@@ -20,26 +20,11 @@ class PlotNode(BilbyPlotNode):
         self.label = merged_node.job_name.replace("_merge", "") + "_plot"
         self.request_cpus = 1
 
-        # Add file transfer logic (copied from BilbyPlotNode)
         if self.inputs.transfer_files or self.inputs.osg:
             input_files_to_transfer = [
                 self._relative_topdir(merged_node.result_file, self.inputs.initialdir),
             ] + inputs.additional_transfer_paths
-            if not BILBY_PIPE_USES_CONTAINER_UNIVERSE and self.transfer_container:
-                input_files_to_transfer.append(self.inputs.container)
-
-            input_files_to_transfer, need_scitokens = self.job_needs_authentication(
-                input_files_to_transfer
-            )
-            if need_scitokens:
-                self.extra_lines.extend(self.scitoken_lines)
-
-            self.extra_lines.extend(
-                self._condor_file_transfer_lines(
-                    input_files_to_transfer,
-                    [self._relative_topdir(self.inputs.outdir, self.inputs.initialdir)],
-                )
-            )
+            configure_file_transfer(self, input_files_to_transfer)
 
         self.setup_arguments(
             add_ini=False, add_unknown_args=False, add_command_line_args=False
