@@ -2,7 +2,7 @@ import os
 from bilby_pipe.job_creation.nodes import PESummaryNode as BilbyPESummaryNode
 from bilby_pipe.utils import BilbyPipeError, logger
 
-from dingo.pipe.utils import BILBY_PIPE_USES_CONTAINER_UNIVERSE
+from dingo.pipe.utils import configure_file_transfer
 
 logger.name = "dingo_pipe"
 
@@ -40,20 +40,8 @@ class PESummaryNode(BilbyPESummaryNode):
                 self.inputs.spline_calibration_envelope_dict,
             ]:
                 input_files_to_transfer.extend(self.extract_paths_from_dict(value))
-            if not BILBY_PIPE_USES_CONTAINER_UNIVERSE and self.transfer_container:
-                input_files_to_transfer.append(self.inputs.container)
-
-            input_files_to_transfer, need_scitokens = self.job_needs_authentication(
-                input_files_to_transfer
-            )
-            if need_scitokens:
-                self.extra_lines.extend(self.scitoken_lines)
-
-            self.extra_lines.extend(
-                self._condor_file_transfer_lines(
-                    input_files_to_transfer,
-                    [self._relative_topdir(self.inputs.webdir, self.inputs.initialdir)],
-                )
+            configure_file_transfer(
+                self, input_files_to_transfer, output_directory=self.inputs.webdir
             )
 
         self.setup_arguments(

@@ -3,7 +3,7 @@ import os
 from bilby_pipe.job_creation.nodes import MergeNode as BilbyMergeNode
 
 from dingo.pipe.utils import (
-    BILBY_PIPE_USES_CONTAINER_UNIVERSE,
+    configure_file_transfer,
     _strip_unwanted_submission_keys,
 )
 
@@ -26,19 +26,7 @@ class MergeNode(BilbyMergeNode):
                 self._relative_topdir(pn.result_file, inputs.initialdir)
                 for pn in parallel_node_list
             ] + inputs.additional_transfer_paths
-            if not BILBY_PIPE_USES_CONTAINER_UNIVERSE and self.transfer_container:
-                input_files_to_transfer.append(inputs.container)
-            input_files_to_transfer, need_scitokens = self.job_needs_authentication(
-                input_files_to_transfer
-            )
-            if need_scitokens:
-                self.extra_lines.extend(self.scitoken_lines)
-            self.extra_lines.extend(
-                self._condor_file_transfer_lines(
-                    input_files_to_transfer,
-                    [self._relative_topdir(inputs.outdir, inputs.initialdir)],
-                )
-            )
+            configure_file_transfer(self, input_files_to_transfer)
 
         self.setup_arguments(
             add_ini=False, add_unknown_args=False, add_command_line_args=False
