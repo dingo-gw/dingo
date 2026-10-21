@@ -210,16 +210,14 @@ class Result(CoreResult):
             self.phase_prior = None
             self.psi_prior = None
             return
-        # Deepcopy because the marginalization split-off below mutates it.
-        self.prior = copy.deepcopy(self.sampler_context.prior)
+        # Copy because the marginalization split-off below mutates it. PriorDict.copy
+        # also starts with an empty constraint-normalization cache (see update_prior).
+        self.prior = self.sampler_context.prior.copy()
 
         prior_update = self.importance_sampling_metadata.get("prior_update")
         if prior_update is not None:
             prior_update = PriorDict(prior_update.copy())
             self.prior.update(prior_update)
-            # The copied prior carries the context prior's cached constraint
-            # normalization; re-estimate it for the updated prior (see update_prior).
-            self.prior._cached_normalizations = {}
 
         # Split off prior over geocent_time if samples appear to be time-marginalized.
         # This needs to be saved to initialize the likelihood.
@@ -243,9 +241,10 @@ class Result(CoreResult):
         Update the prior based on a new dict of priors. Use the existing prior for
         parameters not included in the new dict.
 
-        If class samples have not been importance sampled, then save new sample weights
-        based on the new prior. If class samples have been importance sampled,
-        then update the weights.
+        Before importance sampling, the weights become the prior ratio new / old, zero
+        for samples outside the old prior. After it, the weights and evidence are
+        recomputed under the new prior; samples the likelihood was not evaluated at
+        keep zero weight (see _calculate_evidence).
 
         Parameters
         ----------
@@ -278,9 +277,8 @@ class Result(CoreResult):
         if self.psi_prior is not None and "psi" in prior_update:
             self.psi_prior = prior_update.pop("psi")
         self.prior.update(prior_update)
-        # Bilby caches the constraint normalization by the tuple of parameter names, so
-        # it would keep the factor of the old prior (e.g. off by a nat for a new chirp-
-        # mass prior under component-mass constraints). Re-estimate it.
+        # Bilby's cached constraint normalization (keyed by the parameter names) would
+        # otherwise stay that of the old prior; re-estimate it.
         self.prior._cached_normalizations = {}
 
         # Evaluate new prior.
@@ -288,10 +286,9 @@ class Result(CoreResult):
         self.samples["log_prior"] = log_prior
 
         if self.log_evidence is None:
-            # Save weights. Note that weights are 0 if outside the initial prior,
-            # regardless of new prior. This makes sense since there is no way to assign
-            # a sensible weight.
-            log_weights = log_prior - log_prior_old
+            log_weights = np.where(
+                np.isfinite(log_prior_old), log_prior - log_prior_old, -np.inf
+            )
             weights = np.exp(log_weights - np.max(log_weights))
             weights /= np.mean(weights)
             self.samples["weights"] = weights

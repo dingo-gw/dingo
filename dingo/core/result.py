@@ -2,6 +2,7 @@ import copy
 import math
 import tempfile
 import time
+import warnings
 from collections import namedtuple
 from itertools import product
 
@@ -435,19 +436,23 @@ class Result(DingoDataset):
             else:
                 delta_log_prob_target = 0.0
 
-            # *Un-normalized* log weights are needed to calculate evidence.
+            # *Un-normalized* log weights, log(pi L / q), are needed for the evidence.
             log_weights = (
-                log_prior
-                + np.nan_to_num(log_likelihood)  # NaN = no log_likelihood evaluation
-                + delta_log_prob_target
-                - np.nan_to_num(
-                    log_prob_proposal
-                )  # NaN = outside prior so no synthetic
-                # phase
+                log_prior + log_likelihood + delta_log_prob_target - log_prob_proposal
             )
-            # A non-finite proposal density gives zero weight (nan_to_num would turn
-            # -inf into a +1.8e308 log-weight); N below still counts the sample.
-            log_weights = log_weights.where(np.isfinite(log_prob_proposal), -np.inf)
+            # w = 0 where L was never evaluated (NaN: outside the prior at importance-
+            # sampling time) or q is not finite; N still counts these samples. If the
+            # prior has since been widened, Z then estimates the new prior's evidence
+            # minus the part from the un-evaluated region (a lower bound), and the
+            # posterior is truncated to the evaluated region.
+            missing = log_likelihood.isna() | ~np.isfinite(log_prob_proposal)
+            log_weights = log_weights.where(~missing, -np.inf)
+            if n := np.sum(missing & np.isfinite(log_prior + delta_log_prob_target)):
+                warnings.warn(
+                    f"{n} samples within the prior have no likelihood or no finite "
+                    f"proposal density and get zero weight; if a prior update brought "
+                    f"them inside the prior, re-run importance_sample to evaluate them."
+                )
             self.log_evidence = logsumexp(log_weights) - np.log(self.num_samples)
 
             # Save the *normalized* weights.

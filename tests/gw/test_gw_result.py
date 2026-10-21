@@ -646,6 +646,24 @@ def test_update_prior_reweights_samples_before_importance_sampling():
     assert weights.std() > 0.1
 
 
+def test_update_prior_before_importance_sampling_zeroes_samples_outside_old_prior():
+    # A sample outside the old prior has no prior ratio: it gets zero weight even when
+    # the new prior covers it, and the other weights stay finite (here all equal, as
+    # the widened Uniform shifts their log prior by a constant).
+    result = _seeded_result()
+    n = len(result.samples)
+    result.samples.loc[0, "luminosity_distance"] = 1500.0  # outside Uniform(100, 1000)
+    result.update_prior(
+        {
+            "luminosity_distance": "bilby.core.prior.Uniform(minimum=100.0, "
+            "maximum=2000.0, name='luminosity_distance')"
+        }
+    )
+    weights = result.samples["weights"].to_numpy()
+    assert weights[0] == 0.0
+    np.testing.assert_allclose(weights[1:], n / (n - 1), rtol=1e-12)
+
+
 def test_update_prior_renormalizes_constrained_prior():
     # A new chirp-mass prior changes the fraction of draws that pass the component-
     # mass constraints; the updated log_prior must use the new normalization, not the
@@ -670,9 +688,8 @@ def test_update_prior_renormalizes_constrained_prior():
 
 
 def test_build_prior_renormalizes_constrained_prior_after_update():
-    # _build_prior (on load, and again after sample_proposal_extensions) copies the
-    # context's prior, whose cached constraint normalization belongs to the prior
-    # before the stored prior update.
+    # _build_prior copies the context's prior; a constraint normalization cached by an
+    # in-process evaluation of it belongs to the prior before the stored update.
     result = _seeded_result()
     param_keys = [k for k, v in result.prior.items() if not isinstance(v, Constraint)]
     result.sampler_context.prior.ln_prob(result.samples[param_keys], axis=0)
@@ -727,20 +744,27 @@ def test_update_prior_reweights_importance_sampled_result():
     assert np.isfinite(result.log_evidence)
 
 
-def test_non_finite_proposal_log_prob_gets_zero_weight():
-    # A -inf proposal log_prob must give zero weight (with N unchanged in the
-    # evidence), not a +1.8e308 log-weight that takes all the weight.
+@pytest.mark.parametrize(
+    "column, value", [("log_prob", -np.inf), ("log_likelihood", np.nan)]
+)
+def test_missing_proposal_density_or_likelihood_gets_zero_weight(column, value):
+    # A sample within the prior with a -inf proposal log_prob, or without a likelihood
+    # evaluation, gets zero weight (N unchanged in the evidence) and is counted in a
+    # warning -- not a +1.8e308 or log L = 0 term that takes all the weight. A sample
+    # outside the prior, which has no likelihood either, is not counted.
     result = _seeded_result()
     rng = np.random.default_rng(0)
     n = len(result.samples)
     result.samples["log_prior"] = 0.0
     result.samples["log_likelihood"] = rng.normal(0.0, 1.0, n)
     result.samples["log_prob"] = rng.normal(0.0, 1.0, n)
-    result.samples.loc[0, "log_prob"] = -np.inf
-    result._calculate_evidence()
+    result.samples.loc[0, column] = value
+    result.samples.loc[1, ["log_prior", "log_likelihood"]] = [-np.inf, np.nan]
+    with pytest.warns(UserWarning, match="^1 samples within the prior"):
+        result._calculate_evidence()
 
-    log_weights = (result.samples["log_likelihood"] - result.samples["log_prob"])[1:]
-    assert result.samples["weights"][0] == 0.0
+    log_weights = (result.samples["log_likelihood"] - result.samples["log_prob"])[2:]
+    assert result.samples["weights"][0] == result.samples["weights"][1] == 0.0
     np.testing.assert_allclose(
         result.log_evidence, logsumexp(log_weights) - np.log(n), rtol=1e-12
     )
