@@ -22,7 +22,7 @@ from torch.utils.data import TensorDataset
 from dingo.core.utils.torchutils import (
     build_train_and_test_loaders,
     get_cuda_info,
-    set_float32_matmul_precision,
+    resolve_float32_matmul_precision,
     set_seed_based_on_rank,
 )
 from dingo.core.utils.trainutils import LossInfo, RuntimeLimits
@@ -101,48 +101,46 @@ class TestGetNumGpus:
         assert isinstance(get_num_gpus({"num_gpus": "2"}), int)
 
 
-class TestSetFloat32MatmulPrecision:
-    """The per-stage training setting, recorded in the stage settings; the former
-    local setting is a fallback."""
+class TestResolveFloat32MatmulPrecision:
+    """Every stage's precision is fixed in the stage settings when the run starts:
+    the stage's own value, else the former local setting, else the run-level value
+    that older checkpoints recorded, else highest."""
 
-    @pytest.fixture(autouse=True)
-    def restore_precision(self):
-        before = torch.get_float32_matmul_precision()
-        yield
-        torch.set_float32_matmul_precision(before)
+    def test_local_setting_is_recorded_in_every_stage(self, capsys):
+        stages = [{"float32_matmul_precision": "high"}, {}]
+        resolve_float32_matmul_precision(
+            stages, {"float32_matmul_precision": "high"}, {}
+        )
+        assert "deprecated" in capsys.readouterr().out
+        # A resume without the local key, also before stage 1, keeps the precision.
+        resolve_float32_matmul_precision(stages, {}, {})
+        assert [s["float32_matmul_precision"] for s in stages] == ["high", "high"]
 
-    def test_stage_setting_is_applied_and_recorded(self):
-        stage = {"float32_matmul_precision": "high"}
-        assert set_float32_matmul_precision(stage, {}) == "high"
-        assert torch.get_float32_matmul_precision() == "high"
-        assert stage["float32_matmul_precision"] == "high"
+    def test_run_level_value_of_older_checkpoints_is_kept(self):
+        stages = [{}, {"float32_matmul_precision": "medium"}]
+        resolve_float32_matmul_precision(
+            stages, {}, {"float32_matmul_precision": "high"}
+        )
+        assert [s["float32_matmul_precision"] for s in stages] == ["high", "medium"]
 
-    def test_default_is_highest_per_stage(self):
-        # No inheritance from an earlier stage: an unset stage resets to highest.
-        torch.set_float32_matmul_precision("high")
-        stage = {}
-        assert set_float32_matmul_precision(stage, {}) == "highest"
-        assert torch.get_float32_matmul_precision() == "highest"
-        assert stage["float32_matmul_precision"] == "highest"
-
-    def test_local_setting_is_a_fallback(self):
-        stage = {}
-        set_float32_matmul_precision(stage, {"float32_matmul_precision": "high"})
-        assert torch.get_float32_matmul_precision() == "high"
-        # Recorded, so a resume with the same local setting is consistent.
-        assert stage["float32_matmul_precision"] == "high"
-        set_float32_matmul_precision(stage, {"float32_matmul_precision": "high"})
+    def test_default_is_highest(self):
+        stages = [{}]
+        resolve_float32_matmul_precision(stages, {}, {})
+        assert stages == [{"float32_matmul_precision": "highest"}]
 
     def test_conflicting_settings_raise(self):
-        with pytest.raises(ValueError, match="local settings"):
-            set_float32_matmul_precision(
-                {"float32_matmul_precision": "highest"},
+        with pytest.raises(ValueError, match="remove the local setting"):
+            resolve_float32_matmul_precision(
+                [{}, {"float32_matmul_precision": "highest"}],
                 {"float32_matmul_precision": "high"},
+                {},
             )
 
     def test_rejects_unknown_value(self):
         with pytest.raises(ValueError, match="float32_matmul_precision"):
-            set_float32_matmul_precision({"float32_matmul_precision": "fast"}, {})
+            resolve_float32_matmul_precision(
+                [{"float32_matmul_precision": "fast"}], {}, {}
+            )
 
 
 class TestGetCudaInfo:

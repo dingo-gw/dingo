@@ -20,10 +20,12 @@ from typing import Union, Callable, Tuple, Optional
 class DingoLULinear(transforms.LULinear):
     """glasflow's LULinear with the LU index arrays held as buffers, run in fp32.
 
-    nflows keeps the index arrays as numpy attributes, which Dynamo lifts as CPU graph
-    inputs that CUDA graphs cannot record (torch_compile_mode: reduce-overhead). As
-    buffers they live on the device and are static graph inputs. They are
-    non-persistent, so the state dict, and hence checkpoints, are unchanged.
+    nflows keeps the index arrays as numpy attributes: indexing the weight matrices with
+    them copies them to the device at every forward (a synchronous copy in eager mode),
+    and Dynamo lifts them as CPU graph inputs that CUDA graphs cannot record
+    (torch_compile_mode: reduce-overhead). As buffers they live on the device and are
+    static graph inputs. They are non-persistent, so the state dict, and hence
+    checkpoints, are unchanged.
 
     The transform runs with autocast disabled on fp32 inputs. Autocast would run its
     matrix product in reduced precision, and since the spline transforms return the
@@ -39,14 +41,14 @@ class DingoLULinear(transforms.LULinear):
             self.register_buffer(name, indices, persistent=False)
 
     def forward(self, inputs, context=None):
-        """Forward transform in fp32, also under autocast."""
+        """Forward transform in the parameter dtype (fp32), also under autocast."""
         with torch.autocast(inputs.device.type, enabled=False):
-            return super().forward(inputs.float(), context)
+            return super().forward(inputs.to(self.bias.dtype), context)
 
     def inverse(self, inputs, context=None):
-        """Inverse transform in fp32, also under autocast."""
+        """Inverse transform in the parameter dtype (fp32), also under autocast."""
         with torch.autocast(inputs.device.type, enabled=False):
-            return super().inverse(inputs.float(), context)
+            return super().inverse(inputs.to(self.bias.dtype), context)
 
 
 def create_linear_transform(param_dim: int):

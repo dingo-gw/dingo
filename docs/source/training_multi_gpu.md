@@ -174,8 +174,8 @@ Notes:
   time. It helps when the host cannot keep the GPU busy (a training process at 100% of one
   CPU core while `nvidia-smi` shows the GPU below 100% utilization). CUDA graphs need static
   shapes, so the released glasflow spline (which selects the tails by mask indexing) splits the
-  graph and loses most of the gain; use the static-shape fork. The graphs hold a private
-  memory pool, so peak GPU memory grows. Not supported with multi-GPU training or
+  graph and loses most of the gain. The graphs hold a private memory pool, so peak GPU
+  memory grows. Not supported with multi-GPU training or
   `gradient_updates_per_optimizer_step > 1` (the run stops with an error before training).
 
 - Compilation is slow: 4–12 minutes for a production-size network, paid on the first training
@@ -221,10 +221,11 @@ give the same speedup (0.90 to 0.47 s per step); TF32 is the option for training
 float32.
 
 Like `automatic_mixed_precision`, the setting belongs to a training stage, since it changes the
-numerics of training; a stage that does not set it uses `highest`. The value in effect is
-recorded in the stage settings and hence in the checkpoint metadata. The former
-`local.float32_matmul_precision` still applies to stages that do not set the key. Inference
-runs at PyTorch's default (full float32) regardless of the training precision.
+numerics of training; a stage that does not set it uses `highest`. Each stage's value is fixed
+when the run starts and recorded in the stage settings, hence in the checkpoint metadata, so a
+resume cannot change it. The former `local.float32_matmul_precision` is deprecated but still
+applies to stages that do not set the key. Inference runs at PyTorch's default (full float32)
+regardless of the training precision.
 
 ### Fused optimizer (`fused`)
 
@@ -269,7 +270,7 @@ prevented). As a result, duplicate information can appear in `info.out`. Since e
 If information is not duplicated, it is only printed by `rank = 0`.
 
 During training, a progress line is printed every `log_interval` optimizer steps (default
-10; set in the `local` section) and at the end of each epoch:
+10; set in the `local` section), and once more for any steps left over at the end of the epoch:
 ```
 Train Epoch: 1 [40960/4750000 (1%)]   Loss: -2.771 (-2.799)   Time per step: wall 0.201 (0.205), data wait 0.004 (0.005), gpu 0.172 (0.170); mean over 10 steps
 ```
@@ -290,8 +291,9 @@ same window, again with the epoch means in parentheses:
   the total across all GPUs and is divided equally between them (aim for 4–8 per GPU).
 
 Between two lines the loss stays on the GPU: reading it on the host would block until the GPU
-has finished the step, so `log_interval` also sets how often the host synchronizes with the
-GPU (with `automatic_mixed_precision` the loss scaler adds one synchronization per step).
+has finished the step and leave the GPU idle while the next batch is fetched and launched, so
+`log_interval` also sets how often the host synchronizes with the GPU (with
+`automatic_mixed_precision` the loss scaler adds one synchronization per step).
 In multi-GPU mode the times are those of rank 0; the gradient all-reduce keeps the ranks in
 step, so its wall time reflects the slowest rank. The step time is larger than in single-GPU
 mode because it includes the all-reduce; the speedup comes from fewer steps per epoch, not

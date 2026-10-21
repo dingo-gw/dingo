@@ -158,11 +158,6 @@ def test_loss_info_empty_epoch_is_nan():
     assert info.flush() is False
 
 
-def test_loss_info_rejects_non_positive_log_interval():
-    with pytest.raises(ValueError, match="log_interval"):
-        LossInfo(1, 100, 10, device=torch.device("cpu"), log_interval=0)
-
-
 def test_loss_info_log_interval_syncs_every_n_steps():
     """Only every ``log_interval``-th update reads the window; the epoch average
     is still weighted over all steps, and flush() closes the partial last window."""

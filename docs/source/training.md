@@ -195,7 +195,7 @@ checkpoint_epochs
 : Dingo saves a temporary checkpoint in `model_latest.py` after every epoch, but this is later overwritten by the next checkpoint. This setting saves a permanent checkpoint after the specified number of epochs. Having these checkpoints can help in recovering from training failures that do not result in program termination.
 
 log_interval
-: (Optional, default 10) Print a progress line every this many optimizer steps (and at the end of each epoch). Between lines the loss stays on the GPU, so this also sets how often the host waits for the GPU; reading the loss after every step would leave the GPU idle while the next batch is fetched and launched. See [](training_multi_gpu.md#reading-the-training-log) for the line format.
+: (Optional, default 10) Print a progress line every this many optimizer steps, and once more for any steps left over at the end of the epoch. The loss is read from the GPU only at these points; see [](training_multi_gpu.md#reading-the-training-log) for the line format and for why reading it every step costs time.
 
 leave_waveforms_on_disk
 : To improve memory efficiency during training, the waveforms are not loaded into memory at the beginning of training, but separately for each batch during training. When training on a cluster, it is highly recommended to include a local path where the dataset is cached at the beginning of training (see `local_cache_path`). If RAM is not an issue, the default `leave_waveforms_on_disk=True` can be set to `False`. 

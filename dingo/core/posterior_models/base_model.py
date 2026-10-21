@@ -645,8 +645,7 @@ def train_epoch(
         ``automatic_mixed_precision`` is set, a fresh one is created.
     log_interval : int
         Print a progress line, and read the loss from the device, every this many
-        optimizer steps (the only host-device synchronization of the loop; with
-        AMP the GradScaler adds one per step).
+        optimizer steps.
 
     Returns
     -------

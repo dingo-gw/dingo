@@ -35,7 +35,7 @@ from dingo.core.utils.torchutils import (
     contains_BatchNorm,
     document_gpus,
     replace_BatchNorm_with_SyncBatchNorm,
-    set_float32_matmul_precision,
+    resolve_float32_matmul_precision,
     set_seed_based_on_rank,
     setup_ddp,
 )
@@ -375,8 +375,14 @@ def train_stages(
         except KeyError:
             break
     end_epochs = list(np.cumsum([stage["epochs"] for stage in stages]))
+    resolve_float32_matmul_precision(
+        stages, local_settings, pm.metadata, print_output=print_primary
+    )
 
-    if local_settings.get("torch_compile_mode") == "reduce-overhead":
+    if (
+        local_settings.get("torch_compile")
+        and local_settings.get("torch_compile_mode") == "reduce-overhead"
+    ):
         # Not validated: DDP splits the graph at its gradient buckets, and with
         # gradient accumulation the .grad tensors may alias graph-owned memory.
         if (world_size is not None and world_size > 1) or any(
@@ -391,9 +397,8 @@ def train_stages(
     num_starting_stage = np.searchsorted(end_epochs, pm.epoch + 1)
     for n in range(num_starting_stage, num_stages):
         stage = stages[n]
-        # Per stage, like automatic_mixed_precision; recorded in the stage settings.
         # Dynamo guards on the precision, so a change recompiles the network.
-        set_float32_matmul_precision(stage, local_settings, print_output=print_primary)
+        torch.set_float32_matmul_precision(stage["float32_matmul_precision"])
 
         if pm.epoch == end_epochs[n] - stage["epochs"]:
             if print_primary:

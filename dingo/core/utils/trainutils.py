@@ -100,9 +100,8 @@ class EarlyStopping:
 
 class LossInfo:
     """Track the epoch loss and per-step timings, reading them from the device only
-    every ``log_interval`` optimizer steps: a per-step ``.item()`` blocks the host
-    until the device has finished the step and leaves the GPU idle while the next
-    batch is fetched and launched."""
+    every ``log_interval`` optimizer steps (see ``log_interval`` in the training
+    docs for why not every step)."""
 
     def __init__(
         self,
@@ -122,7 +121,7 @@ class LossInfo:
         self.batch_size_per_grad_update = batch_size_per_grad_update
         self.mode = mode
         self.log_interval = log_interval
-        self.device = torch.device(device)
+        self.device = device
         # track loss
         self.loss_tracker = AvgTracker()
         self.loss = None
@@ -173,7 +172,8 @@ class LossInfo:
         device) and, every ``log_interval`` steps, read the window; True if read."""
         self.iteration += 1
         n = sum(self.cached_n)
-        self.window_sums[0] += torch.stack(self.cached_losses).mean() * n
+        loss = torch.stack(self.cached_losses).mean().to(self.window_sums.dtype)
+        self.window_sums[0] += loss * n
         self.window_sums[1] += n
         self._reset_cached_losses()
         if self.use_cuda_events:

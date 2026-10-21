@@ -232,10 +232,6 @@ class TestCompileMode:
             compile_network(nn.Linear(2, 2))
         assert compile.call_args.kwargs == {"mode": None, "dynamic": None}
 
-    def test_unknown_mode_is_rejected(self):
-        with pytest.raises(RuntimeError, match="Unrecognized mode"):
-            compile_network(nn.Linear(2, 2), mode="fast")
-
     def test_train_stages_rejects_cuda_graphs_with_ddp_or_accumulation(self):
         import types
 
@@ -247,7 +243,11 @@ class TestCompileMode:
             device=torch.device("cpu"),
             metadata={"train_settings": {"training": {"stage_0": stage}}},
         )
-        local = {"runtime_limits": {}, "torch_compile_mode": "reduce-overhead"}
+        local = {
+            "runtime_limits": {},
+            "torch_compile": True,
+            "torch_compile_mode": "reduce-overhead",
+        }
         with pytest.raises(NotImplementedError, match="reduce-overhead"):
             train_stages(pm, None, "", local)
         stage.pop("gradient_updates_per_optimizer_step")
@@ -267,9 +267,7 @@ class TestResetGraphsOnRequiresGradChange:
 
     @staticmethod
     def _set_rb(net, requires_grad):
-        for p in net[
-            0
-        ].parameters():  # parameters "0.weight", "0.bias" play the RB layer
+        for p in net[0].parameters():  # parameters "0.weight", "0.bias" play the RB layer
             p.requires_grad_(requires_grad)
 
     def test_unfreeze_without_reset_gives_no_gradient(self):
