@@ -50,8 +50,8 @@ IMPORTANCE_SAMPLING_SETTINGS = {
     # likelihood.
     "PhasePsiRecoveryDefault": {
         "synthetic_parameters": {
-            "n_grid_phase": 512,
-            "n_grid_psi": 128,
+            "n_grid_phase": 4096,
+            "n_grid_psi": 1024,
             "uniform_weight": 0.01,
         },
     },

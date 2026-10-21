@@ -637,7 +637,7 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         }
 
     def log_likelihood_from_phase_grid_terms(
-        self, terms: dict, phases: np.ndarray, psis: np.ndarray
+        self, terms: dict, phases: np.ndarray, psis: np.ndarray, phasors=None
     ) -> np.ndarray:
         """
         Evaluate the log likelihood on a grid of phases and polarization angles from
@@ -661,6 +661,10 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
             (G,) phases, shared by all samples, or (N, G) phases per sample.
         psis: np.ndarray
             (H,) polarization angles, shared, or (N, H) per sample.
+        phasors: tuple, optional
+            `phase_grid_phasors(terms, phases)`, if already computed: they depend
+            only on the phases, so samples evaluated one at a time on the same grid
+            can share them.
 
         Returns
         -------
@@ -668,15 +672,15 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
             Log likelihoods over all (phase, psi) pairs, of shape (G, H), or
             (N, G, H) with a sample axis in the terms or the angles.
         """
-        phases = np.asarray(phases)
         psis = np.asarray(psis)
         # Basis weights of shape (..., H, K) with K = 2.
         w = np.stack([np.cos(2 * psis), np.sin(2 * psis)], axis=-1)
-        # Phasors exp(-i * order * ph) of shape (..., orders, G), contracted with the
+        # Phasors exp(-i * order * phase) of shape (..., orders, G), contracted with the
         # coefficients of shape (..., K, orders) over the orders, leaving the basis
         # axes: (..., K, G) and (..., K, K, G).
-        phasor_m = np.exp(-1j * terms["m_vals"][:, None] * phases[..., None, :])
-        phasor_delta = np.exp(-1j * terms["deltas"][:, None] * phases[..., None, :])
+        if phasors is None:
+            phasors = phase_grid_phasors(terms, phases)
+        phasor_m, phasor_delta = phasors
         kappa2_b = (terms["kappa2_modes"] @ phasor_m).real
         crossterms = terms["rho2opt_crossterms"]
         rho2opt_bc = np.asarray(terms["rho2opt_const"])[..., None] + (
@@ -895,6 +899,16 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
             inner_product_complex(d_ifo, mu_ifo)
             for d_ifo, mu_ifo in zip(d.values(), mu.values())
         )
+
+
+def phase_grid_phasors(terms: dict, phases: np.ndarray) -> tuple:
+    """exp(-i m phase) and exp(-i delta phase) for the mode orders of
+    `phase_grid_terms`, of shape (..., orders, G) for phases of shape (..., G)."""
+    phases = np.asarray(phases)
+    return (
+        np.exp(-1j * terms["m_vals"][:, None] * phases[..., None, :]),
+        np.exp(-1j * terms["deltas"][:, None] * phases[..., None, :]),
+    )
 
 
 def inner_product(a, b, min_idx=0, delta_f=None, psd=None):
