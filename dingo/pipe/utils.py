@@ -53,6 +53,14 @@ def configure_file_transfer(
     if require_osdf_auth and any("osdf" in path for path in files):
         # Already-prefixed OSDF URLs may not trigger Bilby's authentication check.
         need_scitokens = True
+    if (
+        node.transfer_container
+        and (BILBY_PIPE_USES_CONTAINER_UNIVERSE or include_container)
+        and node.inputs.container.startswith(("osdf://", "igwn+osdf://"))
+    ):
+        # Native container_image transfers are not in transfer_input_files, so
+        # Bilby's input authentication check above cannot see their token needs.
+        need_scitokens = True
     if need_scitokens:
         # Generation may already have requested tokens for frame discovery.
         node.extra_lines.extend(
