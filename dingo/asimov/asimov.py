@@ -1,27 +1,27 @@
 # adapted from the Asimov Bilby Pipeline interface
 import configparser
 import glob
-import importlib
+import importlib.resources
 import os
 import re
 import subprocess
-import time
+import warnings
+from importlib.metadata import version
 
-import torch
+from asimov.pipeline import Pipeline, PipelineException, PipelineLogger
 
-from asimov import config, logger
+# Check if using asimov < 0.7.0 (legacy version with PESummaryPipeline)
+ASIMOV_LEGACY = version("asimov") < "0.7.0"
 
-from asimov.pipeline import (
-    Pipeline,
-    PipelineException,
-    PipelineLogger,
-    PESummaryPipeline,
-)
-
-from dingo.gw.result import Result
+if ASIMOV_LEGACY:
+    warnings.warn(
+        "Using asimov < 0.7.0 is deprecated and support will be removed soon. "
+        "Please upgrade to asimov >= 0.7.0.",
+        DeprecationWarning,
+    )
 
 
-class Dingo(Pipeline):
+class DingoPipeline(Pipeline):
     """
     The Dingo Pipeline.
 
@@ -41,7 +41,9 @@ class Dingo(Pipeline):
     STATUS = {"wait", "stuck", "stopped", "running", "finished"}
 
     def __init__(self, production, category=None):
-        super(Dingo, self).__init__(production, category)
+        from asimov import logger
+
+        super(DingoPipeline, self).__init__(production, category)
         self.logger = logger
         if not production.pipeline.lower() == self.name:
             raise PipelineException
@@ -71,11 +73,6 @@ class Dingo(Pipeline):
             self.logger.info("No results directory found")
             return False
 
-    def before_submit(self):
-        """Pre-submit hook."""
-        self.logger.info("Running the before_submit hook")
-        pass
-
     def build_dag(self, psds=None, user=None, clobber_psd=False, dryrun=False):
         """
         Construct a DAG file in order to submit a production to the
@@ -92,13 +89,17 @@ class Dingo(Pipeline):
         user : str
            The user accounting tag which should be used to run the job.
         dryrun: bool
-           If set to true the commands will not be run, but will be printed to standard output. Defaults to False.
+           If set to true the commands will not be run, but will be printed to standard output.
+           Defaults to False.
 
         Raises
         ------
         PipelineException
            Raised if the construction of the DAG fails.
         """
+        import time
+
+        from asimov import config
 
         cwd = os.getcwd()
         self.logger.info(f"Working in {cwd}")
@@ -141,6 +142,7 @@ class Dingo(Pipeline):
         """
         Collect the combined samples files for PESummary.
         """
+        from dingo.gw.result import Result
 
         if absolute:
             rundir = os.path.abspath(self.production.rundir)
@@ -150,9 +152,9 @@ class Dingo(Pipeline):
         result_files = glob.glob(
             os.path.join(rundir, "result", f"*importance_sampling.hdf5")
         )
-        if len(result_files) == 0: 
+        if len(result_files) == 0:
             raise ValueError("Importance sampling result file not found")
-        elif len(result_files) > 1: 
+        elif len(result_files) > 1:
             raise ValueError("Multiple importance sampling result files found")
 
         # pesummary can't presently read a result file containing MultibandedFrequencyDomain
@@ -176,7 +178,6 @@ class Dingo(Pipeline):
         """
         Upload the samples from this job.
         """
-
         asset = self.collect_assets()["samples"]
         self.production.event.repository.add_file(
             asset,
@@ -212,14 +213,14 @@ class Dingo(Pipeline):
                 )
         return messages
 
-    def fmin_max_are_compatible(self, prod_meta, net_meta):
+    def _fmin_max_are_compatible(self, prod_meta, net_meta, reasons):
         """
         Check if the network min/max frequencies are compatible with the data.
 
         Take possible domain updates and random frequency masking into account.
         """
-        f_min = prod_meta["quality"]['minimum frequency'].values()
-        f_max = prod_meta["quality"]['maximum frequency'].values()
+        f_min = prod_meta["quality"]["minimum frequency"].values()
+        f_max = prod_meta["quality"]["maximum frequency"].values()
 
         # Get network values
         domain = net_meta["dataset_settings"]["domain"]["base_domain"]
@@ -230,77 +231,148 @@ class Dingo(Pipeline):
         net_f_max = domain_update.get("f_max", domain["f_max"])
 
         # Random strain cropping bounds (if they exist)
-        net_f_min_upper = net_meta["train_settings"]["data"]["random_strain_cropping"].get(
-            "f_min_upper", None
-        ) if "random_strain_cropping" in net_meta["train_settings"]["data"] else None
-        net_f_max_lower = net_meta["train_settings"]["data"]["random_strain_cropping"].get(
-            "f_max_lower", None
-        ) if "random_strain_cropping" in net_meta["train_settings"]["data"] else None
+        net_f_min_upper = (
+            net_meta["train_settings"]["data"]["random_strain_cropping"].get(
+                "f_min_upper", None
+            )
+            if "random_strain_cropping" in net_meta["train_settings"]["data"]
+            else None
+        )
+        net_f_max_lower = (
+            net_meta["train_settings"]["data"]["random_strain_cropping"].get(
+                "f_max_lower", None
+            )
+            if "random_strain_cropping" in net_meta["train_settings"]["data"]
+            else None
+        )
 
         # Check f_min
         if net_f_min_upper is None:
-            f_min_match = (min(f_min) == max(f_min) == net_f_min)
+            f_min_match = min(f_min) == max(f_min) == net_f_min
         else:
             f_min_match = (min(f_min) >= net_f_min) and (max(f_min) <= net_f_min_upper)
 
         # Check f_max
         if net_f_max_lower is None:
-            f_max_match = (min(f_max) == max(f_max) == net_f_max)
+            f_max_match = min(f_max) == max(f_max) == net_f_max
         else:
             f_max_match = (min(f_max) >= net_f_max_lower) and (max(f_max) <= net_f_max)
 
+        if not f_min_match:
+            upper = net_f_min if net_f_min_upper is None else net_f_min_upper
+            reasons.append(
+                f"minimum frequencies {prod_meta['quality']['minimum frequency']} "
+                f"outside allowed range [{net_f_min}, {upper}] Hz"
+            )
+        if not f_max_match:
+            lower = net_f_max if net_f_max_lower is None else net_f_max_lower
+            reasons.append(
+                f"maximum frequencies {prod_meta['quality']['maximum frequency']} "
+                f"outside allowed range [{lower}, {net_f_max}] Hz"
+            )
         return f_min_match and f_max_match
 
     @staticmethod
+    def _is_transformer(metadata):
+        model = metadata["train_settings"].get("model", {})
+        return (model.get("embedding_type") or "").lower() == "transformer"
+
+    @staticmethod
     def _net_max_luminosity_distance(metadata):
-        prior = metadata["train_settings"]["data"]["extrinsic_prior"]["luminosity_distance"]
+        prior = metadata["train_settings"]["data"]["extrinsic_prior"][
+            "luminosity_distance"
+        ]
         match = re.findall(r"maximum=[\d]+", prior)
         assert match
         return int(match[0].split("=")[-1])
 
-    def network_is_compatible(self, prod_meta, net_meta):
-        """Check if a network's metadata is compatible with the production in prod_meta."""
+    def network_is_compatible(self, prod_meta, net_meta, reasons=None):
+        """Check compatibility, optionally appending rejection reasons to a list."""
+        reasons = [] if reasons is None else reasons
         duration = prod_meta["data"]["segment length"]
         ifos = prod_meta["interferometers"]
 
-        net_duration = round(1 / net_meta["dataset_settings"]["domain"]["base_domain"]["delta_f"])
+        if self._is_transformer(net_meta):
+            from copy import deepcopy
+
+            from dingo.core.utils.backward_compatibility import update_data_config
+            from dingo.gw.domains import build_domain_from_model_metadata
+            from dingo.gw.frequency_updates import (
+                check_detector_update,
+                check_frequency_updates,
+            )
+
+            net_meta = deepcopy(net_meta)
+            update_data_config(net_meta)
+            domain = build_domain_from_model_metadata(net_meta, base=True)
+            if round(domain.duration) != duration:
+                reasons.append(
+                    f"duration {domain.duration} s does not match requested {duration} s"
+                )
+
+            bounds = []
+            for key in ("minimum frequency", "maximum frequency"):
+                bound = prod_meta.get("quality", {}).get(key)
+                if isinstance(bound, dict):
+                    bound = {ifo: bound[ifo] for ifo in ifos if ifo in bound}
+                bounds.append(bound)
+            try:
+                check_detector_update(net_meta, ifos)
+                check_frequency_updates(net_meta, *bounds, detectors=ifos)
+            except ValueError as err:
+                reasons.append(str(err))
+            return not reasons
+
+        net_duration = round(
+            1 / net_meta["dataset_settings"]["domain"]["base_domain"]["delta_f"]
+        )
         net_ifos = net_meta["train_settings"]["data"]["detectors"]
 
-        if (
-            net_duration == duration
-            and sorted(net_ifos) == sorted(ifos)
-            and self.fmin_max_are_compatible(prod_meta, net_meta)
-        ):
-            return True
-        return False
+        if net_duration != duration:
+            reasons.append(
+                f"duration {net_duration} s does not match requested {duration} s"
+            )
+        if sorted(net_ifos) != sorted(ifos):
+            reasons.append(f"detectors {net_ifos} do not match requested {ifos}")
+        self._fmin_max_are_compatible(prod_meta, net_meta, reasons)
+        return not reasons
 
     def _filter_compatible_networks(self, prod_meta):
         """Load available networks and return those compatible with the production.
 
         Returns a list of (network_config, net_meta) tuples.
         """
+        import torch
+
         compatible_networks = []
+        rejections = []
         for networks in prod_meta["available networks"]:
             try:
-                f = torch.load(networks["model"], map_location="meta", weights_only=False)
+                f = torch.load(
+                    networks["model"], map_location="meta", weights_only=False
+                )
                 net_meta = f["metadata"]
-            except FileNotFoundError:
-                raise PipelineException(
-                    f"Could not find network: '{networks['model']}'..",
-                    production=self.production.name,
-                )
-            except KeyError:
-                raise PipelineException(
-                    f"Could not load metadata from network: '{networks['model']}'..",
-                    production=self.production.name,
-                )
+            except FileNotFoundError as err:
+                msg = f"Could not find network: '{networks['model']}'.."
+                raise PipelineException(msg, production=self.production.name) from err
+            except KeyError as err:
+                msg = "Could not load metadata from network: '{networks['model']}'.."
+                raise PipelineException(msg, production=self.production.name) from err
 
-            if self.network_is_compatible(prod_meta, net_meta):
+            reasons = []
+            if self.network_is_compatible(prod_meta, net_meta, reasons):
+                if self._is_transformer(net_meta):
+                    networks = {**networks, "model init": None}
                 compatible_networks.append((networks, net_meta))
+            else:
+                rejection = f"  {networks['model']}: " + "; ".join(reasons)
+                rejections.append(rejection)
+                self.logger.info(rejection)
 
         if not compatible_networks:
             raise PipelineException(
-                "No compatible DINGO network found for this production..",
+                "No compatible DINGO network found for this production.\n"
+                + "\n".join(rejections),
                 production=self.production.name,
             )
 
@@ -314,20 +386,30 @@ class Dingo(Pipeline):
 
         Returns the selected network config.
         """
+        if len({self._is_transformer(meta) for _, meta in compatible_networks}) > 1:
+            raise PipelineException(
+                "Both transformer and GNPE/legacy networks match this production. "
+                "Set 'networks' explicitly or restrict 'available networks' "
+                "to one architecture.",
+                production=self.production.name,
+            )
         if len(compatible_networks) == 1:
             return compatible_networks[0][0]
 
-        distances = [self._net_max_luminosity_distance(x[1]) for x in compatible_networks]
+        distances = [
+            self._net_max_luminosity_distance(x[1]) for x in compatible_networks
+        ]
         if len(distances) > len(set(distances)):
             raise PipelineException(
                 "Multiple DINGO networks match this production..",
                 production=self.production.name,
             )
 
-        prod_max_luminosity_distance = prod_meta["priors"]["luminosity distance"]["maximum"]
+        prod_max_luminosity_distance = prod_meta["priors"]["luminosity distance"][
+            "maximum"
+        ]
         compatible_networks = sorted(
-            compatible_networks,
-            key=lambda x: self._net_max_luminosity_distance(x[1])
+            compatible_networks, key=lambda x: self._net_max_luminosity_distance(x[1])
         )
         for networks, net_meta in compatible_networks:
             net_max_luminosity_distance = self._net_max_luminosity_distance(net_meta)
@@ -346,11 +428,10 @@ class Dingo(Pipeline):
                 "metadata. Set one of these in the analysis or configuration blueprint."
             )
 
-        # Placeholder in case of error
-        meta["networks"] = {"model": "", "model init": ""}
-
         compatible_networks = self._filter_compatible_networks(meta)
-        meta["networks"] = self._select_preferred_network(meta, compatible_networks)
+        meta["networks"] = self._select_preferred_network(
+            meta, compatible_networks
+        ).copy()
 
         # Update the ledger
         if not dryrun:
@@ -379,7 +460,6 @@ class Dingo(Pipeline):
         PipelineException
            This will be raised if the pipeline fails to submit the job.
         """
-
         cwd = os.getcwd()
         self.logger.info(f"Working in {cwd}")
 
@@ -436,16 +516,19 @@ class Dingo(Pipeline):
             ) from error
 
     def after_completion(self):
-        post_pipeline = PESummaryPipeline(production=self.production)
-        self.logger.info("Job has completed. Running PE Summary.")
-        cluster = post_pipeline.submit_dag()
-        self.production.meta["job id"] = int(cluster)
-        self.production.status = "processing"
-        self.production.event.update_data()
+        # Only run PESummary if it was requested
+        if not "pesummary" in self.production.meta.get("postprocessing", {}):
+            self.logger.info("No pesummary requested, skipping..")
+            return
 
-    def detect_completion_processing(self):
-        # no post processing currently performed
-        return True
+        try:
+            from asimov_pesummary import PESummary
+        except ImportError:
+            self.logger.warning(
+                "asimov-pesummary not available, skipping post-processing"
+            )
+            return
+        super().after_completion()
 
     def resurrect(self):
         """
@@ -472,7 +555,6 @@ class Dingo(Pipeline):
         filepath: str
            The path to the ini file.
         """
-
         with open(filepath, "r") as f:
             file_content = f.read()
 
@@ -480,3 +562,61 @@ class Dingo(Pipeline):
         config_parser.read_string(file_content)
 
         return config_parser
+
+
+class DingoLegacy(DingoPipeline):
+    """
+    The Dingo Pipeline for asimov < 0.7.0 with legacy PESummaryPipeline support.
+    """
+
+    def after_completion(self):
+        """
+        Legacy implementation using PESummaryPipeline for post-processing.
+        """
+        from asimov.pipeline import PESummaryPipeline
+
+        post_pipeline = PESummaryPipeline(production=self.production)
+        self.logger.info("Job has completed. Running PE Summary.")
+        cluster = post_pipeline.submit_dag()
+        self.production.meta["job id"] = int(cluster)
+        self.production.status = "processing"
+        self.production.event.update_data()
+
+    def detect_completion_processing(self):
+        # no post processing currently performed
+        return True
+
+    def before_submit(self):
+        """Pre-submit hook."""
+        self.logger.info("Running the before_submit hook")
+        pass
+
+
+class Dingo:
+    """
+    Factory class that returns the appropriate Dingo pipeline implementation.
+
+    Uses __new__ to transparently return either DingoPipeline or DingoLegacy
+    instances based on the asimov version.
+
+    Parameters
+    ----------
+    production : :class:`asimov.Production`
+       The production object.
+    category : str, optional
+        The category of the job.
+        Defaults to "C01_offline".
+    """
+
+    def __new__(cls, *args, **kwargs):
+        """
+        Return an instance of the appropriate pipeline class.
+
+        If asimov < 0.7.0, returns a DingoLegacy instance.
+        Otherwise, returns a DingoPipeline instance.
+        """
+        if ASIMOV_LEGACY:
+            dingo_cls = DingoLegacy
+        else:
+            dingo_cls = DingoPipeline
+        return dingo_cls(*args, **kwargs)
