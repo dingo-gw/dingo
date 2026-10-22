@@ -152,6 +152,43 @@ def test_loss_info_weighted_average_across_batches():
     assert info.loss == 3.0
 
 
+def test_loss_info_empty_epoch_is_nan():
+    info = LossInfo(1, 100, 10, device=torch.device("cpu"))
+    assert math.isnan(info.get_avg())
+    assert info.flush() is False
+
+
+def test_loss_info_log_interval_syncs_every_n_steps():
+    """Only every ``log_interval``-th update reads the window; the epoch average
+    is still weighted over all steps, and flush() closes the partial last window."""
+    info = LossInfo(1, 100, 10, device=torch.device("cpu"), log_interval=2)
+    synced = []
+    for loss, n in [(2.0, 4), (3.0, 2), (5.0, 4)]:
+        info.update_timer()
+        info.cache_loss(torch.tensor(loss), n=n)
+        synced.append(info.update())
+    assert synced == [False, True, False]
+    assert info.loss == pytest.approx(14.0 / 6)  # first window of two steps
+    assert info.window_steps == 2
+    assert info.flush() is True  # the pending third step
+    assert info.window_steps == 1 and info.loss == 5.0
+    assert info.get_avg() == pytest.approx((8 + 6 + 20) / 10)
+    assert info.flush() is False
+    # Timing is populated on CPU, where there are no CUDA events.
+    assert info.times["wall"].x >= info.times["data wait"].x >= 0.0
+    assert info.times["wall"].N == 3 and "gpu" not in info.times
+
+
+def test_loss_info_accumulation_step_is_mean_of_minibatches():
+    """Within an optimizer step, mini-batch losses are averaged (not n-weighted),
+    and the step is weighted by its total sample count."""
+    info = LossInfo(1, 100, 10, device=torch.device("cpu"))
+    info.cache_loss(torch.tensor(1.0), n=4)
+    info.cache_loss(torch.tensor(3.0), n=2)
+    info.update()
+    assert info.get_avg() == 2.0  # mean(1, 3) over n=6, not (1*4 + 3*2)/6
+
+
 # ---------------------------------------------------------------------------
 # write_history
 # ---------------------------------------------------------------------------
