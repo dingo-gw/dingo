@@ -34,6 +34,8 @@ def configure_file_transfer(
     # Careful, Bilby's authentication helper can rewrite paths in place.
     files = list(input_files)
     for path in network_files:
+        if path is None:
+            continue
         if path.startswith("/osdf/"):
             path = f"igwn+osdf://{path.removeprefix('/osdf')}"
         files.append(path)
