@@ -125,18 +125,30 @@ class BaseFrequencyDomain(Domain, ABC):
         -------
         Array-like of the same form as data.
         """
+        # The phase is computed in float64 whatever the input dtypes: float32 rounds
+        # the phase 2 pi f dt to |2 pi f dt| x 6e-8 rad, 5e-5 rad at 1 kHz for
+        # dt = 0.13 s. The data keep their own dtype.
         f = self.get_sample_frequencies_astype(data)
         if isinstance(data, np.ndarray):
+            dt, f = np.asarray(dt, dtype=np.float64), f.astype(np.float64)
             phase_shift = 2 * np.pi * np.einsum("...,i", dt, f)
+            return self.add_phase(data, phase_shift).astype(data.dtype, copy=False)
         elif isinstance(data, torch.Tensor):
             # Allow for possible multiple "batch" dimensions (e.g., batch + detector,
             # which might have independent time shifts).
-            phase_shift = 2 * np.pi * torch.einsum("...,i", dt, f)
+            # On the GPU, reducing the float64 phase mod 2 pi and taking cos/sin in the
+            # data's precision (error <= 2 pi x 6e-8 rad) is ~3x cheaper than float64
+            # trigonometry.
+            dt = torch.as_tensor(dt, dtype=torch.float64, device=data.device)
+            phase_shift = 2 * np.pi * torch.einsum("...,i", dt, f.to(torch.float64))
+            phase_shift = torch.remainder(phase_shift, 2 * np.pi).to(
+                data.real.dtype if torch.is_complex(data) else data.dtype
+            )
+            return self.add_phase(data, phase_shift)
         else:
             raise NotImplementedError(
                 f"Time translation not implemented for data of type {data}."
             )
-        return self.add_phase(data, phase_shift)
 
     @staticmethod
     def add_phase(
