@@ -1,5 +1,6 @@
 # adapted from the Asimov Bilby Pipeline interface
 import configparser
+import copy
 import glob
 import importlib.resources
 import os
@@ -418,9 +419,25 @@ class DingoPipeline(Pipeline):
         return compatible_networks[-1][0]
 
     def before_config(self, dryrun=False):
-        """Parse available networks before building the ini."""
+        """Prepare sampler settings and select networks before building the ini."""
         super().before_config(dryrun=dryrun)
         meta = self.production.meta
+        sampler = meta.get("sampler", {})
+        recovery = sampler.get("density recovery settings")
+        if isinstance(recovery, dict):
+            recovery = copy.deepcopy(recovery)
+            transform_kwargs = (
+                recovery.get("nde_settings", {})
+                .get("model", {})
+                .get("posterior_kwargs", {})
+                .get("base_transform_kwargs", {})
+            )
+            # Bilby's INI dict parser turns None into "None". Omitting this
+            # particular option preserves the network constructor's None default.
+            if transform_kwargs.get("norm") is None:
+                transform_kwargs.pop("norm", None)
+            meta["sampler"] = {**sampler, "density recovery settings": recovery}
+
         if "networks" in meta:  # Set networks as override
             return
         if "available networks" not in meta:
