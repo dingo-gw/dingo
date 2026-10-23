@@ -3,6 +3,7 @@ import configparser
 import copy
 import glob
 import importlib.resources
+import json
 import os
 import re
 import subprocess
@@ -169,6 +170,11 @@ class DingoPipeline(Pipeline):
                 "f_min": settings["base_domain"]["f_min"],
                 "f_max": settings["base_domain"]["f_max"],
             }
+
+            # PESummary cannot write lists of dictionaries such as sampler.chain to HDF5
+            if isinstance(result.settings.get("sampler"), dict):
+                result.settings["sampler"] = json.dumps(result.settings["sampler"])
+
             filename, ext = os.path.splitext(result_files[0])
             result_files[0] = f"{filename}_pesummary{ext}"
             result.to_file(result_files[0])
@@ -297,11 +303,12 @@ class DingoPipeline(Pipeline):
         if self._is_transformer(net_meta):
             from copy import deepcopy
 
-            from dingo.core.utils.backward_compatibility import \
-                update_data_config
+            from dingo.core.utils.backward_compatibility import update_data_config
             from dingo.gw.domains import build_domain_from_model_metadata
-            from dingo.gw.frequency_updates import (check_detector_update,
-                                                    check_frequency_updates)
+            from dingo.gw.frequency_updates import (
+                check_detector_update,
+                check_frequency_updates,
+            )
 
             net_meta = deepcopy(net_meta)
             update_data_config(net_meta)
