@@ -90,6 +90,7 @@ def configure_preprocessing(data: dict, name: str) -> None:
         return
 
     data["random_strain_cropping"] = {
+        "cropping_probability": 0.5,
         "f_min_upper": 32.0,
         "f_max_lower": 80.0,
         "independent_detectors": True,

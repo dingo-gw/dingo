@@ -252,14 +252,16 @@ def main() -> None:
     apply_blueprint("event", event)
     apply_analyses(event["name"], checkpoints)
 
-    run_command("asimov", "manage", "build", "submit")
+    run_command("asimov", "manage", "build")
+    run_command("asimov", "manage", "submit")
     event_directory = Path("working") / event["name"]
     for name in ANALYSES:
         wait_for_jobs(find_single_file(event_directory / name, "submit/*.dagman.log"))
     run_command("asimov", "monitor")
 
     # Monitoring satisfies the dependencies; build/submit starts PESummary.
-    run_command("asimov", "manage", "build", "submit")
+    run_command("asimov", "manage", "build")
+    run_command("asimov", "manage", "submit")
     wait_for_jobs(event_directory / "pesummary.log", timeout=900)
     run_command("asimov", "monitor")
 
