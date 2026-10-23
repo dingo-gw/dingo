@@ -141,10 +141,8 @@ class DingoPipeline(Pipeline):
 
     def samples(self, absolute=False):
         """
-        Collect the combined samples files for PESummary.
+        Collect available combined samples files for PESummary.
         """
-        from dingo.gw.result import Result
-
         if absolute:
             rundir = os.path.abspath(self.production.rundir)
         else:
@@ -154,9 +152,10 @@ class DingoPipeline(Pipeline):
             os.path.join(rundir, "result", f"*importance_sampling.hdf5")
         )
         if len(result_files) == 0:
-            raise ValueError("Importance sampling result file not found")
-        elif len(result_files) > 1:
-            raise ValueError("Multiple importance sampling result files found")
+            # Asimov also probes assets before a dependency has run.
+            return []
+
+        from dingo.gw.result import Result
 
         # pesummary can't presently read a result file containing MultibandedFrequencyDomain
         # This is a hotfix to create a copy of the result file with UniformFrequencyDomain
