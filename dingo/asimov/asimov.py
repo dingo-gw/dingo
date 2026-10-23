@@ -9,13 +9,14 @@ import warnings
 from importlib.metadata import version
 
 from asimov.pipeline import Pipeline, PipelineException, PipelineLogger
+from packaging.version import Version
 
 # Check if using asimov < 0.7.0 (legacy version with PESummaryPipeline)
-ASIMOV_LEGACY = version("asimov") < "0.7.0"
+ASIMOV_LEGACY = Version(version("asimov")) < Version("0.7.0")
 
 if ASIMOV_LEGACY:
     warnings.warn(
-        "Using asimov < 0.7.0 is deprecated and support will be removed soon. "
+        "Using asimov < 0.7.0 is deprecated and support will be removed. "
         "Please upgrade to asimov >= 0.7.0.",
         DeprecationWarning,
     )
