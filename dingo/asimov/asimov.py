@@ -219,8 +219,8 @@ class DingoPipeline(Pipeline):
 
         Take possible domain updates and random frequency masking into account.
         """
-        f_min = prod_meta["quality"]["minimum frequency"].values()
-        f_max = prod_meta["quality"]["maximum frequency"].values()
+        f_min = prod_meta["likelihood"]["minimum frequency"].values()
+        f_max = prod_meta["likelihood"]["maximum frequency"].values()
 
         # Get network values
         domain = net_meta["dataset_settings"]["domain"]["base_domain"]
@@ -261,13 +261,13 @@ class DingoPipeline(Pipeline):
         if not f_min_match:
             upper = net_f_min if net_f_min_upper is None else net_f_min_upper
             reasons.append(
-                f"minimum frequencies {prod_meta['quality']['minimum frequency']} "
+                f"minimum frequencies {prod_meta['likelihood']['minimum frequency']} "
                 f"outside allowed range [{net_f_min}, {upper}] Hz"
             )
         if not f_max_match:
             lower = net_f_max if net_f_max_lower is None else net_f_max_lower
             reasons.append(
-                f"maximum frequencies {prod_meta['quality']['maximum frequency']} "
+                f"maximum frequencies {prod_meta['likelihood']['maximum frequency']} "
                 f"outside allowed range [{lower}, {net_f_max}] Hz"
             )
         return f_min_match and f_max_match
@@ -295,12 +295,11 @@ class DingoPipeline(Pipeline):
         if self._is_transformer(net_meta):
             from copy import deepcopy
 
-            from dingo.core.utils.backward_compatibility import update_data_config
+            from dingo.core.utils.backward_compatibility import \
+                update_data_config
             from dingo.gw.domains import build_domain_from_model_metadata
-            from dingo.gw.frequency_updates import (
-                check_detector_update,
-                check_frequency_updates,
-            )
+            from dingo.gw.frequency_updates import (check_detector_update,
+                                                    check_frequency_updates)
 
             net_meta = deepcopy(net_meta)
             update_data_config(net_meta)
@@ -312,7 +311,7 @@ class DingoPipeline(Pipeline):
 
             bounds = []
             for key in ("minimum frequency", "maximum frequency"):
-                bound = prod_meta.get("quality", {}).get(key)
+                bound = prod_meta.get("likelihood", {}).get(key)
                 if isinstance(bound, dict):
                     bound = {ifo: bound[ifo] for ifo in ifos if ifo in bound}
                 bounds.append(bound)
@@ -516,6 +515,8 @@ class DingoPipeline(Pipeline):
             ) from error
 
     def after_completion(self):
+        super().after_completion()
+
         # Only run PESummary if it was requested
         if not "pesummary" in self.production.meta.get("postprocessing", {}):
             self.logger.info("No pesummary requested, skipping..")
@@ -528,7 +529,6 @@ class DingoPipeline(Pipeline):
                 "asimov-pesummary not available, skipping post-processing"
             )
             return
-        super().after_completion()
 
     def resurrect(self):
         """
