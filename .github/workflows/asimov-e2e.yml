@@ -48,7 +48,7 @@ jobs:
           /opt/miniforge/bin/conda create -y -p "$E2E_PREFIX" python=3.11 pip
           # Install CPU wheels first, so Dingo does not pull in CUDA.
           "$E2E_PREFIX/bin/python" -m pip install 'torch>=2.6' torchvision --index-url https://download.pytorch.org/whl/cpu
-          "$E2E_PREFIX/bin/python" -m pip install . 'asimov==0.8.0' 'bilby_pipe==1.10.2' asimov-pesummary
+          "$E2E_PREFIX/bin/python" -m pip install . 'asimov==0.8.0' 'bilby_pipe==1.10.1' asimov-pesummary
 
       - name: Start a one-CPU HTCondor pool
         run: |
