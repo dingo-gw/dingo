@@ -714,6 +714,16 @@ def train_epoch(
 
         if is_step_batch:
             if automatic_mixed_precision:
+                # Unscale here, so that the logged norm is that of the true gradient;
+                # scaler.step() then skips its own unscaling (the scale is a power of
+                # two, so the update is unchanged).
+                scaler.unscale_(pm.optimizer)
+            loss_info.cache_grad_norm(
+                torch.nn.utils.get_total_norm(
+                    [p.grad for p in pm.network.parameters() if p.grad is not None]
+                )
+            )
+            if automatic_mixed_precision:
                 scaler.step(pm.optimizer)
                 scaler.update()
             else:

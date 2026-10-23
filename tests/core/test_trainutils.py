@@ -139,7 +139,10 @@ def test_local_limits_ignore_total_epoch_limit():
 
 def test_loss_info_weighted_average_across_batches():
     info = LossInfo(
-        epoch=1, len_dataset=100, batch_size_per_grad_update=10, device=torch.device("cpu")
+        epoch=1,
+        len_dataset=100,
+        batch_size_per_grad_update=10,
+        device=torch.device("cpu"),
     )
     # Two optimizer steps of one mini-batch each; the epoch average is weighted
     # by the number of samples in each step.
@@ -177,6 +180,20 @@ def test_loss_info_log_interval_syncs_every_n_steps():
     # Timing is populated on CPU, where there are no CUDA events.
     assert info.times["wall"].x >= info.times["data wait"].x >= 0.0
     assert info.times["wall"].N == 3 and "gpu" not in info.times
+
+
+def test_loss_info_grad_norm_window_mean_and_max():
+    """Gradient norms give a per-window mean and max; a non-finite norm (a step the
+    AMP loss scaler skips) is left out of both, and the window resets on read."""
+    info = LossInfo(1, 100, 10, device=torch.device("cpu"), log_interval=3)
+    for norm in [1.0, float("inf"), 5.0]:
+        info.cache_loss(torch.tensor(0.0), n=1)
+        info.cache_grad_norm(torch.tensor(norm))
+        info.update()
+    assert info.grad_norm == (3.0, 5.0)
+    info.cache_loss(torch.tensor(0.0), n=1)
+    info.update()  # a step without a norm, e.g. a validation pass
+    assert info.flush() is True and info.grad_norm is None
 
 
 def test_loss_info_accumulation_step_is_mean_of_minibatches():

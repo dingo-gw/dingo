@@ -131,6 +131,11 @@ class LossInfo:
         # has none), read into loss_tracker at each sync.
         dtype = torch.float32 if self.device.type == "mps" else torch.float64
         self.window_sums = torch.zeros(2, device=device, dtype=dtype)
+        # Gradient norms of the window's optimizer steps [Σ ‖g‖, steps, max ‖g‖], on
+        # the device; steps the AMP loss scaler skips (non-finite ‖g‖) are left out.
+        # Not all-reduced: under DDP the gradients, hence the norms, agree across ranks.
+        self.window_grad_norms = torch.zeros(3, device=device, dtype=dtype)
+        self.grad_norm = None  # (mean, max) of the last window, if norms were cached
         self.synced_iteration = 0
         # Use dist.is_initialized() so that LossInfo is DDP-aware only when a
         # process group has actually been set up.
@@ -152,6 +157,15 @@ class LossInfo:
         self.cached_losses.append(loss.detach())
         self.cached_n.append(n)
         self.t = time.perf_counter()
+
+    def cache_grad_norm(self, norm: torch.Tensor) -> None:
+        """Add the total gradient norm of one optimizer step (on the device) to the
+        window, skipping a non-finite norm."""
+        finite = torch.isfinite(norm)
+        norm = torch.where(finite, norm, 0.0).to(self.window_grad_norms.dtype)
+        self.window_grad_norms[0] += norm
+        self.window_grad_norms[1] += finite
+        self.window_grad_norms[2] = torch.maximum(self.window_grad_norms[2], norm)
 
     def _reset_cached_losses(self) -> None:
         self.cached_losses = []
@@ -201,6 +215,9 @@ class LossInfo:
             dist.all_reduce(self.window_sums)
         loss_n, n = self.window_sums.tolist()
         self.window_sums.zero_()
+        norm_sum, steps, norm_max = self.window_grad_norms.tolist()
+        self.window_grad_norms.zero_()
+        self.grad_norm = (norm_sum / steps, norm_max) if steps else None
         now = time.perf_counter()
         self.loss = loss_n / n
         self.loss_tracker.update(loss_n, n)
@@ -260,6 +277,11 @@ class LossInfo:
             end="\t\t",
         )
         print(f"Loss: {self.loss:.3f} ({self.loss_tracker.get_avg():.3f})", end="\t\t")
+        if self.grad_norm is not None:
+            print(
+                f"Grad norm: {self.grad_norm[0]:.3g} (max {self.grad_norm[1]:.3g})",
+                end="\t\t",
+            )
         times = ", ".join(
             f"{name} {t.x / self.window_steps:.3f} ({t.get_avg():.3f})"
             for name, t in self.times.items()
