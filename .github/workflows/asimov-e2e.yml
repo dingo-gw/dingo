@@ -1,0 +1,96 @@
+name: Asimov HTCondor end-to-end
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: asimov-e2e-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  asimov-e2e:
+    runs-on: ubuntu-latest
+    # Same isolated mini-pool approach as bilby_pipe's GitLab e2e-tests.yml.
+    container:
+      image: htcondor/mini:latest
+      options: --user root
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    env:
+      E2E_PREFIX: /opt/dingo-e2e
+      OMP_NUM_THREADS: "1"
+      OPENBLAS_NUM_THREADS: "1"
+      MKL_NUM_THREADS: "1"
+      PYTHONUNBUFFERED: "1"
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+    steps:
+      - name: Install system tools
+        run: yum install -y git wget bzip2
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install Python and CPU dependencies
+        run: |
+          wget -q https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh -O /tmp/miniforge.sh
+          bash /tmp/miniforge.sh -b -p /opt/miniforge
+          /opt/miniforge/bin/conda create -y -p "$E2E_PREFIX" python=3.11 pip
+          # Install CPU wheels first, so Dingo does not pull in CUDA.
+          "$E2E_PREFIX/bin/python" -m pip install 'torch>=2.6' torchvision --index-url https://download.pytorch.org/whl/cpu
+          "$E2E_PREFIX/bin/python" -m pip install . 'asimov==0.8.0' 'bilby_pipe==1.10.2' asimov-pesummary
+
+      - name: Start a one-CPU HTCondor pool
+        run: |
+          id -u submituser >/dev/null 2>&1 || useradd -m -s /bin/bash submituser
+          mkdir -p "$GITHUB_WORKSPACE/e2e_project"
+          chmod -R a+rX "$GITHUB_WORKSPACE" "$E2E_PREFIX"
+          chown submituser "$GITHUB_WORKSPACE/e2e_project"
+          cat > /etc/condor/config.d/99-dingo-e2e <<'EOF'
+          NUM_CPUS = 1
+          # asimov-pesummary currently requests 8192 MB per job.
+          MEMORY = 8192
+          NUM_SLOTS = 1
+          SCHEDD_INTERVAL = 5
+          NEGOTIATOR_INTERVAL = 5
+          STARTER_UPDATE_INTERVAL = 5
+          EOF
+          condor_master
+          timeout 60 bash -c 'until condor_status -af Name | grep -q .; do sleep 2; done'
+
+      - name: Exercise transformer, GNPE, and PESummary through Asimov
+        run: >-
+          runuser -u submituser -- env PATH="$E2E_PREFIX/bin:$PATH"
+          python "$GITHUB_WORKSPACE/tests/e2e/asimov_htcondor.py"
+          "$GITHUB_WORKSPACE/e2e_project"
+
+      - name: Clean up jobs
+        if: always()
+        run: |
+          condor_rm -all || true
+
+      - name: Upload diagnostics and small results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: asimov-e2e
+          retention-days: 5
+          include-hidden-files: true
+          path: |
+            e2e_project/blueprints/
+            e2e_project/checkouts/
+            e2e_project/working/
+            e2e_project/pages/
+            e2e_project/.asimov/
+            e2e_project/asimov.conf
+            e2e_project/logs/
