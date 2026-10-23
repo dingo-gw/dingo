@@ -283,9 +283,10 @@ class DingoPipeline(Pipeline):
         prior = metadata["train_settings"]["data"]["extrinsic_prior"][
             "luminosity_distance"
         ]
-        match = re.findall(r"maximum=[\d]+", prior)
-        assert match
-        return int(match[0].split("=")[-1])
+        match = re.search(r"\bmaximum\s*=\s*([^,)]+)", prior)
+        if match is None:
+            raise ValueError(f"Missing luminosity-distance prior maximum: {prior!r}")
+        return float(match.group(1))
 
     def network_is_compatible(self, prod_meta, net_meta, reasons=None):
         """Check compatibility, optionally appending rejection reasons to a list."""
