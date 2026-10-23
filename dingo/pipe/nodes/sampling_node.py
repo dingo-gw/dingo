@@ -2,7 +2,10 @@ import os
 
 from bilby_pipe.job_creation.nodes import AnalysisNode
 
-from dingo.pipe.utils import _strip_unwanted_submission_keys
+from dingo.pipe.utils import (
+    configure_file_transfer,
+    _strip_unwanted_submission_keys,
+)
 
 
 class SamplingNode(AnalysisNode):
@@ -53,31 +56,16 @@ class SamplingNode(AnalysisNode):
                     self.extra_lines.append(f'MY.DESIRED_Sites = "{sites}"')
                 self.requirements.append("IS_GLIDEIN=?=True")
 
-                # modifying the paths for OSDF networks
-                network_files = []
-                for s in [self.inputs.model, self.inputs.model_init]:
-                    if s is None:
-                        continue
-                    if "osdf" in s:
-                        # stripping osdf prefix as it is not needed
-                        network_files.append(f"igwn+osdf://{s.replace('/osdf', '')}")
-                    else:
-                        network_files.append(s)
-
-                input_files_to_transfer.extend(network_files)
-
-                if self.transfer_container:
-                    input_files_to_transfer.append(self.inputs.container)
-
-                # Credentials are needed to access any OSDF files
-                if any(["osdf" in s for s in input_files_to_transfer]):
-                    self.extra_lines.extend(self.scitoken_lines)
-
-            self.extra_lines.extend(
-                self._condor_file_transfer_lines(
-                    input_files_to_transfer,
-                    [self._relative_topdir(self.inputs.outdir, self.inputs.initialdir)],
-                )
+            configure_file_transfer(
+                self,
+                input_files_to_transfer,
+                network_files=(
+                    (self.inputs.model, self.inputs.model_init)
+                    if self.inputs.osg else ()
+                ),
+                include_container=self.inputs.osg,
+                authenticate=False,
+                require_osdf_auth=self.inputs.osg,
             )
 
             self.arguments.add("outdir", os.path.relpath(self.inputs.outdir))
