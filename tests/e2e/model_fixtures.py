@@ -95,7 +95,15 @@ def configure_preprocessing(data: dict, name: str) -> None:
         "f_max_lower": 80.0,
         "independent_detectors": True,
     }
-    if name == "gnpe":
+    if name == "init":
+        # The first GNPE kernel step conditions on detector arrival times.
+        parameters = [f"{detector}_time" for detector in data["detectors"]]
+        data["inference_parameters"] = parameters
+        data["standardization"] = {
+            "mean": {parameter: 0.0 for parameter in parameters},
+            "std": {parameter: 0.01 for parameter in parameters},
+        }
+    elif name == "gnpe":
         data["gnpe_time_shifts"] = {
             "kernel": "bilby.core.prior.Uniform(minimum=-0.001, maximum=0.001)",
             "exact_equiv": True,
