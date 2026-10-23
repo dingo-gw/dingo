@@ -420,6 +420,7 @@ class DingoPipeline(Pipeline):
 
     def before_config(self, dryrun=False):
         """Parse available networks before building the ini."""
+        super().before_config(dryrun=dryrun)
         meta = self.production.meta
         if "networks" in meta:  # Set networks as override
             return
