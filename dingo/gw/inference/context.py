@@ -535,6 +535,7 @@ class GWSamplerContext:
         calibration_marginalization_kwargs: Optional[dict] = None,
         use_base_domain: bool = False,
         wfg_updates: Optional[dict] = None,
+        heterodyning_parameters: Optional[dict] = None,
     ) -> StationaryGaussianGWLikelihood:
         """
         Build the exact GW likelihood on this event's data, in physical parameter
@@ -572,6 +573,12 @@ class GWSamplerContext:
             the network metadata. Only for settings that change how the waveform
             is computed, not the waveform itself (e.g.
             `use_dft_phase_decomposition`).
+        heterodyning_parameters : dict, optional
+            For a chirp-prior-conditioned (DINGO-BNS) model on its multibanded
+            domain: the fixed heterodyne reference, the pinned proxy values keyed by
+            physical name, e.g. `{"chirp_mass": 1.1975}`. Required there, because the
+            bands resolve heterodyned signals only; the likelihood heterodynes data
+            and signals by it. Not used on the base domain.
 
         Returns
         -------
@@ -588,6 +595,7 @@ class GWSamplerContext:
                 "calibration_marginalization_kwargs": calibration_marginalization_kwargs,
                 "use_base_domain": use_base_domain,
                 "wfg_updates": wfg_updates,
+                "heterodyning_parameters": heterodyning_parameters,
             }
         )
         if settings == self._likelihood_settings:
@@ -660,6 +668,28 @@ class GWSamplerContext:
                 grid.delta_f,
             )
 
+        heterodyning = None
+        chirp_prior_conditioning = chirp_prior_conditioning_settings(
+            self.model_metadata["train_settings"]["data"]
+        )
+        if (
+            isinstance(data_domain, MultibandedFrequencyDomain)
+            and not use_base_domain
+            and chirp_prior_conditioning is not None
+        ):
+            names = set(chirp_prior_conditioning["kernel"])
+            if set(heterodyning_parameters or {}) != names:
+                raise ValueError(
+                    f"The multibanded likelihood of this chirp-prior-conditioned model "
+                    f"needs the fixed heterodyne reference {sorted(names)} (the pinned "
+                    f"proxies), got {heterodyning_parameters}. Without it the "
+                    f"decimated raw data lose signal."
+                )
+            heterodyning = {
+                "order": chirp_prior_conditioning.get("order", 0),
+                "parameters": heterodyning_parameters,
+            }
+
         # Likelihood reference time: the event time (the training-frame RA correction has
         # already been applied to the samples), falling back to the training reference.
         if self.event_metadata is not None and "time_event" in self.event_metadata:
@@ -707,6 +737,7 @@ class GWSamplerContext:
             calibration_marginalization_kwargs=calibration_marginalization_kwargs,
             use_base_domain=use_base_domain,
             frequency_update=frequency_update,
+            heterodyning=heterodyning,
         )
         self._likelihood = likelihood
         self._likelihood_settings = settings

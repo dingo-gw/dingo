@@ -12,6 +12,7 @@ from dingo.gw.injection import GWSignal
 from dingo.gw.transforms import (
     DecimateWaveformsAndASDS,
     create_mask_based_on_frequency_update,
+    factor_fiducial_waveform,
 )
 from dingo.gw.waveform_generator import WaveformGenerator
 from dingo.gw.domains import (
@@ -42,6 +43,7 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         frequency_update: Optional[
             dict[str, float | dict[str, float | list[float]]]
         ] = None,
+        heterodyning: Optional[dict] = None,
     ):
         """
         Parameters
@@ -72,6 +74,14 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
             calibration spline nodes are placed across it, per detector. Values
             are floats or per-detector dicts, e.g.
             {'minimum_frequency': {'H1': 30., 'L1': 20.}, 'maximum_frequency': 1024.}
+        heterodyning: dict, optional
+            Fixed phase heterodyning on a MultibandedFrequencyDomain, {"order": int,
+            "parameters": {"chirp_mass": float, ...}}, as `factor_fiducial_waveform`.
+            Required for a multibanded domain built for heterodyned signals (DINGO-BNS):
+            its bands do not resolve the raw chirp, and decimating raw data loses
+            signal. The data are heterodyned on the base domain before decimation, the
+            signals at the band nodes; the common phase factor leaves the inner
+            products unchanged. Not used on a uniform domain or with use_base_domain.
         """
         super().__init__(
             wfg_kwargs=wfg_kwargs,
@@ -83,6 +93,21 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         )
 
         if isinstance(data_domain, MultibandedFrequencyDomain) and not use_base_domain:
+            if heterodyning is not None:
+                # Heterodyning and decimation do not commute: heterodyne first.
+                event_data = {
+                    **event_data,
+                    "waveform": factor_fiducial_waveform(
+                        event_data["waveform"],
+                        data_domain.base_domain,
+                        heterodyning["parameters"]["chirp_mass"],
+                        mass_ratio=heterodyning["parameters"].get("mass_ratio"),
+                        order=heterodyning["order"],
+                    ),
+                }
+                # The signals, through the projection transforms (built by the
+                # whiten setter below).
+                self.heterodyning = heterodyning
             decimator = DecimateWaveformsAndASDS(
                 data_domain, decimation_mode="whitened"
             )

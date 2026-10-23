@@ -359,3 +359,47 @@ def test_inference_and_importance_sampling_on_injection(trained_bns_model):
     assert np.isfinite(result.samples["weights"]).all()
     assert result.samples["weights"].sum() > 0
     assert np.isfinite(result.log_evidence)
+
+
+def test_multibanded_likelihood_matches_base_domain(trained_bns_model):
+    """The bands resolve heterodyned signals only: the multibanded likelihood
+    heterodynes data and signals by the pinned proxy, and then agrees with the
+    base-domain likelihood (DINGO-BNS, Dax et al. 2025, Methods). Without the proxy the
+    context refuses to build it, since decimated raw data lose signal."""
+    model_path, paths = trained_bns_model
+    model = build_model_from_kwargs(
+        filename=model_path, device="cpu", load_training_info=False
+    )
+    injection_generator = Injection.from_posterior_model_metadata(model.metadata)
+    injection_generator.use_base_domain = True
+    injection_generator.asd = ASDDataset(file_name=paths["asd"], ifos=DETECTORS)
+    theta = {k: float(v) for k, v in injection_generator.prior.sample().items()}
+    data = injection_generator.injection(theta)
+    context = GWSamplerContext.from_model(model, data)
+    proxy = {"chirp_mass": theta["chirp_mass"] + 0.3 * KERNEL_HALF_WIDTH}
+
+    # The truth and points off it, within the kernel around the proxy.
+    offsets = [
+        {},
+        {"chirp_mass": -2e-4},
+        {"luminosity_distance": 5.0},
+        {"geocent_time": 2e-4},
+    ]
+    points = pd.DataFrame(
+        [{**theta, **{k: theta[k] + v for k, v in o.items()}} for o in offsets]
+    )
+    log_lambda = {}
+    for use_base_domain in [True, False]:
+        likelihood = context.likelihood(
+            use_base_domain=use_base_domain, heterodyning_parameters=proxy
+        )
+        log_lambda[use_base_domain] = (
+            likelihood.log_likelihood_multi(points) - likelihood.log_Zn
+        )
+    assert log_lambda[True][0] > 50  # a loud signal, where a lost signal shows
+    # The toy bands are coarse (8 waveforms, median mismatch 1e-3), hence a few
+    # percent here; the raw, decimated likelihood gives about -ln_lambda instead.
+    np.testing.assert_allclose(log_lambda[False], log_lambda[True], rtol=0.05)
+
+    with pytest.raises(ValueError, match="heterodyne reference"):
+        context.likelihood()
