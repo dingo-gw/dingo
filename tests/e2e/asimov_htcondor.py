@@ -2,8 +2,9 @@
 
 Usage: python tests/e2e/asimov_htcondor.py /path/to/empty/project
 
-All test assertions are in assert_outputs(). Checkpoint construction lives
-in model_fixtures.py. This script is not collected by pytest.
+Test assertions are grouped in assert_jobs_succeeded() and assert_outputs().
+Checkpoint construction lives in model_fixtures.py. This script is not
+collected by pytest.
 """
 
 import argparse
@@ -31,8 +32,15 @@ MAXIMUM_FREQUENCY = {"H1": 96.0, "L1": 112.0}
 NUM_SAMPLES = 32
 
 
+def assert_jobs_succeeded(log_path: Path, expected_jobs: int) -> None:
+    """Check job exit codes before starting dependent analyses."""
+    jobs = read_job_history(log_path)
+    assert len(jobs) == expected_jobs, (log_path, jobs)
+    assert all(job.get("ExitCode") == 0 for job in jobs), (log_path, jobs)
+
+
 def assert_outputs(event_name: str) -> None:
-    """Check successful jobs, frequency propagation, and usable summary pages."""
+    """Check finished productions, frequency propagation, and summary pages."""
     # Import after the final monitor call to read the finished project's ledger.
     from asimov import current_ledger
 
@@ -44,12 +52,6 @@ def assert_outputs(event_name: str) -> None:
         production = productions[name]
         assert production.status == "finished", name
         run_directory = Path(production.rundir)
-        dag_jobs = read_job_history(
-            find_single_file(run_directory, "submit/*.dagman.log")
-        )
-        assert len(dag_jobs) == 1, dag_jobs
-        assert dag_jobs[0].get("ExitCode") == 0, dag_jobs
-
         result_path = find_single_file(
             run_directory, "result/*_importance_sampling.hdf5"
         )
@@ -79,11 +81,6 @@ def assert_outputs(event_name: str) -> None:
             samples = summary[summary_name]["posterior_samples"][()]
             assert len(samples) > 0, summary_name
 
-    # Both summary jobs share the event's job log. Read only this run's jobs.
-    summary_jobs = read_job_history(Path("working") / event_name / "pesummary.log")
-    assert len(summary_jobs) == len(ANALYSES), summary_jobs
-    assert all(job.get("ExitCode") == 0 for job in summary_jobs), summary_jobs
-
 
 def run_command(*arguments, timeout: int = 180) -> None:
     """Run a command with live terminal output and fail on a nonzero exit."""
@@ -111,9 +108,10 @@ def read_job_history(log_path: Path) -> list[dict]:
     return json.loads(output)
 
 
-def wait_for_jobs(log_path: Path, timeout: int = 600) -> None:
-    """Let HTCondor wait for all jobs in this log; assert_outputs checks success."""
+def wait_for_jobs(log_path: Path, timeout: int = 600, expected_jobs: int = 1) -> None:
+    """Wait for jobs to leave the queue, then check that they succeeded."""
     run_command("condor_wait", "-wait", timeout, log_path, timeout=timeout + 30)
+    assert_jobs_succeeded(log_path, expected_jobs)
 
 
 def initialize_project(directory: Path) -> None:
@@ -135,6 +133,7 @@ def initialize_project(directory: Path) -> None:
         ("condor/cache_time", "0"),
         ("pipelines/environment", sys.prefix),
         ("general/webroot", "pages"),
+        ("logging/print level", "warning"),
     ):
         run_command("asimov", "configuration", "update", key, value)
 
@@ -262,7 +261,10 @@ def main() -> None:
     # Monitoring satisfies the dependencies; build/submit starts PESummary.
     run_command("asimov", "manage", "build")
     run_command("asimov", "manage", "submit")
-    wait_for_jobs(event_directory / "pesummary.log", timeout=900)
+    # Both summary jobs share the event's job log.
+    wait_for_jobs(
+        event_directory / "pesummary.log", timeout=900, expected_jobs=len(ANALYSES)
+    )
     run_command("asimov", "monitor")
 
     assert_outputs(event["name"])

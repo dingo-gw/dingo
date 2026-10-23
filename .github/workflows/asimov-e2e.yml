@@ -27,14 +27,17 @@ jobs:
         shell: bash
     env:
       E2E_PREFIX: /opt/dingo-e2e
+      CONDOR_CONFIG: /etc/condor/condor_config
       OMP_NUM_THREADS: "1"
       OPENBLAS_NUM_THREADS: "1"
       MKL_NUM_THREADS: "1"
       PYTHONUNBUFFERED: "1"
       PIP_DISABLE_PIP_VERSION_CHECK: "1"
     steps:
-      - name: Install system tools
-        run: yum install -y git wget bzip2
+      - name: Install system tools and update HTCondor
+        run: |
+          yum install -y git wget bzip2
+          yum update -y 'condor*'
 
       - uses: actions/checkout@v4
         with:
@@ -48,7 +51,9 @@ jobs:
           /opt/miniforge/bin/conda create -y -p "$E2E_PREFIX" python=3.11 pip
           # Install CPU wheels first, so Dingo does not pull in CUDA.
           "$E2E_PREFIX/bin/python" -m pip install 'torch>=2.6' torchvision --index-url https://download.pytorch.org/whl/cpu
-          "$E2E_PREFIX/bin/python" -m pip install . 'asimov>=0.8,<0.9' 'bilby_pipe>=1.10,<1.11' asimov-pesummary
+          # Match the Python submission client to the container's daemons.
+          htcondor_version=$(condor_version | awk '/^\$CondorVersion:/ {print $2}')
+          "$E2E_PREFIX/bin/python" -m pip install . 'asimov>=0.8,<0.9' 'bilby_pipe>=1.10,<1.11' asimov-pesummary "htcondor==$htcondor_version"
 
       - name: Start a one-CPU HTCondor pool
         run: |
