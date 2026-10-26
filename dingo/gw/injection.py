@@ -17,6 +17,7 @@ from dingo.gw.transforms import (
     WhitenAndScaleStrain,
     SampleCalibrationParameters,
     ApplyCalibrationToWaveform,
+    HeterodynePhase,
 )
 from dingo.gw.waveform_generator.waveform_generator import (
     WaveformGenerator,
@@ -84,6 +85,9 @@ class GWSignal(object):
         self._calibration_envelope = None
         self._calibration_marginalization_kwargs = None
         self.frequency_update = frequency_update
+        # Optional fixed heterodyne of the signal, {"order": int, "parameters": dict};
+        # set by StationaryGaussianGWLikelihood on a multibanded domain.
+        self.heterodyning = None
         self.whiten = False
 
         self.asd = None
@@ -189,6 +193,14 @@ class GWSignal(object):
                 frequency_bounds=frequency_bounds,
             )
         )
+        if self.heterodyning is not None:
+            transforms.append(
+                HeterodynePhase(
+                    self.data_domain,
+                    order=self.heterodyning["order"],
+                    fixed_parameters=self.heterodyning["parameters"],
+                )
+            )
         if self.whiten:
             transforms.append(WhitenAndScaleStrain(self.data_domain.noise_std))
         self.projection_transforms = Compose(transforms)
