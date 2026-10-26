@@ -136,12 +136,12 @@ class BaseFrequencyDomain(Domain, ABC):
         elif isinstance(data, torch.Tensor):
             # Allow for possible multiple "batch" dimensions (e.g., batch + detector,
             # which might have independent time shifts).
-            # On the GPU, reducing the float64 phase mod 2 pi and taking cos/sin in the
-            # data's precision (error <= 2 pi x 6e-8 rad) is ~3x cheaper than float64
+            # On the GPU, reducing the float64 phase to [-pi, pi) and taking cos/sin in
+            # the data's precision (error <= pi x 6e-8 rad) is ~3x cheaper than float64
             # trigonometry.
             dt = torch.as_tensor(dt, dtype=torch.float64, device=data.device)
             phase_shift = 2 * np.pi * torch.einsum("...,i", dt, f.to(torch.float64))
-            phase_shift = torch.remainder(phase_shift, 2 * np.pi).to(
+            phase_shift = (torch.remainder(phase_shift + np.pi, 2 * np.pi) - np.pi).to(
                 data.real.dtype if torch.is_complex(data) else data.dtype
             )
             return self.add_phase(data, phase_shift)
@@ -154,7 +154,7 @@ class BaseFrequencyDomain(Domain, ABC):
     def add_phase(
         data: np.ndarray | torch.Tensor, phase: np.ndarray | torch.Tensor
     ) -> np.ndarray | torch.Tensor:
-        """
+        r"""
         Add a (frequency-dependent) phase to a frequency series. Allows for batching,
         as well as additional channels (such as detectors). Accounts for the fact that
         the data could be a complex frequency series or real and imaginary parts.
