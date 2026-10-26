@@ -653,8 +653,7 @@ def train_epoch(
         optimizer steps.
     log_grad_norm : bool
         Also log the total gradient norm of every optimizer step (window mean and
-        maximum). It costs a pass over the gradients each step, and under AMP a
-        separate unscaling pass, which a fused optimizer otherwise does in its step.
+        maximum). It costs one pass over the gradients each step.
 
     Returns
     -------
@@ -722,12 +721,15 @@ def train_epoch(
         loss_info.cache_loss(loss=loss, n=len(data[0]))
 
         if is_step_batch:
+            if automatic_mixed_precision:
+                # Unscale explicitly; scaler.step() then skips its own unscaling (the
+                # scale is a power of two, so the update is unchanged). Otherwise a
+                # fused optimizer divides every gradient by the scale in float64, slow
+                # on GPUs with reduced float64 throughput (+3.7 ms per step on an RTX
+                # PRO 6000 for 3e8 parameters). It also makes the logged norm that of
+                # the true gradient.
+                scaler.unscale_(pm.optimizer)
             if log_grad_norm:
-                if automatic_mixed_precision:
-                    # Unscale here, so that the logged norm is that of the true
-                    # gradient; scaler.step() then skips its own unscaling (the scale
-                    # is a power of two, so the update is unchanged).
-                    scaler.unscale_(pm.optimizer)
                 loss_info.cache_grad_norm(
                     torch.nn.utils.get_total_norm(
                         [p.grad for p in pm.network.parameters() if p.grad is not None]

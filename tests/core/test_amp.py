@@ -83,6 +83,19 @@ class TestTrainEpochWithoutAmp:
         train_epoch(pm, _make_dataloader(), log_interval=1, log_grad_norm=log_grad_norm)
         assert ("Grad norm" in capsys.readouterr().out) == log_grad_norm
 
+    def test_amp_unscales_explicitly_on_every_step(self):
+        # Without the explicit unscale, a fused optimizer unscales in float64 (slow);
+        # independent of the gradient-norm logging.
+        pm = _make_mock_pm()
+        scaler = torch.amp.GradScaler("cpu")
+        calls = []
+        unscale = scaler.unscale_
+        scaler.unscale_ = lambda opt: (calls.append(1), unscale(opt))[1]
+        _, n_iter = train_epoch(
+            pm, _make_dataloader(), automatic_mixed_precision=True, scaler=scaler
+        )
+        assert len(calls) == n_iter > 0
+
     def test_gradient_accumulation(self):
         """With 16 samples, batch=8, accum=2 → 2 batches → 1 optimizer step."""
         pm = _make_mock_pm()
