@@ -77,6 +77,12 @@ class TestTrainEpochWithoutAmp:
             not torch.equal(b, a) for b, a in zip(params_before, params_after)
         ), "Parameters should be updated after training."
 
+    @pytest.mark.parametrize("log_grad_norm", [False, True])
+    def test_grad_norm_logged_only_when_requested(self, log_grad_norm, capsys):
+        pm = _make_mock_pm()
+        train_epoch(pm, _make_dataloader(), log_interval=1, log_grad_norm=log_grad_norm)
+        assert ("Grad norm" in capsys.readouterr().out) == log_grad_norm
+
     def test_gradient_accumulation(self):
         """With 16 samples, batch=8, accum=2 → 2 batches → 1 optimizer step."""
         pm = _make_mock_pm()

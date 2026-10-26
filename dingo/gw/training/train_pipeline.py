@@ -456,6 +456,7 @@ def train_stages(
             automatic_mixed_precision=stage.get("automatic_mixed_precision", False),
             world_size=world_size if world_size is not None else 1,
             log_interval=local_settings.get("log_interval", 10),
+            log_grad_norm=local_settings.get("log_grad_norm", False),
         )
 
         # if test_only, model should not be saved, and run is complete

@@ -111,6 +111,7 @@ local:
 # torch_compile: False  # Fuse the network kernels with torch.compile; see the multi-GPU guide.
 # torch_compile_mode: reduce-overhead  # Replay the compiled step as CUDA graphs; see the multi-GPU guide.
 # log_interval: 10  # Print a progress line (and read the loss from the GPU) every this many steps.
+# log_grad_norm: False  # Also log each optimizer step's gradient norm (costs a few % per step).
 #  wandb:
 #    project: dingo
 #    group: my_project
@@ -196,6 +197,9 @@ checkpoint_epochs
 
 log_interval
 : (Optional, default 10) Print a progress line every this many optimizer steps, and once more for any steps left over at the end of the epoch. The loss is read from the GPU only at these points; see [](training_multi_gpu.md#reading-the-training-log) for the line format and for why reading it every step costs time.
+
+log_grad_norm
+: (Optional, default `False`) Also log the total gradient norm of every optimizer step, as the mean and maximum over each `log_interval` window. This is a diagnostic for loss spikes, telling whether they start with outlying gradients. It costs an extra pass over the gradients each step, plus a separate unscaling pass under mixed precision, a few percent of the step time.
 
 leave_waveforms_on_disk
 : To improve memory efficiency during training, the waveforms are not loaded into memory at the beginning of training, but separately for each batch during training. When training on a cluster, it is highly recommended to include a local path where the dataset is cached at the beginning of training (see `local_cache_path`). If RAM is not an issue, the default `leave_waveforms_on_disk=True` can be set to `False`. 

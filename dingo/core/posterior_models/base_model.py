@@ -414,6 +414,7 @@ class BasePosteriorModel(ABC):
         automatic_mixed_precision: bool = False,
         world_size: int = 1,
         log_interval: int = 10,
+        log_grad_norm: bool = False,
     ):
         """
         Train the network for one or more epochs.
@@ -445,6 +446,8 @@ class BasePosteriorModel(ABC):
         log_interval : int
             Print a progress line, and read the loss from the device, every this
             many optimizer steps.
+        log_grad_norm : bool
+            Also log the gradient norm of every optimizer step (see `train_epoch`).
         """
         is_primary = self.rank is None or self.rank == 0
 
@@ -486,6 +489,7 @@ class BasePosteriorModel(ABC):
                     world_size=world_size,
                     scaler=scaler,
                     log_interval=log_interval,
+                    log_grad_norm=log_grad_norm,
                 )
                 self.iteration += n_iter
 
@@ -624,6 +628,7 @@ def train_epoch(
     world_size: int = 1,
     scaler=None,
     log_interval: int = 10,
+    log_grad_norm: bool = False,
 ) -> Tuple[float, int]:
     """
     Train the network for one epoch.
@@ -646,6 +651,10 @@ def train_epoch(
     log_interval : int
         Print a progress line, and read the loss from the device, every this many
         optimizer steps.
+    log_grad_norm : bool
+        Also log the total gradient norm of every optimizer step (window mean and
+        maximum). It costs a pass over the gradients each step, and under AMP a
+        separate unscaling pass, which a fused optimizer otherwise does in its step.
 
     Returns
     -------
@@ -713,16 +722,17 @@ def train_epoch(
         loss_info.cache_loss(loss=loss, n=len(data[0]))
 
         if is_step_batch:
-            if automatic_mixed_precision:
-                # Unscale here, so that the logged norm is that of the true gradient;
-                # scaler.step() then skips its own unscaling (the scale is a power of
-                # two, so the update is unchanged).
-                scaler.unscale_(pm.optimizer)
-            loss_info.cache_grad_norm(
-                torch.nn.utils.get_total_norm(
-                    [p.grad for p in pm.network.parameters() if p.grad is not None]
+            if log_grad_norm:
+                if automatic_mixed_precision:
+                    # Unscale here, so that the logged norm is that of the true
+                    # gradient; scaler.step() then skips its own unscaling (the scale
+                    # is a power of two, so the update is unchanged).
+                    scaler.unscale_(pm.optimizer)
+                loss_info.cache_grad_norm(
+                    torch.nn.utils.get_total_norm(
+                        [p.grad for p in pm.network.parameters() if p.grad is not None]
+                    )
                 )
-            )
             if automatic_mixed_precision:
                 scaler.step(pm.optimizer)
                 scaler.update()
