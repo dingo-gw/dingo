@@ -197,11 +197,8 @@ class SamplingInput(Input):
             }
 
         if self.model_init is not None:
-            if self.fixed_context_parameters is not None:
-                raise ValueError(
-                    "fixed-context-parameters pins the context of a single-network "
-                    "model; it cannot be combined with model-init (iterative GNPE)."
-                )
+            # Iterative GNPE: fixed-context-parameters pins the context other than
+            # the proxies (the distance-prior bound); the builder checks the keys.
             self.gnpe = True
             self._main_model = model
             init_model = build_model_from_kwargs(
@@ -215,6 +212,7 @@ class SamplingInput(Input):
                 self.context,
                 event_metadata=self.event_metadata,
                 num_iterations=self.num_gnpe_iterations,
+                fixed_context_parameters=self.fixed_context_parameters,
             )
         else:
             self.gnpe = False
@@ -309,6 +307,7 @@ class SamplingInput(Input):
             FlowFactor(unconditional_model),
             self.context,
             event_metadata=self.event_metadata,
+            fixed_context_parameters=self.fixed_context_parameters,
         )
         self.dingo_sampler.provenance_extra["models"] = self._model_paths()
         # The recovery recipe: the Gibbs chain that generated the NDE's training

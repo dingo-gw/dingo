@@ -6,6 +6,7 @@ from os.path import join
 import numpy as np
 import torch
 from dingo.core.nn.transformer import TransformerModel
+from dingo.core.posterior_models.build_model import build_model_from_kwargs
 from dingo.core.posterior_models.normalizing_flow import NormalizingFlowPosteriorModel
 from dingo.core.utils import torchutils
 
@@ -42,13 +43,13 @@ def data_setup_pm_1():
         "activation": "elu",
         "dropout": 0.0,
         "norm": "BatchNorm",
-        "added_context": True,
     }
 
     d.model_kwargs = {
         "posterior_model_type": "normalizing_flow",
         "posterior_kwargs": d.posterior_kwargs,
         "embedding_kwargs": d.embedding_kwargs,
+        "num_context_parameters": 2,
     }
 
     d.metadata = {"train_settings": {"model": d.model_kwargs}}
@@ -155,6 +156,68 @@ def test_pm_saving_and_loading_basic(data_setup_pm_1):
             assert not torch.all(
                 param_0.data == param_2.data
             ), "Model initialization does not seem to be random."
+
+
+@pytest.mark.parametrize("posterior_model_type", ["normalizing_flow", "flow_matching"])
+def test_pm_loads_checkpoint_with_context_in_embedding_net(
+    data_setup_pm_1, tmp_path, posterior_model_type
+):
+    """
+    Networks with context parameters were saved with the resnet embedding net wrapped
+    in a ModuleMerger (`added_context`), which concatenated the context parameters;
+    the posterior network now does this. A model saved in the old layout loads with
+    identical outputs.
+    """
+    d = data_setup_pm_1
+    model_kwargs = copy.deepcopy(d.model_kwargs)
+    model_kwargs["posterior_model_type"] = posterior_model_type
+    prefix = "embedding_net"
+    if posterior_model_type == "flow_matching":
+        prefix = "context_embedding_net"
+        model_kwargs["posterior_kwargs"] = {
+            "input_dim": 4,
+            "context_dim": 10,
+            "activation": "elu",
+            "norm": None,
+            "hidden_dims": [16, 16],
+            "dropout": 0.0,
+            "sigma_min": 0.001,
+            "time_prior_exponent": 1,
+            "theta_with_glu": True,
+            "context_with_glu": False,
+        }
+    torch.manual_seed(0)
+    pm = build_model_from_kwargs(
+        settings={"train_settings": {"model": model_kwargs}}, device="cpu"
+    )
+    filename = str(tmp_path / "model.pt")
+    pm.save_model(filename, save_training_info=False)
+
+    # Rewrite the checkpoint in the old layout.
+    saved = torch.load(filename, weights_only=False)
+    saved["model_state_dict"] = {
+        k.replace(f"{prefix}.", f"{prefix}.enets.0.", 1): v
+        for k, v in saved["model_state_dict"].items()
+    }
+    for kwargs in (saved["model_kwargs"], saved["metadata"]["train_settings"]["model"]):
+        kwargs.pop("num_context_parameters", None)  # the two may be the same dict
+        kwargs["embedding_kwargs"]["added_context"] = True
+    torch.save(saved, filename)
+
+    pm_old = build_model_from_kwargs(filename=filename, device="cpu")
+    assert pm_old.model_kwargs["num_context_parameters"] == 2
+    assert "added_context" not in pm_old.model_kwargs["embedding_kwargs"]
+
+    x = torch.rand(5, *d.embedding_kwargs["input_dims"])
+    z = torch.randn(5, 2)
+    theta = torch.randn(5, 4)
+    inputs = (theta, x, z)
+    if posterior_model_type == "flow_matching":
+        inputs = (torch.rand(5),) + inputs
+    pm.network.eval()
+    pm_old.network.eval()
+    with torch.no_grad():
+        assert torch.equal(pm.network(*inputs), pm_old.network(*inputs))
 
 
 def test_pm_scheduler(data_setup_pm_1, data_setup_optimizer_scheduler):
