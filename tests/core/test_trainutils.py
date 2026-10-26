@@ -139,7 +139,10 @@ def test_local_limits_ignore_total_epoch_limit():
 
 def test_loss_info_weighted_average_across_batches():
     info = LossInfo(
-        epoch=1, len_dataset=100, batch_size_per_grad_update=10, device=torch.device("cpu")
+        epoch=1,
+        len_dataset=100,
+        batch_size_per_grad_update=10,
+        device=torch.device("cpu"),
     )
     # Two optimizer steps of one mini-batch each; the epoch average is weighted
     # by the number of samples in each step.
@@ -150,6 +153,57 @@ def test_loss_info_weighted_average_across_batches():
     # Weighted: (2*4 + 3*2) / (4 + 2) = 14 / 6.
     assert info.get_avg() == pytest.approx(14.0 / 6)
     assert info.loss == 3.0
+
+
+def test_loss_info_empty_epoch_is_nan():
+    info = LossInfo(1, 100, 10, device=torch.device("cpu"))
+    assert math.isnan(info.get_avg())
+    assert info.flush() is False
+
+
+def test_loss_info_log_interval_syncs_every_n_steps():
+    """Only every ``log_interval``-th update reads the window; the epoch average
+    is still weighted over all steps, and flush() closes the partial last window."""
+    info = LossInfo(1, 100, 10, device=torch.device("cpu"), log_interval=2)
+    synced = []
+    for loss, n in [(2.0, 4), (3.0, 2), (5.0, 4)]:
+        info.update_timer()
+        info.cache_loss(torch.tensor(loss), n=n)
+        synced.append(info.update())
+    assert synced == [False, True, False]
+    assert info.loss == pytest.approx(14.0 / 6)  # first window of two steps
+    assert info.window_steps == 2
+    assert info.flush() is True  # the pending third step
+    assert info.window_steps == 1 and info.loss == 5.0
+    assert info.get_avg() == pytest.approx((8 + 6 + 20) / 10)
+    assert info.flush() is False
+    # Timing is populated on CPU, where there are no CUDA events.
+    assert info.times["wall"].x >= info.times["data wait"].x >= 0.0
+    assert info.times["wall"].N == 3 and "gpu" not in info.times
+
+
+def test_loss_info_grad_norm_window_mean_and_max():
+    """Gradient norms give a per-window mean and max; a non-finite norm (a step the
+    AMP loss scaler skips) is left out of both, and the window resets on read."""
+    info = LossInfo(1, 100, 10, device=torch.device("cpu"), log_interval=3)
+    for norm in [1.0, float("inf"), 5.0]:
+        info.cache_loss(torch.tensor(0.0), n=1)
+        info.cache_grad_norm(torch.tensor(norm))
+        info.update()
+    assert info.grad_norm == (3.0, 5.0)
+    info.cache_loss(torch.tensor(0.0), n=1)
+    info.update()  # a step without a norm, e.g. a validation pass
+    assert info.flush() is True and info.grad_norm is None
+
+
+def test_loss_info_accumulation_step_is_mean_of_minibatches():
+    """Within an optimizer step, mini-batch losses are averaged (not n-weighted),
+    and the step is weighted by its total sample count."""
+    info = LossInfo(1, 100, 10, device=torch.device("cpu"))
+    info.cache_loss(torch.tensor(1.0), n=4)
+    info.cache_loss(torch.tensor(3.0), n=2)
+    info.update()
+    assert info.get_avg() == 2.0  # mean(1, 3) over n=6, not (1*4 + 3*2)/6
 
 
 # ---------------------------------------------------------------------------

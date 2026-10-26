@@ -102,7 +102,7 @@ consequences:
 | 8 | 32 768 |       4 096        | N/8 | fewer steps, good GPU utilisation → **faster** than the baseline |
 
 When the `batch_size` is scaled by `num_gpus`, the actual wall-clock speedup is somewhat less than 8× because the 
-gradient all-reduce adds overhead per step (visible as inflated *Time Network* in the log); a factor of 4–6× is typical.
+gradient all-reduce adds overhead per step (visible as a longer step time in the log); a factor of 4–6× is typical.
 
 In general, it is recommended to increase the batch size as much as possible to fully utilize the GPU memory.
 
@@ -163,9 +163,20 @@ independent of `num_gpus` and larger at smaller per-GPU batch sizes.
 local:
   torch_compile: true                    # default: false
   torch_compile_cache_dir: /scratch/tmp  # optional; see note below
+  torch_compile_mode: reduce-overhead    # optional; CUDA graphs, see note below
 ```
 
 Notes:
+
+- `torch_compile_mode: reduce-overhead` additionally records the compiled step as CUDA graphs
+  and replays them, which removes the launch overhead of the kernels that remain after fusion:
+  the host then submits one graph per forward and backward pass instead of one kernel at a
+  time. It helps when the host cannot keep the GPU busy (a training process at 100% of one
+  CPU core while `nvidia-smi` shows the GPU below 100% utilization). CUDA graphs need static
+  shapes, so the released glasflow spline (which selects the tails by mask indexing) splits the
+  graph and loses most of the gain. The graphs hold a private memory pool, so peak GPU
+  memory grows. Not supported with multi-GPU training or
+  `gradient_updates_per_optimizer_step > 1` (the run stops with an error before training).
 
 - Compilation is slow: 4–12 minutes for a production-size network, paid on the first training
   step of a run and again at every stage boundary that changes which parameters are trainable.
@@ -181,8 +192,8 @@ Notes:
   cache must live on **node-local** disk. If the system temp directory is a shared network
   filesystem, set it to a node-local path (e.g. the HTCondor scratch directory); otherwise a
   just-compiled kernel can be unloadable on another rank and the run hangs on an NCCL timeout.
-- Once the network step is faster, the dataloader can become the bottleneck: watch
-  `Time Dataloader` in the log and raise `num_workers` if needed.
+- Once the network step is faster, the dataloader can become the bottleneck: watch the
+  `data wait` time in the log and raise `num_workers` if needed.
 
 ### TensorFloat-32 matrix multiplications (`float32_matmul_precision`)
 
@@ -190,8 +201,9 @@ PyTorch runs float32 matrix multiplications at full precision by default, which 
 tensor cores of Ampere and newer GPUs unused. Setting
 
 ```yaml
-local:
-  float32_matmul_precision: high   # default: highest
+training:
+  stage_0:
+    float32_matmul_precision: high   # default: highest
 ```
 
 lets them use TensorFloat-32: matmul inputs are rounded to 10 mantissa bits (the range of
@@ -201,15 +213,23 @@ and combines with `torch_compile`: with both (and the fused optimizer below) the
 drops from 0.85 s to 0.28 s per 4096 samples on an A100, a 3× gain in GPU time. All non-matmul
 operations (splines, normalization, the optimizer) are unaffected.
 
-TF32 and `automatic_mixed_precision` are alternatives, not a stack: under AMP the matmuls
-already run in float16, so `float32_matmul_precision: high` changes nothing there. On the
-`npe_model` network TF32 alone and AMP alone give the same speedup (0.90 to 0.47 s per step);
-TF32 is the option for trainings that stay in float32. The value in effect is stored in the
-checkpoint metadata (`float32_matmul_precision`).
+TF32 and `automatic_mixed_precision` are alternatives, not a stack: under AMP the large
+matmuls already run in float16. The flow's LU linear transforms stay in float32 under AMP (the
+flow variable is not rounded to float16), so with AMP keep `float32_matmul_precision: highest`:
+`high` would round their inputs to TF32. On the `npe_model` network TF32 alone and AMP alone
+give the same speedup (0.90 to 0.47 s per step); TF32 is the option for trainings that stay in
+float32.
+
+Like `automatic_mixed_precision`, the setting belongs to a training stage, since it changes the
+numerics of training; a stage that does not set it uses `highest`. Each stage's value is fixed
+when the run starts and recorded in the stage settings, hence in the checkpoint metadata, so a
+resume cannot change it. The former `local.float32_matmul_precision` is deprecated but still
+applies to stages that do not set the key. Inference runs at PyTorch's default (full float32)
+regardless of the training precision.
 
 ### Fused optimizer (`fused`)
 
-Unlike the settings above, this one is not in the `local` section: it belongs to the
+Like `float32_matmul_precision`, this one is not in the `local` section: it belongs to the
 `optimizer` block of an individual training stage, and is passed straight through to the
 PyTorch optimizer. Setting `fused: true` selects the fused CUDA kernel, which performs the
 whole optimizer update in one kernel instead of one per step of the update math, and is about
@@ -249,46 +269,35 @@ prevented). As a result, duplicate information can appear in `info.out`. Since e
 `info.out` in parallel, the order of these statements can be mixed up compared to single-GPU training. 
 If information is not duplicated, it is only printed by `rank = 0`.
 
-During training, each printed line looks like the following in single-GPU mode:
+During training, a progress line is printed every `log_interval` optimizer steps (default
+10; set in the `local` section), and once more for any steps left over at the end of the epoch:
 ```
-Train Epoch: 1 [4096/4750000 (0%)]   Loss: -2.771 (-2.799)   Time Dataloader: 0.043 (0.043)   Time Network: 0.415 (0.415)
-```
-
-In multi-GPU mode, rank 0 additionally prints a third timing column:
-```
-Train Epoch: 1 [4096/4750000 (0%)]   Loss: -2.771 (-2.799)   Time Dataloader: 0.018 (0.018)   Time Network: 0.700 (0.700)   Time Loss Aggregation: 0.090 (0.090)
+Train Epoch: 1 [40960/4750000 (1%)]   Loss: -2.771 (-2.799)   Time per step: wall 0.201 (0.205), data wait 0.004 (0.005), gpu 0.172 (0.170); mean over 10 steps
 ```
 
-Each value is the current step; the value in parentheses is the running average
-over the epoch. **In DDP mode all three timings are reported as the maximum across
-all GPUs** (`dist.ReduceOp.MAX`), i.e. they reflect the slowest rank.
+`Loss` is the mean over the steps since the previous line; the value in parentheses is the
+mean over the epoch so far. In multi-GPU mode both are sample-weighted means over all GPUs
+and identical on every rank. The times (in seconds) are means per optimizer step over the
+same window, again with the epoch means in parentheses:
 
-### Time Dataloader
-Wall-clock time spent loading and pre-processing one batch (waveform
-decompression, projection to detectors, noise generation). Expect this to be
-smaller than in single-GPU mode because each GPU loads a smaller per-GPU batch.
+- `wall`: the wall-clock time per step;
+- `gpu`: the time the device spends on the step, from the copy of the batch to the GPU to
+  the end of the optimizer step, measured with CUDA events (omitted on other devices). If it
+  stays close to the wall time while `nvidia-smi` shows the GPU well below 100% utilization,
+  the GPU is waiting for kernel launches from the host: see `torch_compile` above;
+- `data wait`: the time the host spends blocked waiting for the next batch from the
+  dataloader (waveform decompression, projection to detectors, noise generation). If it is a
+  sizable fraction of the step, increase `num_workers`. Like `batch_size`, `num_workers` is
+  the total across all GPUs and is divided equally between them (aim for 4–8 per GPU).
 
-### Time Network
-Forward pass + backward pass + **DDP gradient all-reduce** + optimizer step.
-Unlike single-GPU training this includes gradient synchronisation, so *Time
-Network* per step will typically be *larger* than in single-GPU mode even though
-each GPU processes fewer samples. The speedup comes from fewer steps per epoch,
-not from faster individual steps.
-
-### Time Loss Aggregation *(DDP only)*
-Time required to reduce per-GPU losses to rank 0 and compute the global average.
-Includes a `dist.barrier()` that waits for the slowest GPU to finish its network
-pass before proceeding. Occasional spikes can indicate increased wait time at the barrier.
-Sustained high values could indicate a load imbalance between GPUs.
-
-### Guidelines for tuning `num_workers`
-
-- *Time Dataloader* should be clearly smaller than *Time Network*. If dataloader
-  time dominates, increase `num_workers`. Like `batch_size`, `num_workers` is the
-  total across all GPUs and is divided equally between them (aim for 4–8 per GPU).
-- *Time Network* being larger per step than single-GPU is expected; this is the
-  all-reduce cost.
-- *Time Loss Aggregation* should be small relative to *Time Network*.
+Between two lines the loss stays on the GPU: reading it on the host would block until the GPU
+has finished the step and leave the GPU idle while the next batch is fetched and launched, so
+`log_interval` also sets how often the host synchronizes with the GPU (with
+`automatic_mixed_precision` the loss scaler adds one synchronization per step).
+In multi-GPU mode the times are those of rank 0; the gradient all-reduce keeps the ranks in
+step, so its wall time reflects the slowest rank. The step time is larger than in single-GPU
+mode because it includes the all-reduce; the speedup comes from fewer steps per epoch, not
+from faster individual steps.
 
 ## Monitoring with WandB
 
