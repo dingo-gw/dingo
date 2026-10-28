@@ -40,6 +40,7 @@ class ImportanceSamplingInput(Input):
         self.scheduler = args.scheduler
         # self.periodic_restart_time = args.periodic_restart_time
         self.request_cpus = args.request_cpus_importance_sampling
+        self.max_n_likelihoods = args.max_n_likelihoods
 
         # Naming arguments
         self.outdir = args.outdir
@@ -273,10 +274,12 @@ class ImportanceSamplingInput(Input):
             self.result.sample_proposal_extensions(
                 calibration_sampling_kwargs=calibration_sampling_kwargs,
                 synthetic_parameters_kwargs=synthetic_parameters_kwargs,
+                max_n_likelihoods=self.max_n_likelihoods,
             )
 
         self.result.importance_sample(
             num_processes=self.request_cpus,
+            max_n_likelihoods=self.max_n_likelihoods,
             time_marginalization_kwargs=self.importance_sampling_settings.get(
                 "time_marginalization"
             ),

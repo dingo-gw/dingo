@@ -1635,6 +1635,12 @@ def create_parser(top_level=True, usage=None):
         help=("Whether to perform importance sampling on result. (Default: True)"),
     )
     sampler_parser.add(
+        "--max-n-likelihoods",
+        type=int,
+        default=None,
+        help="If given, maximum samples per batch in each importance-sampling job."
+    )
+    sampler_parser.add(
         "--importance-sampling-settings",
         type=str,
         default="Default",

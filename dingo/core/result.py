@@ -30,6 +30,19 @@ DATA_KEYS = [
 ]
 
 
+def _likelihood_batch_size(max_n_likelihoods, num_samples):
+    """Validate the likelihood limit and return a nonzero batch size."""
+    if max_n_likelihoods is None:
+        return max(1, num_samples)
+    if (
+        isinstance(max_n_likelihoods, (bool, np.bool_))
+        or not isinstance(max_n_likelihoods, (int, np.integer))
+        or max_n_likelihoods <= 0
+    ):
+        raise ValueError("max_n_likelihoods must be a positive integer or None.")
+    return max_n_likelihoods
+
+
 def _clip_weights(weights: np.ndarray, num_clip: int) -> np.ndarray:
     """Replace the ``num_clip`` largest weights with their mean, then re-normalize.
 
@@ -258,7 +271,12 @@ class Result(DingoDataset):
         else:
             return None
 
-    def importance_sample(self, num_processes: int = 1, **likelihood_kwargs):
+    def importance_sample(
+        self,
+        num_processes: int = 1,
+        max_n_likelihoods: Optional[int] = None,
+        **likelihood_kwargs,
+    ):
         """
         Calculate importance weights for samples.
 
@@ -289,6 +307,8 @@ class Result(DingoDataset):
         num_processes : int
             Number of parallel processes to use when calculating likelihoods. (This is
             the most expensive task.)
+        max_n_likelihoods : int or None
+            Maximum number of samples per likelihood batch. None uses one batch.
         likelihood_kwargs : dict
             kwargs that are forwarded to the likelihood constructor. E.g., options for
             marginalization.
@@ -309,6 +329,7 @@ class Result(DingoDataset):
                 "samples. This can then be sampled with log probability."
             )
 
+        batch_size = _likelihood_batch_size(max_n_likelihoods, len(self.samples))
         self._build_likelihood(**likelihood_kwargs)
 
         if "delta_log_prob_target" in self.samples.columns:
@@ -352,9 +373,12 @@ class Result(DingoDataset):
         else:
             print(f"Calculating {len(theta)} likelihoods.")
             t0 = time.time()
-            log_likelihood = self.likelihood.log_likelihood_multi(
-                theta, num_processes=num_processes
-            )
+            log_likelihood = np.empty(len(theta))
+            for start in range(0, len(theta), batch_size):
+                stop = start + batch_size
+                log_likelihood[start:stop] = self.likelihood.log_likelihood_multi(
+                    theta.iloc[start:stop], num_processes=num_processes
+                )
             print(f"Done. This took {time.time() - t0:.2f} seconds.")
 
         self.log_noise_evidence = self.likelihood.log_Zn
@@ -994,7 +1018,7 @@ class Result(DingoDataset):
         key: str
             The parameter key for which to calculate the median and error bar
         weighted: bool, optional
-            If True, use the importance weights stored in the "weights" 
+            If True, use the importance weights stored in the "weights"
             column of the samples. Default is False.
         fmt: str, ('.2f')
             Format string used for the values in the returned LaTeX string.
@@ -1006,17 +1030,17 @@ class Result(DingoDataset):
         Returns
         ---------
         summary: namedtuple
-            An object with attributes median, lower, upper, and string, where 
-            string is a LaTeX representation of the form 
+            An object with attributes median, lower, upper, and string, where
+            string is a LaTeX representation of the form
             $median_{-lower}^{+upper}$.
         """
-        
+
         Summary = namedtuple('summary', ['median', 'lower', 'upper', 'string'])
 
         if len(quantiles) != 2:
             raise ValueError("quantiles must be of length 2")
 
-        quants_to_compute = np.array([quantiles[0], 0.5, quantiles[1]]) 
+        quants_to_compute = np.array([quantiles[0], 0.5, quantiles[1]])
 
         theta = self._cleaned_samples()
         if weighted:
@@ -1033,12 +1057,12 @@ class Result(DingoDataset):
         string_template = r"${{{0}}}_{{-{1}}}^{{+{2}}}$"
         string = string_template.format(
             fmt(median), fmt(lower), fmt(upper))
-        return Summary(median=median, lower=lower, upper=upper, string=string)    
+        return Summary(median=median, lower=lower, upper=upper, string=string)
 
     def _percentile(self, samples, weights, quants_to_compute):
         """
         Compute weighted percentiles of an array of samples.
-    
+
         Parameters
         ----------
         samples : array-like
@@ -1047,7 +1071,7 @@ class Result(DingoDataset):
             The weights for each sample.
         percentiles : array-like
             List or array of percentiles in [0, 100].
-    
+
         Returns
         -------
         np.ndarray
@@ -1056,16 +1080,16 @@ class Result(DingoDataset):
         samples = np.asarray(samples)
         weights = np.asarray(weights)
         quants_to_compute = np.asarray(quants_to_compute)
-    
+
         # Sort samples and weights by the sample values
         sorter = np.argsort(samples)
         samples_sorted = samples[sorter]
         weights_sorted = weights[sorter]
-    
+
         # Cumulative sum of weights
         cumulative_weights = np.cumsum(weights_sorted)
         cumulative_weights /= cumulative_weights[-1]  # normalize to 1
-    
+
         # Interpolate for all requested percentiles at once
         return np.interp(quants_to_compute, cumulative_weights, samples_sorted)
 
