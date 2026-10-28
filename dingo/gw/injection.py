@@ -172,14 +172,17 @@ class GWSignal(object):
         )
         if self.calibration_marginalization_kwargs:
             # For calibration marginalization: sample parameters from prior
+            sampling_kwargs = dict(self.calibration_marginalization_kwargs)
+            sampling_kwargs.pop("batch_size", None)
             transforms.append(
                 SampleCalibrationParameters(
                     self.ifo_list,
                     self.data_domain,
                     frequency_bounds=frequency_bounds,
-                    **self.calibration_marginalization_kwargs,
+                    **sampling_kwargs,
                 )
             )
+        calibration_start = len(transforms)
         # Always add ApplyCalibrationToWaveform - it's a no-op if no calibration
         # parameters are present in the sample
         transforms.append(
@@ -192,6 +195,8 @@ class GWSignal(object):
         if self.whiten:
             transforms.append(WhitenAndScaleStrain(self.data_domain.noise_std))
         self.projection_transforms = Compose(transforms)
+        self._calibration_pre_transforms = Compose(transforms[:calibration_start])
+        self._calibration_post_transforms = Compose(transforms[calibration_start:])
 
     def signal(self, theta):
         """
@@ -215,6 +220,13 @@ class GWSignal(object):
                 parameters: waveform parameters
                 asd (if set): amplitude spectral density for each detector
         """
+        sample = self.projection_transforms(self._signal_sample(theta))
+        # The projection has moved the extrinsic parameters into "parameters".
+        del sample["extrinsic_parameters"]
+        return sample
+
+    def _signal_sample(self, theta):
+        """Generate polarizations and package them for detector projection."""
         theta_intrinsic, theta_extrinsic = split_off_extrinsic_parameters(theta)
         theta_intrinsic = {k: float(v) for k, v in theta_intrinsic.items()}
 
@@ -235,11 +247,24 @@ class GWSignal(object):
         if asd is not None:
             sample["asds"] = asd
 
-        sample = self.projection_transforms(sample)
-        # The projection has moved the extrinsic parameters into "parameters"; the
-        # emptied part of the training sample layout is not data.
-        del sample["extrinsic_parameters"]
         return sample
+
+    def _calibration_signal_batches(self, theta, batch_size):
+        """Project once and draw all spline nodes once, then expand curves in batches."""
+        sample = self._calibration_pre_transforms(self._signal_sample(theta))
+        num_curves = self.calibration_marginalization_kwargs["num_calibration_curves"]
+        for start in range(0, num_curves, batch_size):
+            batch = {
+                **sample,
+                # Calibration replaces entries in this nested dictionary.
+                "waveform": sample["waveform"].copy(),
+                "extrinsic_parameters": {
+                    k: v[start : start + batch_size] if k.startswith("recalib_") else v
+                    for k, v in sample["extrinsic_parameters"].items()
+                },
+            }
+            yield self._calibration_post_transforms(batch)
+            del batch
 
     # It would be good to have an ASD class to handle all of this functionality,
     # namely storing ASDs from numpy arrays, from ASDDatasets, loading from files,

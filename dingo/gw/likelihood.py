@@ -61,7 +61,9 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         time_marginalization_kwargs: dict
             Time marginalization parameters. If None, no time marginalization is used.
         calibration_marginalization_kwargs: dict
-            Calibration marginalization parameters. If None, no calibration marginalization is used.
+            Calibration marginalization parameters. Optional ``batch_size`` limits
+            curves evaluated at once per worker without changing the total draws.
+            If None, no calibration marginalization is used.
         phase_marginalization_kwargs: dict
             Phase marginalization parameters. If None, no phase marginalization is used.
         use_base_domain: bool (default False)
@@ -847,32 +849,33 @@ class StationaryGaussianGWLikelihood(GWSignal, Likelihood):
         if self.return_aux_snr:
             raise NotImplementedError
 
-        # Step 1: Compute whitened GW strain mu(theta) for parameters theta.
-        mu = self.signal(theta)["waveform"]
-        d = self.whitened_strains
-
-        # In the calibration-marginalization case, the values of mu for each detector
-        # have an additional leading dimension, which corresponds to the calibration
-        # draws. These are averaged over in computing the likelihood.
-        # TODO: Combine with _log_likelihood() into a single method.
-
-        # Step 2: Compute likelihood. log_Zn is precomputed, so we only need to
-        # compute the remaining terms rho2opt and kappa2
-
-        rho2opt = np.sum(
-            [inner_product(mu_ifo.T, mu_ifo.T) for mu_ifo in mu.values()], axis=0
+        batch_size = self.calibration_marginalization_kwargs.get("batch_size")
+        signals = (
+            (self.signal(theta),)
+            if batch_size is None
+            else self._calibration_signal_batches(theta, batch_size)
         )
-        kappa2 = np.sum(
-            [
-                inner_product(d_ifo[:, None], mu_ifo.T)
-                for d_ifo, mu_ifo in zip(d.values(), mu.values())
-            ],
-            axis=0,
-        )
-
-        likelihoods = self.log_Zn + kappa2 - 1 / 2.0 * rho2opt
-        # Return the average over calibration envelopes
-        return logsumexp(likelihoods) - np.log(len(likelihoods))
+        log_sum = -np.inf
+        num_curves = 0
+        for signal in signals:
+            mu = signal["waveform"]
+            rho2opt = np.sum(
+                [inner_product(m.T, m.T) for m in mu.values()], axis=0
+            )
+            kappa2 = np.sum(
+                [
+                    inner_product(self.whitened_strains[ifo][:, None], m.T)
+                    for ifo, m in mu.items()
+                ],
+                axis=0,
+            )
+            # Sum detectors before marginalizing, and normalize over all draws,
+            # including a possibly shorter final batch.
+            likelihoods = self.log_Zn + kappa2 - 0.5 * rho2opt
+            log_sum = np.logaddexp(log_sum, logsumexp(likelihoods))
+            num_curves += len(likelihoods)
+            del signal, mu
+        return log_sum - np.log(num_curves)
 
     def d_inner_h_complex(self, theta):
         """

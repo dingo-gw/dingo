@@ -100,6 +100,7 @@ class ImportanceSamplingInput(Input):
         self.spline_calibration_nodes = args.spline_calibration_nodes
         self.spline_calibration_envelope_dict = args.spline_calibration_envelope_dict
         self.spline_calibration_curves = args.spline_calibration_curves
+        self.spline_calibration_batch_size = args.spline_calibration_batch_size
         self.calibration_correction_type = args.calibration_correction_type
 
         # # Marginalization
@@ -160,6 +161,7 @@ class ImportanceSamplingInput(Input):
                 },
                 "num_calibration_nodes": self.spline_calibration_nodes,
                 "num_calibration_curves": self.spline_calibration_curves,
+                "batch_size": self.spline_calibration_batch_size,
                 "correction_type": self.calibration_correction_type,
             }
         elif self.calibration_model is None or self.calibration_mode in [

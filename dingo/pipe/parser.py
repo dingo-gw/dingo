@@ -145,6 +145,12 @@ def create_parser(top_level=True, usage=None):
             "uncertainty. Only used when calibration-mode='marginalize'."
         ),
     )
+    calibration_parser.add(
+        "--spline-calibration-batch-size",
+        type=int,
+        default=None,
+        help="If given, maximum calibration curves evaluated at once per likelihood worker."
+    )
     #
     # calibration_parser.add(
     #     "--spline-calibration-amplitude-uncertainty-dict",
