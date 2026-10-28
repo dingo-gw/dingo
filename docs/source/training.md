@@ -66,6 +66,7 @@ model:
       num_training_samples: 20000
       num_validation_samples: 5000
       size: 200
+#     method: scipy  # 'gram' is faster for many samples; it raises if the basis is not resolved.
 
 # Training is divided in stages. They each require all settings as indicated below.
 training:
@@ -102,6 +103,7 @@ training:
 local:
   device: cuda  # Change this to 'cpu' for training without a GPU.
   num_workers: 6
+# svd_num_threads: 16  # BLAS threads for the embedding-network SVD at the start of training.
 # num_gpus: 1   # Set to >1 to enable multi-GPU (DDP) training. Requires
                 # freeze_rb_layer: False in all stages. When using
                 # dingo_train_condor, request_gpus is set automatically.
@@ -175,6 +177,9 @@ device
 
 num_workers
 : Number of CPU worker processes to use for pre-processing training data before copying to the GPU. Data pre-processing (inluding decompression, projection to detectors, and noise generation) is quite expensive, so using 16 or 32 processes is recommended, otherwise this can become a bottleneck. We recommend monitoring the GPU utilization percentage as well as time spent on pre-processing (output during training) to fine-tune this number. When training on multiple GPUs, this is the total number of workers; it is divided equally across the GPUs.
+
+svd_num_threads
+: (Optional) Number of BLAS threads used to compute and test the SVD that seeds the embedding network, when training starts from scratch. Data generation for the SVD stays single-threaded. If unset, the process's thread settings apply; these are often a single thread (e.g. `OMP_NUM_THREADS=1`, set to keep the data-loader workers from oversubscribing the CPUs), which makes this step slow for long waveforms and large `svd` settings.
 
 num_gpus
 : (Optional, default 1) Number of GPUs to use for training. Setting this to more than 1 enables data-parallel multi-GPU training (PyTorch DDP). The `batch_size` specified in each training stage is the total effective batch size; it is divided equally across GPUs. When using `dingo_train_condor`, the HTCondor `request_gpus` directive is set automatically from this value. See [](#multi-gpu-training) for details.
