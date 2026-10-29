@@ -3,7 +3,10 @@ import os
 from bilby_pipe.job_creation.nodes import GenerationNode as BilbyGenerationNode
 from bilby_pipe.utils import BilbyPipeError
 
-from dingo.pipe.utils import _strip_unwanted_submission_keys
+from dingo.pipe.utils import (
+    configure_file_transfer,
+    _strip_unwanted_submission_keys,
+)
 
 
 class GenerationNode(BilbyGenerationNode):
@@ -42,7 +45,9 @@ class GenerationNode(BilbyGenerationNode):
             self.arguments.add("timeslide-file", self.inputs.timeslide_file)
 
         frame_files, success = self.resolve_frame_files
-        need_scitokens = not success
+        # Frame discovery may need credentials even without file transfers.
+        if not success:
+            self.extra_lines.extend(self.scitoken_lines)
 
         if self.inputs.transfer_files or self.inputs.osg:
             input_files_to_transfer = list()
@@ -56,21 +61,6 @@ class GenerationNode(BilbyGenerationNode):
                 if (value := getattr(self.inputs, attr)) is not None:
                     input_files_to_transfer.append(os.path.abspath(str(value)))
 
-            # modifying the paths for OSDF networks
-            network_files = []
-            for s in [self.inputs.model, self.inputs.model_init]:
-                if s is None:
-                    continue
-                if "osdf" in s:
-                    # stripping osdf prefix as it is not needed
-                    network_files.append(f"igwn+osdf://{s.replace('/osdf', '')}")
-                else:
-                    network_files.append(s)
-
-            input_files_to_transfer.extend(network_files)
-
-            if self.transfer_container:
-                input_files_to_transfer.append(self.inputs.container)
             for value in [
                 self.inputs.psd_dict,
                 self.inputs.spline_calibration_envelope_dict,
@@ -79,20 +69,11 @@ class GenerationNode(BilbyGenerationNode):
                 input_files_to_transfer.extend(self.extract_paths_from_dict(value))
             input_files_to_transfer.extend(self.inputs.additional_transfer_paths)
 
-            input_files_to_transfer, need_auth = self.job_needs_authentication(
-                input_files_to_transfer
-            )
-
-            # Credentials are needed to access any OSDF files
-            if any(["osdf" in s for s in input_files_to_transfer]):
-                need_auth = True
-            need_scitokens = need_scitokens or need_auth
-
-            self.extra_lines.extend(
-                self._condor_file_transfer_lines(
-                    input_files_to_transfer,
-                    [self._relative_topdir(self.inputs.outdir, self.inputs.initialdir)],
-                )
+            configure_file_transfer(
+                self,
+                input_files_to_transfer,
+                network_files=(self.inputs.model, self.inputs.model_init),
+                require_osdf_auth=True,
             )
             self.arguments.add("outdir", os.path.relpath(self.inputs.outdir))
 
@@ -109,9 +90,6 @@ class GenerationNode(BilbyGenerationNode):
                 "pass these frame files to the data-dict option. You may need to "
                 f"remove a prefix, e.g., file://localhost.\n\t{new_frames}"
             )
-        if need_scitokens:
-            self.extra_lines.extend(self.scitoken_lines)
-
         # DINGO-specific customization: Add site selection
         if self.inputs.generation_pool == "igwn-pool":
             sites = getattr(self.inputs, 'generation_desired_sites', None)
