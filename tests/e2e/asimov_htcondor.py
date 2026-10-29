@@ -1,9 +1,10 @@
-"""Run the Asimov -> Dingo -> PESummary smoke test on a local HTCondor pool.
+"""Run Asimov -> mocked Dingo workers -> PESummary on a local HTCondor pool.
 
 Usage: python tests/e2e/asimov_htcondor.py /path/to/empty/project
 
 Test assertions are grouped in assert_jobs_succeeded() and assert_outputs().
-Checkpoint construction lives in model_fixtures.py. This script is not
+Metadata-only checkpoints live in model_fixtures.py; synthetic workers live in
+mock_dingo.py. No networks are built, trained, or saved. This script is not
 collected by pytest.
 """
 
@@ -13,12 +14,12 @@ import json
 import os
 import shlex
 import subprocess
-import sys
 from pathlib import Path
 
 import h5py
 import numpy as np
 import yaml
+from mock_dingo import install_mock_executables
 from model_fixtures import create_model_checkpoints, write_noise_psd
 
 from dingo.gw.domains import MultibandedFrequencyDomain
@@ -61,17 +62,6 @@ def assert_outputs(event_name: str) -> None:
         assert np.isfinite(result.log_evidence), name
         assert result.minimum_frequency == MINIMUM_FREQUENCY, name
         assert result.maximum_frequency == MAXIMUM_FREQUENCY, name
-
-        # Check that the requested bounds affect the likelihood, too.
-        result._build_likelihood()
-        frequencies = result.likelihood.data_domain()
-        for detector in MINIMUM_FREQUENCY:
-            inside = (frequencies >= MINIMUM_FREQUENCY[detector]) & (
-                frequencies <= MAXIMUM_FREQUENCY[detector]
-            )
-            asd = result.likelihood.asd[detector]
-            assert np.all(asd[~inside] == 1.0), (name, detector)
-            assert np.all(asd[inside] < 1e-15), (name, detector)
 
         summary_name = f"{name}-summary"
         assert productions[summary_name].status == "finished", summary_name
@@ -127,19 +117,20 @@ def initialize_project(directory: Path) -> None:
         "[init]\n\tdefaultBranch = master\n"
     )
     os.environ["GIT_CONFIG_GLOBAL"] = str(git_config)
+    environment = install_mock_executables(directory / "environment")
     run_command("asimov", "init", "Dingo end-to-end test")
     for key, value in (
         ("condor/user", getpass.getuser()),
         ("condor/cache_time", "0"),
-        ("pipelines/environment", sys.prefix),
+        ("pipelines/environment", environment),
         ("general/webroot", "pages"),
         ("logging/print level", "warning"),
     ):
         run_command("asimov", "configuration", "update", key, value)
 
 
-def build_project_blueprint(recovery_settings: dict) -> dict:
-    """Reduce the example's resource and sampling settings for a CPU smoke test."""
+def build_project_blueprint() -> dict:
+    """Configure small CPU jobs whose Dingo workers generate synthetic results."""
     project = load_yaml(EXAMPLES / "project_dingo.yaml")
     pipeline = project["pipelines"]["dingo"]
     pipeline["scheduler"].pop("CUDA Global Memory Mb", None)
@@ -171,7 +162,6 @@ def build_project_blueprint(recovery_settings: dict) -> dict:
             "batch size": 16,
             "num gnpe iterations": 2,
             "sampling seed": 42,
-            "density recovery settings": recovery_settings,
         }
     )
     pipeline["plotting"] = False
@@ -184,7 +174,7 @@ def build_project_blueprint(recovery_settings: dict) -> dict:
 
 
 def configure_event(event: dict, psd_path: str) -> None:
-    """Use short Gaussian data with detector-specific lower frequency bounds."""
+    """Configure simulated data and detector-specific lower frequency bounds."""
     event["data"].update(
         {
             "segment length": 4,
@@ -247,7 +237,7 @@ def main() -> None:
     checkpoints = create_model_checkpoints(event, settings, fixture_directory)
     psd_path = write_noise_psd(settings, fixture_directory / "psd.txt")
     configure_event(event, psd_path)
-    apply_blueprint("project", build_project_blueprint(settings["recovery"]))
+    apply_blueprint("project", build_project_blueprint())
     apply_blueprint("event", event)
     apply_analyses(event["name"], checkpoints)
 

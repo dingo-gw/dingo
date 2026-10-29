@@ -1,6 +1,4 @@
-# Metadata for tiny, untrained checkpoints created by model_fixtures.py.
-# dataset_settings/train_settings are required checkpoint schema fields;
-# no waveform dataset is generated and no checkpoint training is performed.
+# Metadata-only fixtures. No network architecture, weights, or training recipe.
 dataset_settings:
   domain:
     type: MultibandedFrequencyDomain
@@ -42,8 +40,7 @@ train_settings:
       psi: default
       luminosity_distance: bilby.core.prior.Uniform(minimum=2000.0, maximum=4000.0)
     inference_parameters: [chirp_mass, mass_ratio, phase, luminosity_distance, geocent_time, ra, dec, psi]
-    # Fixed fixture scales keep random-network proposals well inside the priors.
-    # They are not estimated from a training dataset.
+    # Scales for deterministic synthetic samples, without a network.
     standardization:
       mean:
         chirp_mass: 30.0
@@ -63,49 +60,5 @@ train_settings:
         ra: 0.3
         dec: 0.2
         psi: 0.2
-  model: &flow
+  model:
     posterior_model_type: normalizing_flow
-    posterior_kwargs:
-      num_flow_steps: 2
-      base_transform_kwargs:
-        hidden_dim: 16
-        num_transform_blocks: 1
-        activation: elu
-        dropout_probability: 0.0
-        norm: null
-        num_bins: 4
-        base_transform_type: rq-coupling
-
-resnet:
-  output_dim: 8
-  hidden_dims: [16, 16]
-  activation: elu
-  dropout: 0.0
-  norm: null
-  svd: {size: 4}  # Projection width only; no SVD is computed.
-
-transformer:
-  tokenizer_kwargs: {hidden_dims: [16], activation: elu, norm: null}
-  transformer_kwargs:
-    d_model: 16
-    dim_feedforward: 32
-    nhead: 2
-    num_layers: 1
-    dropout: 0.0
-    norm_first: true
-  pooling: cls
-  final_net_kwargs: {output_dim: 8}
-
-recovery:
-  # GNPE's inference-time density recovery is needed for importance sampling.
-  num_samples: 64
-  threshold_std: 10
-  nde_settings:
-    model: *flow
-    training:
-      epochs: 1
-      batch_size: 16
-      optimizer: {type: adam, lr: 0.001}
-      scheduler: {type: cosine, T_max: 1}
-      num_workers: 0
-      train_fraction: 0.75

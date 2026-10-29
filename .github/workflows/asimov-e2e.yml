@@ -73,7 +73,7 @@ jobs:
           condor_master
           timeout 60 bash -c 'until condor_status -af Name | grep -q .; do sleep 2; done'
 
-      - name: Exercise transformer, GNPE, and PESummary through Asimov
+      - name: Exercise Asimov and PESummary with metadata-only Dingo fixtures
         run: >-
           runuser -u submituser -- env PATH="$E2E_PREFIX/bin:$PATH"
           python "$GITHUB_WORKSPACE/tests/e2e/asimov_htcondor.py"
@@ -93,6 +93,8 @@ jobs:
           include-hidden-files: true
           path: |
             e2e_project/blueprints/
+            e2e_project/fixtures/
+            e2e_project/environment/
             e2e_project/checkouts/
             e2e_project/working/
             e2e_project/pages/

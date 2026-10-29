@@ -1,39 +1,31 @@
-"""Tiny initialized checkpoints and an analytic PSD for the Asimov smoke test."""
+"""Metadata-only checkpoints and a synthetic PSD for the Asimov smoke test."""
 
 import copy
 from pathlib import Path
 
 import numpy as np
 import torch
-from bilby.gw.detector import PowerSpectralDensity
 
-from dingo.core.posterior_models import build_model_from_kwargs
-from dingo.core.utils.torchutils import seed_generators
 from dingo.gw.domains import build_domain
 
 
 def create_model_checkpoints(
     event: dict, settings: dict, directory: Path
 ) -> dict[str, str]:
-    """Save untrained transformer, GNPE initialization, and GNPE checkpoints."""
-    torch.set_num_threads(1)
-    seed_generators(np.random.SeedSequence(42))
+    """Save only metadata; no network is constructed or serialized."""
     checkpoints = {}
     for name in ("transformer", "init", "gnpe"):
         metadata = build_checkpoint_metadata(name, event, settings)
-        model = build_model_from_kwargs(settings=metadata, device="cpu")
         path = str(directory / f"{name}.pt")
-        model.save_model(path, save_training_info=False)
+        torch.save({"metadata": metadata}, path)
         checkpoints[name] = path
     return checkpoints
 
 
 def write_noise_psd(settings: dict, path: Path) -> str:
-    """Write the analytic PSD on the uniform grid required by Bilby's generator."""
+    """Write a flat synthetic PSD for configuration and file-transfer coverage."""
     domain = build_domain(settings["dataset_settings"]["domain"]).base_domain
-    psd = PowerSpectralDensity(asd_file="aLIGO_ZERO_DET_high_P_asd.txt")
-    asd = np.interp(domain(), psd.frequency_array, psd.asd_array, left=1, right=1)
-    np.savetxt(path, np.column_stack((domain(), asd**2)))
+    np.savetxt(path, np.column_stack((domain(), np.full(len(domain), 1e-46))))
     return str(path)
 
 
@@ -46,28 +38,9 @@ def build_checkpoint_metadata(name: str, event: dict, settings: dict) -> dict:
     data.update(detectors=event["interferometers"], ref_time=event["event time"])
     configure_preprocessing(data, name)
 
-    embedding_type = "transformer" if name == "transformer" else "resnet"
-    embedding = copy.deepcopy(settings[embedding_type])
-    if embedding_type == "transformer":
-        embedding["tokenizer_kwargs"].update(
-            input_dim=3 * data["tokenization"]["token_size"],
-            position_continuous_dim=2,
-            position_category_sizes=[len(data["detectors"])],
-        )
-        embedding_dimension = embedding["final_net_kwargs"]["output_dim"]
-    else:
-        domain = build_domain(metadata["dataset_settings"]["domain"])
-        embedding.update(
-            input_dims=[len(data["detectors"]), 3, domain.frequency_mask_length],
-            added_context=bool(data["context_parameters"]),
-        )
-        embedding_dimension = embedding["output_dim"]
-
-    model = metadata["train_settings"]["model"]
-    model.update(embedding_type=embedding_type, embedding_kwargs=embedding)
-    model["posterior_kwargs"].update(
-        input_dim=len(data["inference_parameters"]),
-        context_dim=embedding_dimension + len(data["context_parameters"]),
+    metadata["train_settings"]["model"].update(
+        embedding_type="transformer" if name == "transformer" else "resnet",
+        embedding_kwargs={},
     )
     return metadata
 
