@@ -147,7 +147,7 @@ def create_parser(top_level=True, usage=None):
     )
     calibration_parser.add(
         "--spline-calibration-batch-size",
-        type=int,
+        type=noneint,
         default=None,
         help="If given, maximum calibration curves evaluated at once per likelihood worker."
     )
@@ -1642,7 +1642,7 @@ def create_parser(top_level=True, usage=None):
     )
     sampler_parser.add(
         "--max-n-likelihoods",
-        type=int,
+        type=noneint,
         default=None,
         help="If given, maximum samples per batch in each importance-sampling job."
     )
