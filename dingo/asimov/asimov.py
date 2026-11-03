@@ -445,6 +445,11 @@ class DingoPipeline(Pipeline):
         if not dryrun:
             self.production.meta.update(meta)
 
+    @property
+    def dag_file(self):
+        job_label = self.production.meta.get("job label", self.production.name)
+        return os.path.join(self.production.rundir, "submit", f"dag_{job_label}.submit")
+
     def submit_dag(self, dryrun=False):
         """
         Submit a DAG file to the condor cluster.
@@ -474,16 +479,11 @@ class DingoPipeline(Pipeline):
         self.before_submit()
 
         try:
-            if "job label" in self.production.meta:
-                job_label = self.production.meta["job label"]
-            else:
-                job_label = self.production.name
-            dag_filename = f"dag_{job_label}.submit"
             command = [
                 "condor_submit_dag",
                 "-batch-name",
                 f"dingo/{self.production.event.name}/{self.production.name}",
-                os.path.join(self.production.rundir, "submit", dag_filename),
+                self.dag_file,
             ]
 
             if dryrun:
@@ -497,7 +497,7 @@ class DingoPipeline(Pipeline):
 
                 stdout, stderr = dagman.communicate()
 
-                if "submitted to cluster" in str(stdout):
+                if dagman.returncode == 0 and "submitted to cluster" in str(stdout):
                     cluster = re.search(
                         r"submitted to cluster ([\d]+)", str(stdout)
                     ).groups()[0]
@@ -540,19 +540,27 @@ class DingoPipeline(Pipeline):
             return
 
     def resurrect(self):
-        """
-        Attempt to ressurrect a failed job.
-        """
+        """Resubmit a rescue DAG, or let Asimov mark the production stuck."""
+        count = self.production.meta.get("resurrections", 0)
         try:
-            count = self.production.meta["resurrections"]
-        except:
-            count = 0
-        if (count < 5) and (
-            len(glob.glob(os.path.join(self.production.rundir, "submit", "*.rescue*")))
-            > 0
-        ):
-            count += 1
+            if count >= 5:
+                raise PipelineException("The five automatic rescue attempts are exhausted.")
+            # A child sub-DAG's rescue file alone cannot rescue the top-level DAG.
+            if not glob.glob(glob.escape(self.dag_file) + ".rescue[0-9][0-9][0-9]"):
+                raise PipelineException(f"No rescue file found for {self.dag_file}.")
+
+            self.production.meta["resurrections"] = count + 1
+            self.production.event.update_data()
+            self.logger.info(f"Attempting automatic rescue {count + 1}/5 for {self.production.name}.")
             self.submit_dag()
+        except Exception as error:
+            message = f"Cannot rescue {self.production.name}: {error}"
+            self.logger.error(message)
+            # The monitor catches this, sets 'stuck', and persists the ledger.
+            raise PipelineException(message, production=self.production.name) from error
+
+        # The monitor does not persist metadata on its successful rescue branch.
+        self.production.event.update_data()
 
     @classmethod
     def read_ini(cls, filepath):
