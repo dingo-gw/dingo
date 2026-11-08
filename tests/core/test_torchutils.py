@@ -37,11 +37,100 @@ def test_get_scheduler_from_kwargs():
 
 def test_split_dataset_into_train_and_test():
     dataset = torch.utils.data.TensorDataset(torch.arange(100.0))
-    train, test = torchutils.split_dataset_into_train_and_test(dataset, 0.8)
+    train, test = torchutils.split_dataset_into_train_and_test(
+        dataset, 0.8, block_size=1
+    )
     assert len(train) == 80
     assert len(test) == 20
     # The split is a partition (no shared indices, full coverage).
     assert len(train) + len(test) == len(dataset)
+
+
+@pytest.mark.parametrize("n, fraction", [(0, 0.8), (7, 0.5), (1000, 0.8), (1001, 0.95)])
+def test_split_block_size_1_is_random_split(n, fraction):
+    """Runs started before block_size existed resume with the same train/test split."""
+    dataset = torch.utils.data.TensorDataset(torch.arange(float(n)))
+    train, test = torchutils.split_dataset_into_train_and_test(
+        dataset, fraction, block_size=1
+    )
+    size = int(fraction * n)
+    ref_train, ref_test = torch.utils.data.random_split(
+        dataset, [size, n - size], generator=torch.Generator().manual_seed(42)
+    )
+    assert train.indices == ref_train.indices and test.indices == ref_test.indices
+
+
+@pytest.mark.parametrize(
+    "block_size, test_rows",
+    [(1, [673, 842, 746, 582, 717, 364]), (16, [332, 333, 334, 335, 336, 337])],
+)
+def test_split_is_frozen(block_size, test_rows):
+    """The split of saved models must never change (also not with torch's randperm):
+    a resumed run would train on its test rows."""
+    dataset = torch.utils.data.TensorDataset(torch.arange(1000))
+    _, test = torchutils.split_dataset_into_train_and_test(
+        dataset, 0.8, block_size=block_size
+    )
+    assert test.indices[:6] == test_rows
+
+
+def num_runs(rows):
+    """Number of runs of consecutive rows in a sequence."""
+    rows = torch.as_tensor(rows)
+    return 1 + int((rows[1:] != rows[:-1] + 1).sum()) if len(rows) else 0
+
+
+def test_block_size_split_and_sampler():
+    """Blocks of the split and the samplers: a partition into whole blocks, every
+    training row once per epoch, batches of few contiguous runs, a reproducible order
+    per epoch, and contiguous, disjoint DDP shares."""
+    n, b, B = 1000, 16, 64
+    dataset = torch.utils.data.TensorDataset(torch.arange(n))
+    train_loader, test_loader = torchutils.build_train_and_test_loaders(
+        dataset, 0.8, B, num_workers=0, block_size=b
+    )
+    sampler = train_loader.sampler
+    train, test = train_loader.dataset.indices, test_loader.dataset.indices
+    assert sorted(train + test) == list(range(n))
+    assert num_runs(test) <= len(test) / b + 2
+
+    orders = []
+    for epoch in (1, 1, 2):
+        sampler.set_epoch(epoch)
+        batches = [x.tolist() for (x,) in train_loader]
+        assert sorted(sum(batches, [])) == sorted(train)
+        assert all(num_runs(x) <= 2 * (B / b + 2) + 1 for x in batches)
+        orders.append(sum(batches, []))
+    assert orders[0] == orders[1] and orders[0] != orders[2]
+    assert num_runs(sum([x.tolist() for (x,) in test_loader], [])) <= len(test) / b + 2
+
+    W = 3
+    shares = []
+    for rank in range(W):
+        loader, _ = torchutils.build_train_and_test_loaders(
+            dataset, 0.8, B, num_workers=0, world_size=W, rank=rank, block_size=b
+        )
+        loader.sampler.set_epoch(1)
+        batches = [x.tolist() for (x,) in loader]
+        assert all(num_runs(x) <= 2 * (B / b + 2) + 1 for x in batches)
+        shares.append(set(sum(batches, [])))
+    assert {len(x) for x in shares} == {len(train) // W}
+    assert set.union(*shares) <= set(train) and len(set.union(*shares)) > len(train) - W
+    for bad in (
+        {"block_size": 64.0},
+        {"block_size": True},
+        {"num_replicas": 2, "rank": 2},
+    ):
+        with pytest.raises(ValueError):
+            torchutils.BlockSampler(n, **bad)
+
+    # The block grid's phase (the random offset) changes between epochs.
+    s = torchutils.BlockSampler(1024, b)
+    phases = set()
+    for epoch in range(8):
+        s.set_epoch(epoch)
+        phases.add(next(iter(s)) % b)
+    assert len(phases) > 1
 
 
 def test_get_number_of_model_parameters():

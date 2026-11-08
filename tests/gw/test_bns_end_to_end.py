@@ -208,6 +208,7 @@ def test_trained_model_records_bns_settings(trained_bns_model):
         filename=model_path, device="cpu", load_training_info=False
     )
     data_settings = model.metadata["train_settings"]["data"]
+    assert data_settings["block_size"] == 1  # recorded by the training pipeline
     assert data_settings["context_parameters"] == ["ra", "dec", "chirp_mass_proxy"]
     assert (
         data_settings["chirp_prior_conditioning"]["kernel"]

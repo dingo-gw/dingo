@@ -86,7 +86,7 @@ Dingo interprets `batch_size` as the **total effective batch size across all GPU
 per-GPU batch size = batch_size / num_gpus
 ```
 
-Pytorch's `DistributedSampler` also splits the waveform dataset equally, so each GPU sees `1/N` of
+The sampler (`BlockSampler`) also splits the waveform dataset equally, so each GPU sees `1/N` of
 the data per epoch. Putting both together, the number of optimizer steps per epoch is:
 ```
 steps / epoch  =  dataset_size × train_fraction / batch_size
