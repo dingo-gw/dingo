@@ -20,6 +20,7 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import TensorDataset
 
 from dingo.core.utils.torchutils import (
+    BlockSampler,
     build_train_and_test_loaders,
     get_cuda_info,
     set_float32_matmul_precision,
@@ -211,67 +212,81 @@ class TestDDPStateDictStripping:
 class TestBuildTrainAndTestLoaders:
     def test_drop_last_default_keeps_partial_batch(self):
         dataset = TensorDataset(torch.randn(100, 4))
-        train_loader, test_loader, _ = build_train_and_test_loaders(
-            dataset=dataset, train_fraction=0.8, batch_size=30, num_workers=0
+        train_loader, test_loader = build_train_and_test_loaders(
+            dataset=dataset,
+            train_fraction=0.8,
+            batch_size=30,
+            num_workers=0,
+            block_size=1,
         )
         assert [len(b[0]) for b in train_loader] == [30, 30, 20]
         assert not train_loader.drop_last and not test_loader.drop_last
 
     def test_drop_last_drops_partial_batch(self):
         dataset = TensorDataset(torch.randn(100, 4))
-        train_loader, test_loader, _ = build_train_and_test_loaders(
+        train_loader, test_loader = build_train_and_test_loaders(
             dataset=dataset,
             train_fraction=0.8,
             batch_size=30,
             num_workers=0,
             drop_last=True,
+            block_size=1,
         )
         assert [len(b[0]) for b in train_loader] == [30, 30]
         assert train_loader.drop_last
         assert not test_loader.drop_last  # eager test epoch; never empty a small split
 
-    def test_single_gpu_returns_none_sampler(self):
+    def test_single_gpu_uses_block_sampler(self):
         dataset = TensorDataset(torch.randn(100, 4))
-        train_loader, test_loader, sampler = build_train_and_test_loaders(
+        train_loader, test_loader = build_train_and_test_loaders(
             dataset=dataset,
             train_fraction=0.8,
             batch_size=10,
             num_workers=0,
+            block_size=4,
         )
-        assert sampler is None
+        assert isinstance(train_loader.sampler, BlockSampler)
+        assert train_loader.sampler.block_size == 4 and len(train_loader.sampler) == 80
         assert len(train_loader.dataset) == 80
         assert len(test_loader.dataset) == 20
 
-    def test_ddp_returns_distributed_sampler(self):
-        from torch.utils.data import DistributedSampler
-
+    def test_ddp_block_sampler_shard(self):
         dataset = TensorDataset(torch.randn(100, 4))
-        train_loader, test_loader, sampler = build_train_and_test_loaders(
+        train_loader, test_loader = build_train_and_test_loaders(
             dataset=dataset,
-            train_fraction=0.8,
+            train_fraction=0.81,
             batch_size=5,
             num_workers=0,
             world_size=2,
             rank=0,
+            block_size=1,
         )
-        assert isinstance(sampler, DistributedSampler)
-        # Each rank sees ceil(80/2) = 40 samples.
-        assert len(train_loader.dataset) == 80
+        assert isinstance(train_loader.sampler, BlockSampler)
+        # Each rank sees 81 // 2 = 40 samples (truncated, not padded to 41).
+        assert len(train_loader.sampler) == 40
+        assert len(train_loader.dataset) == 81
 
     def test_ddp_splits_data_across_ranks(self):
-        from torch.utils.data import DistributedSampler
-
         dataset = TensorDataset(torch.arange(100).float().unsqueeze(1))
-        _, _, sampler0 = build_train_and_test_loaders(
-            dataset, 1.0, 5, 0, world_size=2, rank=0
-        )
-        _, _, sampler1 = build_train_and_test_loaders(
-            dataset, 1.0, 5, 0, world_size=2, rank=1
-        )
-        # The two samplers should produce disjoint index sets.
-        indices0 = set(sampler0)
-        indices1 = set(sampler1)
-        assert len(indices0 & indices1) == 0, "DDP samplers should partition the data."
+        loaders = [
+            build_train_and_test_loaders(
+                dataset, 0.8, 5, 0, world_size=2, rank=r, block_size=1
+            )
+            for r in (0, 1)
+        ]
+        # The two ranks' training and test samplers partition their splits.
+        for k in (0, 1):
+            indices0, indices1 = (set(loaders[r][k].sampler) for r in (0, 1))
+            assert (
+                len(indices0 & indices1) == 0
+            ), "DDP samplers should partition the data."
+
+    def test_ddp_test_split_smaller_than_world_size_raises(self):
+        dataset = TensorDataset(torch.arange(10).float().unsqueeze(1))
+        with pytest.raises(ValueError):
+            build_train_and_test_loaders(
+                dataset, 0.9, 5, 0, world_size=2, rank=0, block_size=1
+            )
 
 
 class TestLossInfoSingleGPU:

@@ -7,6 +7,7 @@ from dingo.core.density.unconditional_density_estimation import (
 )
 from dingo.core.posterior_models.normalizing_flow import NormalizingFlowPosteriorModel
 from dingo.core.result import Result
+from dingo.core.utils.torchutils import BlockSampler
 
 
 PARAMETERS = ["x", "y"]
@@ -111,3 +112,17 @@ def test_train_unconditional_flow_rejects_too_many_outliers(result):
     # guard raises before any training happens (no train_dir needed).
     with pytest.raises(ValueError, match="Too many proxy samples"):
         result.train_unconditional_flow(PARAMETERS, _nde_settings(), threshold_std=1.0)
+
+
+def test_training_loop_sets_the_sampler_epoch(result, tmp_path, monkeypatch):
+    """Every epoch gets a new order: the training loop calls set_epoch on its loader's
+    sampler (density recovery passes no sampler of its own)."""
+    epochs = []
+    monkeypatch.setattr(
+        BlockSampler, "set_epoch", lambda self, epoch: epochs.append(epoch)
+    )
+    settings = _nde_settings()
+    settings["data"]["parameters"] = PARAMETERS
+    settings["training"]["epochs"] = 2
+    train_unconditional_density_estimator(result, settings, str(tmp_path))
+    assert epochs == [1, 2]

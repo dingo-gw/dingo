@@ -404,7 +404,6 @@ class BasePosteriorModel(ABC):
         train_loader: torch.utils.data.DataLoader,
         test_loader: torch.utils.data.DataLoader,
         train_dir: str,
-        train_sampler: Optional[torch.utils.data.DistributedSampler] = None,
         runtime_limits: Optional[RuntimeLimits] = None,
         checkpoint_epochs: Optional[int] = None,
         use_wandb: bool = False,
@@ -423,8 +422,6 @@ class BasePosteriorModel(ABC):
         test_loader : DataLoader
         train_dir : str
             Directory for saving models and history.
-        train_sampler : DistributedSampler, optional
-            Required for DDP training to re-shuffle data each epoch.
         runtime_limits : RuntimeLimits, optional
         checkpoint_epochs : int, optional
             Save a named checkpoint every this many epochs.
@@ -463,9 +460,9 @@ class BasePosteriorModel(ABC):
 
             lr = utils.get_lr(self.optimizer)
             with threadpool_limits(limits=1, user_api="blas"):
-                if train_sampler is not None:
-                    # Ensure each epoch sees a different random shuffle.
-                    train_sampler.set_epoch(self.epoch)
+                if hasattr(train_loader.sampler, "set_epoch"):
+                    # A new order each epoch (BlockSampler, DistributedSampler).
+                    train_loader.sampler.set_epoch(self.epoch)
 
                 if is_primary:
                     print(f"\nStart training epoch {self.epoch} with lr {lr}")

@@ -14,7 +14,7 @@ import torch.multiprocessing as mp
 import yaml
 from threadpoolctl import threadpool_limits
 from torch.nn.parallel import DistributedDataParallel as DDP
-from torch.utils.data import DataLoader, DistributedSampler
+from torch.utils.data import DataLoader
 
 from dingo.core.nn.compile_utils import (
     compile_network,
@@ -220,11 +220,12 @@ def initialize_stage(
     rank: Optional[int] = None,
     resume: bool = False,
     drop_last: bool = False,
-) -> Tuple[DataLoader, DataLoader, Optional[DistributedSampler]]:
+) -> Tuple[DataLoader, DataLoader]:
     """
     Initializes training based on PosteriorModel metadata and current stage:
         * Builds transforms (based on noise settings for current stage);
-        * Builds DataLoaders (with DistributedSampler for DDP);
+        * Builds DataLoaders (BlockSampler, in blocks of data.block_size rows; one
+        share per GPU under DDP);
         * At the beginning of a stage (i.e., if not resuming mid-stage), initializes
         a new optimizer and scheduler;
         * Freezes / unfreezes SVD layer of embedding network
@@ -247,8 +248,7 @@ def initialize_stage(
 
     Returns
     -------
-    (train_loader, test_loader, train_sampler)
-        *train_sampler* is ``None`` in single-GPU mode.
+    (train_loader, test_loader)
     """
 
     train_settings = pm.metadata["train_settings"]
@@ -278,7 +278,7 @@ def initialize_stage(
         batch_size_per_gpu = stage["batch_size"]
         num_workers_per_gpu = num_workers
 
-    train_loader, test_loader, train_sampler = build_train_and_test_loaders(
+    train_loader, test_loader = build_train_and_test_loaders(
         dataset=wfd,
         train_fraction=train_settings["data"]["train_fraction"],
         batch_size=batch_size_per_gpu,
@@ -286,6 +286,7 @@ def initialize_stage(
         world_size=world_size,
         rank=rank,
         drop_last=drop_last,
+        block_size=train_settings["data"].setdefault("block_size", 1),
     )
 
     if not resume:
@@ -325,7 +326,7 @@ def initialize_stage(
     if print_output:
         print_number_of_model_parameters(pm.network)
 
-    return train_loader, test_loader, train_sampler
+    return train_loader, test_loader
 
 
 def train_stages(
@@ -385,7 +386,7 @@ def train_stages(
             if print_primary:
                 print(f"\nBeginning training stage {n}. Settings:")
                 print(yaml.dump(stage, default_flow_style=False, sort_keys=False))
-            train_loader, test_loader, train_sampler = initialize_stage(
+            train_loader, test_loader = initialize_stage(
                 pm,
                 wfd,
                 stage,
@@ -399,7 +400,7 @@ def train_stages(
             if print_primary:
                 print(f"\nResuming training in stage {n}. Settings:")
                 print(yaml.dump(stage, default_flow_style=False, sort_keys=False))
-            train_loader, test_loader, train_sampler = initialize_stage(
+            train_loader, test_loader = initialize_stage(
                 pm,
                 wfd,
                 stage,
@@ -425,7 +426,6 @@ def train_stages(
             train_loader=train_loader,
             test_loader=test_loader,
             train_dir=train_dir,
-            train_sampler=train_sampler,
             runtime_limits=runtime_limits,
             checkpoint_epochs=local_settings["checkpoint_epochs"],
             use_wandb=local_settings.get("wandb", False),
