@@ -10,12 +10,11 @@ in dingo.ini by explicitly adding them to the EXCLUDED_FROM_INI set if needed.
 """
 
 import re
+from importlib.resources import files
 
 import pytest
 
-from importlib.resources import files
 from dingo.pipe.parser import create_parser
-
 
 # Arguments that do NOT need to be in dingo.ini template.
 # When adding a new parser argument that shouldn't be in dingo.ini, add it here.
@@ -33,7 +32,6 @@ EXCLUDED_FROM_INI = {
     "data_format",
     "default_prior",
     "deltaT",
-    "density_recovery_settings",
     "dingo_injection",
     "disable_hdf5_locking",
     "duration",
@@ -45,9 +43,7 @@ EXCLUDED_FROM_INI = {
     "final_result",
     "final_result_nsamples",
     "fixed_context_parameters",
-    "gaussian_noise",
     "generation_desired_sites",
-    "generation_seed",
     "getenv",
     "gps_file",
     "gps_tuple",
@@ -70,7 +66,6 @@ EXCLUDED_FROM_INI = {
     "local_plot",
     "log_directory",
     "model_reference_time",
-    "n_simulation",
     "notification",
     "numerical_relativity_file",
     "overwrite_outdir",
@@ -90,7 +85,6 @@ EXCLUDED_FROM_INI = {
     "reference_frequency",
     "resampling_method",
     "result_format",
-    "sampling_seed",
     "save_bilby_data_dump",
     "scheduler",
     "scheduler_analysis_time",
