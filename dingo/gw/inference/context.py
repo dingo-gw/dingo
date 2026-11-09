@@ -11,6 +11,7 @@ import warnings
 import numpy as np
 import torch
 from bilby.core.prior import PriorDict, Uniform
+from bilby.core.utils import logger
 from bilby.gw.detector import InterferometerList
 from torchvision.transforms import Compose
 from dingo.core.inference.steps import _n_rows
@@ -693,11 +694,19 @@ class GWSamplerContext:
             maximum_frequency={d: f_max for d, (_, f_max) in bounds.items()},
         )
 
+        wfg_kwargs = {
+            **dataset_settings["waveform_generator"],
+            **(wfg_updates or {}),
+        }
+        # Log once, before the first likelihood (and any worker pools) is built.
+        # GWSignal forwards these arguments unchanged to the waveform generator.
+        if self._likelihood is None:
+            logger.info(
+                "Waveform generator arguments: %s",
+                {"domain": wfg_domain.domain_dict, **wfg_kwargs},
+            )
         likelihood = StationaryGaussianGWLikelihood(
-            wfg_kwargs={
-                **dataset_settings["waveform_generator"],
-                **(wfg_updates or {}),
-            },
+            wfg_kwargs=wfg_kwargs,
             wfg_domain=wfg_domain,
             data_domain=data_domain,
             event_data=event_data,
