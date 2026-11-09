@@ -1,0 +1,64 @@
+# Metadata-only fixtures. No network architecture, weights, or training recipe.
+dataset_settings:
+  domain:
+    type: MultibandedFrequencyDomain
+    # 176 bins at 0.25 Hz, then 128 bins at 0.5 Hz. Both bands align
+    # with the transformer's 16-bin tokens.
+    nodes: [20.0, 64.0, 128.0]
+    delta_f_initial: 0.25
+    base_domain:
+      type: UniformFrequencyDomain
+      f_min: 20.0
+      f_max: 128.0
+      delta_f: 0.25
+  waveform_generator:
+    approximant: IMRPhenomD
+    f_ref: 20.0
+    spin_conversion_phase: null
+  intrinsic_prior:
+    mass_1: bilby.core.prior.Constraint(minimum=5.0, maximum=100.0)
+    mass_2: bilby.core.prior.Constraint(minimum=5.0, maximum=100.0)
+    chirp_mass: bilby.core.prior.Uniform(minimum=28.0, maximum=32.0)
+    mass_ratio: bilby.core.prior.Uniform(minimum=0.7, maximum=0.9)
+    a_1: 0.0
+    a_2: 0.0
+    tilt_1: 0.0
+    tilt_2: 0.0
+    phi_12: 0.0
+    phi_jl: 0.0
+    theta_jn: 0.0
+    phase: default
+    luminosity_distance: 100.0
+    geocent_time: 0.0
+
+train_settings:
+  data:
+    extrinsic_prior:
+      dec: default
+      ra: default
+      geocent_time: bilby.core.prior.Uniform(minimum=-0.1, maximum=0.1)
+      psi: default
+      luminosity_distance: bilby.core.prior.Uniform(minimum=2000.0, maximum=4000.0)
+    inference_parameters: [chirp_mass, mass_ratio, phase, luminosity_distance, geocent_time, ra, dec, psi]
+    # Scales for deterministic synthetic samples, without a network.
+    standardization:
+      mean:
+        chirp_mass: 30.0
+        mass_ratio: 0.8
+        phase: 3.14
+        luminosity_distance: 3000.0
+        geocent_time: 0.0
+        ra: 3.14
+        dec: 0.0
+        psi: 1.57
+      std:
+        chirp_mass: 0.3
+        mass_ratio: 0.02
+        phase: 0.3
+        luminosity_distance: 100.0
+        geocent_time: 0.01
+        ra: 0.3
+        dec: 0.2
+        psi: 0.2
+  model:
+    posterior_model_type: normalizing_flow
