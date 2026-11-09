@@ -32,6 +32,7 @@ EXCLUDED_FROM_INI = {
     "data_format",
     "default_prior",
     "deltaT",
+    "density_recovery_settings",
     "dingo_injection",
     "disable_hdf5_locking",
     "duration",

@@ -19,6 +19,15 @@ def create_model_checkpoints(
         path = str(directory / f"{name}.pt")
         torch.save({"metadata": metadata}, path)
         checkpoints[name] = path
+        if name != "init":
+            # The requested detector bands require cropping or token masking.
+            incompatible = copy.deepcopy(metadata)
+            data = incompatible["train_settings"]["data"]
+            data.pop("random_strain_cropping", None)
+            data.pop("tokenization", None)
+            path = str(directory / f"{name}-incompatible.pt")
+            torch.save({"metadata": incompatible}, path)
+            checkpoints[f"{name}-incompatible"] = path
     return checkpoints
 
 

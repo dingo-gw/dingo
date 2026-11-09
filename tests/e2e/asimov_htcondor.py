@@ -40,8 +40,8 @@ def assert_jobs_succeeded(log_path: Path, expected_jobs: int) -> None:
     assert all(job.get("ExitCode") == 0 for job in jobs), (log_path, jobs)
 
 
-def assert_outputs(event_name: str) -> None:
-    """Check finished productions, frequency propagation, and summary pages."""
+def assert_outputs(event_name: str, checkpoints: dict[str, str]) -> None:
+    """Check network selection, finished productions, frequencies, and summaries."""
     # Import after the final monitor call to read the finished project's ledger.
     from asimov import current_ledger
 
@@ -52,6 +52,10 @@ def assert_outputs(event_name: str) -> None:
     for name in ANALYSES:
         production = productions[name]
         assert production.status == "finished", name
+        networks = production.meta["networks"]
+        assert networks["model"] == checkpoints[name], name
+        expected_init = checkpoints["init"] if name == "gnpe" else None
+        assert networks["model init"] == expected_init, name
         run_directory = Path(production.rundir)
         result_path = find_single_file(
             run_directory, "result/*_importance_sampling.hdf5"
@@ -118,7 +122,7 @@ def initialize_project(directory: Path) -> None:
     )
     os.environ["GIT_CONFIG_GLOBAL"] = str(git_config)
     environment = install_mock_executables(directory / "environment")
-    run_command("asimov", "init", "Dingo end-to-end test")
+    run_command("asimov", "init", "Dingo integration smoke test")
     for key, value in (
         ("condor/user", getpass.getuser()),
         ("condor/cache_time", "0"),
@@ -206,12 +210,14 @@ def apply_analyses(event_name: str, checkpoints: dict[str, str]) -> None:
     for name in ANALYSES:
         analysis = load_yaml(EXAMPLES / "analysis_dingo.yaml")
         analysis["name"] = name
-        analysis["networks"].update(
-            {
-                "model": checkpoints[name],
-                "model init": checkpoints["init"] if name == "gnpe" else None,
-            }
-        )
+        # Exercise Asimov's selection hook instead of overriding its result.
+        # The first candidate cannot support the requested frequency bands.
+        # Transformer selection must also clear the supplied GNPE initializer.
+        analysis.pop("networks")
+        analysis["available networks"] = [
+            {"model": checkpoints[candidate], "model init": checkpoints["init"]}
+            for candidate in (f"{name}-incompatible", name)
+        ]
         # Analysis upper bounds complement the event's lower bounds.
         analysis["likelihood"] = {"maximum frequency": MAXIMUM_FREQUENCY}
         apply_blueprint(name, analysis, event_name)
@@ -257,8 +263,8 @@ def main() -> None:
     )
     run_command("asimov", "monitor")
 
-    assert_outputs(event["name"])
-    print("Passed: transformer, GNPE, frequency bounds, and PESummary.", flush=True)
+    assert_outputs(event["name"], checkpoints)
+    print("Passed: network selection, job orchestration, and PESummary.", flush=True)
 
 
 if __name__ == "__main__":
