@@ -40,6 +40,7 @@ class ImportanceSamplingInput(Input):
         self.scheduler = args.scheduler
         # self.periodic_restart_time = args.periodic_restart_time
         self.request_cpus = args.request_cpus_importance_sampling
+        self.max_n_likelihoods = args.max_n_likelihoods
 
         # Naming arguments
         self.outdir = args.outdir
@@ -99,6 +100,7 @@ class ImportanceSamplingInput(Input):
         self.spline_calibration_nodes = args.spline_calibration_nodes
         self.spline_calibration_envelope_dict = args.spline_calibration_envelope_dict
         self.spline_calibration_curves = args.spline_calibration_curves
+        self.spline_calibration_batch_size = args.spline_calibration_batch_size
         self.calibration_correction_type = args.calibration_correction_type
 
         # # Marginalization
@@ -159,6 +161,7 @@ class ImportanceSamplingInput(Input):
                 },
                 "num_calibration_nodes": self.spline_calibration_nodes,
                 "num_calibration_curves": self.spline_calibration_curves,
+                "batch_size": self.spline_calibration_batch_size,
                 "correction_type": self.calibration_correction_type,
             }
         elif self.calibration_model is None or self.calibration_mode in [
@@ -273,10 +276,12 @@ class ImportanceSamplingInput(Input):
             self.result.sample_proposal_extensions(
                 calibration_sampling_kwargs=calibration_sampling_kwargs,
                 synthetic_parameters_kwargs=synthetic_parameters_kwargs,
+                max_n_likelihoods=self.max_n_likelihoods,
             )
 
         self.result.importance_sample(
             num_processes=self.request_cpus,
+            max_n_likelihoods=self.max_n_likelihoods,
             time_marginalization_kwargs=self.importance_sampling_settings.get(
                 "time_marginalization"
             ),

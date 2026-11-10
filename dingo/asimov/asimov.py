@@ -2,6 +2,7 @@
 import configparser
 import glob
 import importlib.resources
+import json
 import os
 import re
 import subprocess
@@ -141,10 +142,8 @@ class DingoPipeline(Pipeline):
 
     def samples(self, absolute=False):
         """
-        Collect the combined samples files for PESummary.
+        Collect available combined samples files for PESummary.
         """
-        from dingo.gw.result import Result
-
         if absolute:
             rundir = os.path.abspath(self.production.rundir)
         else:
@@ -154,9 +153,10 @@ class DingoPipeline(Pipeline):
             os.path.join(rundir, "result", f"*importance_sampling.hdf5")
         )
         if len(result_files) == 0:
-            raise ValueError("Importance sampling result file not found")
-        elif len(result_files) > 1:
-            raise ValueError("Multiple importance sampling result files found")
+            # Asimov also probes assets before a dependency has run.
+            return []
+
+        from dingo.gw.result import Result
 
         # pesummary can't presently read a result file containing MultibandedFrequencyDomain
         # This is a hotfix to create a copy of the result file with UniformFrequencyDomain
@@ -169,6 +169,11 @@ class DingoPipeline(Pipeline):
                 "f_min": settings["base_domain"]["f_min"],
                 "f_max": settings["base_domain"]["f_max"],
             }
+
+            # PESummary cannot write lists of dictionaries such as sampler.chain to HDF5
+            if isinstance(result.settings.get("sampler"), dict):
+                result.settings["sampler"] = json.dumps(result.settings["sampler"])
+
             filename, ext = os.path.splitext(result_files[0])
             result_files[0] = f"{filename}_pesummary{ext}"
             result.to_file(result_files[0])
@@ -214,14 +219,14 @@ class DingoPipeline(Pipeline):
                 )
         return messages
 
-    def _fmin_max_are_compatible(self, prod_meta, net_meta):
+    def _fmin_max_are_compatible(self, prod_meta, net_meta, reasons):
         """
         Check if the network min/max frequencies are compatible with the data.
 
         Take possible domain updates and random frequency masking into account.
         """
-        f_min = prod_meta["quality"]["minimum frequency"].values()
-        f_max = prod_meta["quality"]["maximum frequency"].values()
+        f_min = prod_meta["likelihood"]["minimum frequency"].values()
+        f_max = prod_meta["likelihood"]["maximum frequency"].values()
 
         # Get network values
         domain = net_meta["dataset_settings"]["domain"]["base_domain"]
@@ -259,34 +264,85 @@ class DingoPipeline(Pipeline):
         else:
             f_max_match = (min(f_max) >= net_f_max_lower) and (max(f_max) <= net_f_max)
 
+        if not f_min_match:
+            upper = net_f_min if net_f_min_upper is None else net_f_min_upper
+            reasons.append(
+                f"minimum frequencies {prod_meta['likelihood']['minimum frequency']} "
+                f"outside allowed range [{net_f_min}, {upper}] Hz"
+            )
+        if not f_max_match:
+            lower = net_f_max if net_f_max_lower is None else net_f_max_lower
+            reasons.append(
+                f"maximum frequencies {prod_meta['likelihood']['maximum frequency']} "
+                f"outside allowed range [{lower}, {net_f_max}] Hz"
+            )
         return f_min_match and f_max_match
+
+    @staticmethod
+    def _is_transformer(metadata):
+        model = metadata["train_settings"].get("model", {})
+        return (model.get("embedding_type") or "").lower() == "transformer"
 
     @staticmethod
     def _net_max_luminosity_distance(metadata):
         prior = metadata["train_settings"]["data"]["extrinsic_prior"][
             "luminosity_distance"
         ]
-        match = re.findall(r"maximum=[\d]+", prior)
-        assert match
-        return int(match[0].split("=")[-1])
+        match = re.search(r"\bmaximum\s*=\s*([^,)]+)", prior)
+        if match is None:
+            raise ValueError(f"Missing luminosity-distance prior maximum: {prior!r}")
+        return float(match.group(1))
 
-    def network_is_compatible(self, prod_meta, net_meta):
-        """Check if a network's metadata is compatible with the production in prod_meta."""
+    def network_is_compatible(self, prod_meta, net_meta, reasons=None):
+        """Check compatibility, optionally appending rejection reasons to a list."""
+        reasons = [] if reasons is None else reasons
         duration = prod_meta["data"]["segment length"]
         ifos = prod_meta["interferometers"]
+
+        if self._is_transformer(net_meta):
+            from copy import deepcopy
+
+            from dingo.core.utils.backward_compatibility import update_data_config
+            from dingo.gw.domains import build_domain_from_model_metadata
+            from dingo.gw.frequency_updates import (
+                check_detector_update,
+                check_frequency_updates,
+            )
+
+            net_meta = deepcopy(net_meta)
+            update_data_config(net_meta)
+            domain = build_domain_from_model_metadata(net_meta, base=True)
+            if round(domain.duration) != duration:
+                reasons.append(
+                    f"duration {domain.duration} s does not match requested {duration} s"
+                )
+
+            bounds = []
+            for key in ("minimum frequency", "maximum frequency"):
+                bound = prod_meta.get("likelihood", {}).get(key)
+                if isinstance(bound, dict):
+                    bound = {ifo: bound[ifo] for ifo in ifos if ifo in bound}
+                bounds.append(bound)
+            try:
+                check_detector_update(net_meta, ifos)
+                check_frequency_updates(net_meta, *bounds, detectors=ifos)
+            except ValueError as err:
+                reasons.append(str(err))
+            return not reasons
 
         net_duration = round(
             1 / net_meta["dataset_settings"]["domain"]["base_domain"]["delta_f"]
         )
         net_ifos = net_meta["train_settings"]["data"]["detectors"]
 
-        if (
-            net_duration == duration
-            and sorted(net_ifos) == sorted(ifos)
-            and self._fmin_max_are_compatible(prod_meta, net_meta)
-        ):
-            return True
-        return False
+        if net_duration != duration:
+            reasons.append(
+                f"duration {net_duration} s does not match requested {duration} s"
+            )
+        if sorted(net_ifos) != sorted(ifos):
+            reasons.append(f"detectors {net_ifos} do not match requested {ifos}")
+        self._fmin_max_are_compatible(prod_meta, net_meta, reasons)
+        return not reasons
 
     def _filter_compatible_networks(self, prod_meta):
         """Load available networks and return those compatible with the production.
@@ -296,6 +352,7 @@ class DingoPipeline(Pipeline):
         import torch
 
         compatible_networks = []
+        rejections = []
         for networks in prod_meta["available networks"]:
             try:
                 f = torch.load(
@@ -309,12 +366,20 @@ class DingoPipeline(Pipeline):
                 msg = "Could not load metadata from network: '{networks['model']}'.."
                 raise PipelineException(msg, production=self.production.name) from err
 
-            if self.network_is_compatible(prod_meta, net_meta):
+            reasons = []
+            if self.network_is_compatible(prod_meta, net_meta, reasons):
+                if self._is_transformer(net_meta):
+                    networks = {**networks, "model init": None}
                 compatible_networks.append((networks, net_meta))
+            else:
+                rejection = f"  {networks['model']}: " + "; ".join(reasons)
+                rejections.append(rejection)
+                self.logger.info(rejection)
 
         if not compatible_networks:
             raise PipelineException(
-                "No compatible DINGO network found for this production..",
+                "No compatible DINGO network found for this production.\n"
+                + "\n".join(rejections),
                 production=self.production.name,
             )
 
@@ -328,6 +393,13 @@ class DingoPipeline(Pipeline):
 
         Returns the selected network config.
         """
+        if len({self._is_transformer(meta) for _, meta in compatible_networks}) > 1:
+            raise PipelineException(
+                "Both transformer and GNPE/legacy networks match this production. "
+                "Set 'networks' explicitly or restrict 'available networks' "
+                "to one architecture.",
+                production=self.production.name,
+            )
         if len(compatible_networks) == 1:
             return compatible_networks[0][0]
 
@@ -354,6 +426,7 @@ class DingoPipeline(Pipeline):
 
     def before_config(self, dryrun=False):
         """Parse available networks before building the ini."""
+        super().before_config(dryrun=dryrun)
         meta = self.production.meta
         if "networks" in meta:  # Set networks as override
             return
@@ -363,15 +436,19 @@ class DingoPipeline(Pipeline):
                 "metadata. Set one of these in the analysis or configuration blueprint."
             )
 
-        # Placeholder in case of error
-        meta["networks"] = {"model": "", "model init": ""}
-
         compatible_networks = self._filter_compatible_networks(meta)
-        meta["networks"] = self._select_preferred_network(meta, compatible_networks)
+        meta["networks"] = self._select_preferred_network(
+            meta, compatible_networks
+        ).copy()
 
         # Update the ledger
         if not dryrun:
             self.production.meta.update(meta)
+
+    @property
+    def dag_file(self):
+        job_label = self.production.meta.get("job label", self.production.name)
+        return os.path.join(self.production.rundir, "submit", f"dag_{job_label}.submit")
 
     def submit_dag(self, dryrun=False):
         """
@@ -402,16 +479,11 @@ class DingoPipeline(Pipeline):
         self.before_submit()
 
         try:
-            if "job label" in self.production.meta:
-                job_label = self.production.meta["job label"]
-            else:
-                job_label = self.production.name
-            dag_filename = f"dag_{job_label}.submit"
             command = [
                 "condor_submit_dag",
                 "-batch-name",
                 f"dingo/{self.production.event.name}/{self.production.name}",
-                os.path.join(self.production.rundir, "submit", dag_filename),
+                self.dag_file,
             ]
 
             if dryrun:
@@ -425,7 +497,7 @@ class DingoPipeline(Pipeline):
 
                 stdout, stderr = dagman.communicate()
 
-                if "submitted to cluster" in str(stdout):
+                if dagman.returncode == 0 and "submitted to cluster" in str(stdout):
                     cluster = re.search(
                         r"submitted to cluster ([\d]+)", str(stdout)
                     ).groups()[0]
@@ -452,6 +524,8 @@ class DingoPipeline(Pipeline):
             ) from error
 
     def after_completion(self):
+        super().after_completion()
+
         # Only run PESummary if it was requested
         if not "pesummary" in self.production.meta.get("postprocessing", {}):
             self.logger.info("No pesummary requested, skipping..")
@@ -464,22 +538,29 @@ class DingoPipeline(Pipeline):
                 "asimov-pesummary not available, skipping post-processing"
             )
             return
-        super().after_completion()
 
     def resurrect(self):
-        """
-        Attempt to ressurrect a failed job.
-        """
+        """Resubmit a rescue DAG, or let Asimov mark the production stuck."""
+        count = self.production.meta.get("resurrections", 0)
         try:
-            count = self.production.meta["resurrections"]
-        except:
-            count = 0
-        if (count < 5) and (
-            len(glob.glob(os.path.join(self.production.rundir, "submit", "*.rescue*")))
-            > 0
-        ):
-            count += 1
+            if count >= 5:
+                raise PipelineException("The five automatic rescue attempts are exhausted.")
+            # A child sub-DAG's rescue file alone cannot rescue the top-level DAG.
+            if not glob.glob(glob.escape(self.dag_file) + ".rescue[0-9][0-9][0-9]"):
+                raise PipelineException(f"No rescue file found for {self.dag_file}.")
+
+            self.production.meta["resurrections"] = count + 1
+            self.production.event.update_data()
+            self.logger.info(f"Attempting automatic rescue {count + 1}/5 for {self.production.name}.")
             self.submit_dag()
+        except Exception as error:
+            message = f"Cannot rescue {self.production.name}: {error}"
+            self.logger.error(message)
+            # The monitor catches this, sets 'stuck', and persists the ledger.
+            raise PipelineException(message, production=self.production.name) from error
+
+        # The monitor does not persist metadata on its successful rescue branch.
+        self.production.event.update_data()
 
     @classmethod
     def read_ini(cls, filepath):

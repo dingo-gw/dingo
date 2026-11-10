@@ -145,6 +145,12 @@ def create_parser(top_level=True, usage=None):
             "uncertainty. Only used when calibration-mode='marginalize'."
         ),
     )
+    calibration_parser.add(
+        "--spline-calibration-batch-size",
+        type=noneint,
+        default=None,
+        help="If given, maximum calibration curves evaluated at once per likelihood worker."
+    )
     #
     # calibration_parser.add(
     #     "--spline-calibration-amplitude-uncertainty-dict",
@@ -621,6 +627,16 @@ def create_parser(top_level=True, usage=None):
             "A dictionary of arbitrary additional waveform-arguments to pass "
             "to the bilby waveform generator's waveform arguments for the "
             "injection only"
+        ),
+    )
+    injection_parser.add(
+        "--injection-waveform-generator",
+        default=None,
+        type=nonestr,
+        help=(
+            "Waveform generator class to use for injections. If None, use the "
+            "analysis waveform generator. Construction arguments can be passed "
+            "via --injection-waveform-generator-constructor-dict."
         ),
     )
     injection_parser.add(
@@ -1582,9 +1598,10 @@ def create_parser(top_level=True, usage=None):
     )
     sampler_parser.add(
         "--num-gnpe-iterations",
-        type=int,
+        type=noneint,
         default=30,
-        help="Number of GNPE iterations to perform when using a GNPE model. Default 30.",
+        help="Number of GNPE iterations to perform when using a GNPE model. Default 30. "
+        "May be None for non-GNPE models, which ignore this setting.",
     )
     sampler_parser.add(
         "--num-samples",
@@ -1622,6 +1639,12 @@ def create_parser(top_level=True, usage=None):
         action=StoreBoolean,
         default=True,
         help=("Whether to perform importance sampling on result. (Default: True)"),
+    )
+    sampler_parser.add(
+        "--max-n-likelihoods",
+        type=noneint,
+        default=None,
+        help="If given, maximum samples per batch in each importance-sampling job."
     )
     sampler_parser.add(
         "--importance-sampling-settings",

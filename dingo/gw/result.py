@@ -9,6 +9,7 @@ from bilby.gw.prior import CalibrationPriorDict
 from bilby_pipe.utils import CALIBRATION_CORRECTION_TYPE_LOOKUP
 
 from dingo.core.result import Result as CoreResult
+from dingo.core.result import _likelihood_batch_size
 from dingo.core.utils.backward_compatibility import (
     check_minimum_version,
     update_data_config,
@@ -407,6 +408,7 @@ class Result(CoreResult):
         self,
         calibration_sampling_kwargs: Optional[dict] = None,
         synthetic_parameters_kwargs: Optional[dict] = None,
+        max_n_likelihoods: Optional[int] = None,
     ):
         """
         Extend the proposal samples with calibration parameters and / or a synthetic
@@ -475,7 +477,10 @@ class Result(CoreResult):
                 Overrides the waveform generator setting of the same name for this
                 step only, selecting how the m-components are obtained (see
                 WaveformGenerator).
+        max_n_likelihoods : int or None
+            Maximum samples per batch. None uses one batch.
         """
+        batch_size = _likelihood_batch_size(max_n_likelihoods, len(self.samples))
         if calibration_sampling_kwargs is None and synthetic_parameters_kwargs is None:
             raise ValueError(
                 "Pass calibration_sampling_kwargs and / or synthetic_parameters_kwargs."
@@ -486,11 +491,10 @@ class Result(CoreResult):
             self.samples = self.samples.drop(columns="log_likelihood_cache")
 
         param_keys = [k for k, v in self.prior.items() if not isinstance(v, Constraint)]
-        theta = self.samples[param_keys]
         # Out-of-prior samples carry zero weight in importance sampling (which uses
         # the same _log_prior), and it may not even be possible to generate signals
         # for them (e.g., for BH spins > 1).
-        within_prior = np.isfinite(self._log_prior())
+        valid_indices = np.flatnonzero(np.isfinite(self._log_prior()))
 
         steps = []
         if calibration_sampling_kwargs is not None:
@@ -500,33 +504,37 @@ class Result(CoreResult):
                 self._synthetic_parameters_step(
                     synthetic_parameters_kwargs,
                     conditioning=param_keys + [p for s in steps for p in s.parameters],
-                    num_samples=np.sum(within_prior),
+                    num_samples=len(valid_indices),
                 )
             )
 
-        table = SampleTableFactor(
-            {k: theta[k].to_numpy()[within_prior] for k in param_keys},
-            log_prob=self.samples["log_prob"].to_numpy()[within_prior],
-        )
         print(
             f"Sampling {', '.join(type(s).__name__ for s in steps)} for "
-            f"{np.sum(within_prior)} samples."
+            f"{len(valid_indices)} samples."
         )
         t0 = time.time()
-        # One draw per proposal sample (the table root is emitted once).
-        out, log_prob = ChainComposer([table] + steps).sample_and_log_prob(
-            1, self.sampler_context
-        )
-
         # Out-of-prior samples get placeholder values 0 (finite, so that their prior
         # is -inf rather than nan), log_prob = nan and no cached log likelihood.
-        for k in [c for s in steps for c in s.produces]:
-            column = np.full(len(theta), np.nan if k == "log_likelihood_cache" else 0.0)
-            column[within_prior] = out[k].cpu().numpy()
+        columns = {
+            k: np.full(len(self.samples), np.nan if k == "log_likelihood_cache" else 0.0)
+            for s in steps
+            for k in s.produces
+        }
+        columns["log_prob"] = np.full(len(self.samples), np.nan)
+        for start in range(0, len(valid_indices), batch_size):
+            indices = valid_indices[start : start + batch_size]
+            batch = self.samples.iloc[indices]
+            table = SampleTableFactor(
+                {k: batch[k].to_numpy() for k in param_keys},
+                log_prob=batch["log_prob"].to_numpy(),
+            )
+            # One draw per proposal sample.
+            out = ChainComposer([table] + steps).sample(1, self.sampler_context)
+            for k, column in columns.items():
+                column[indices] = out[k].cpu().numpy()
+            del out
+        for k, column in columns.items():
             self.samples[k] = column
-        log_prob_array = np.full(len(theta), np.nan)
-        log_prob_array[within_prior] = log_prob.cpu().numpy()
-        self.samples["log_prob"] = log_prob_array
 
         # Record the settings and the calibration priors only now that the chain has
         # run, so that a failure leaves the result unchanged.

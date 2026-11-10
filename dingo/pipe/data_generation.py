@@ -124,9 +124,7 @@ class DataGenerationInput(BilbyDataGenerationInput):
         self.waveform_generator_class = (
             "bilby.gw.waveform_generator.LALCBCWaveformGenerator"
         )
-        # self.waveform_generator_class_ctor_args = (
-        #     args.waveform_generator_constructor_dict
-        # )
+        self.waveform_generator_class_ctor_args = None
         self.waveform_approximant = args.waveform_approximant
         self.catch_waveform_errors = args.catch_waveform_errors
         # TODO: These are set to parser defaults. Fix to set from model.
