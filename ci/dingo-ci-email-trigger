@@ -1,0 +1,143 @@
+#!/bin/bash
+set -euo pipefail
+
+# Email-triggered CI: check for trigger emails and run CI jobs.
+JOBS_PATH="/data/dingo"
+EMAIL_CONFIG="/data/dingo/mpi-email.json"
+DOCKER_IMAGE="dingo:toy_npe_model"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+LOG_FILE="${JOBS_PATH}/logs.txt"
+
+log() {
+    echo "$(date '+%Y-%m-%d %H:%M:%S') $1" >> "$LOG_FILE"
+}
+
+for cmd in docker python3 jq; do
+    command -v "$cmd" >/dev/null 2>&1 || { echo "Required command not found: $cmd" >&2; exit 1; }
+done
+
+run_ci_for() {
+    local ref="$1"
+    echo "Launching CI for ${ref}"
+    docker run --rm --shm-size=16g --runtime=nvidia --gpus all \
+        -v "${JOBS_PATH}:${JOBS_PATH}" \
+        "${DOCKER_IMAGE}" --base-dir "${JOBS_PATH}" --checkout "${ref}" --email "${EMAIL_CONFIG}"
+}
+
+# Delete existing job folder(s) for a given ref (prefix-match for short SHA).
+delete_job_folder() {
+    local ref="$1"
+    if [[ "$ref" =~ ^[0-9a-fA-F]{7,40}$ ]]; then
+        shopt -s nullglob
+        for d in "${JOBS_PATH}"/*/; do
+            d="${d%/}"
+            local name
+            name="$(basename "$d")"
+            if [[ "$name" == "${ref}"* ]]; then
+                echo "Deleting existing job folder: ${d}"
+                rm -rf "$d"
+            fi
+        done
+        shopt -u nullglob
+    else
+        if [ -d "${JOBS_PATH}/${ref}" ]; then
+            echo "Deleting existing job folder: ${JOBS_PATH}/${ref}"
+            rm -rf "${JOBS_PATH}/${ref}"
+        fi
+    fi
+}
+
+# Validate config
+if [ ! -f "${EMAIL_CONFIG}" ]; then
+    echo "Email config not found: ${EMAIL_CONFIG}" >&2
+    exit 1
+fi
+if ! jq -e '.imap' "${EMAIL_CONFIG}" >/dev/null 2>&1; then
+    echo "No IMAP config in email.json" >&2
+    exit 1
+fi
+
+# Fetch matching email -- failure exits non-zero (visible to systemd)
+# Verbose output goes to stderr, match result to stdout
+verbose_output=$(mktemp)
+result_output=$(mktemp)
+fetch_exit_code=0
+python3 "$SCRIPT_DIR/fetch_matching_email.py" "$EMAIL_CONFIG" >"$result_output" 2>"$verbose_output" || fetch_exit_code=$?
+
+# Log verbose output (info about all checked emails)
+if [ -s "$verbose_output" ]; then
+    while IFS= read -r line; do
+        log "$line"
+        echo "$line"
+    done < "$verbose_output"
+fi
+rm -f "$verbose_output"
+
+if [ "$fetch_exit_code" -ne 0 ]; then
+    log "ERROR: failed to fetch emails"
+    rm -f "$result_output"
+    exit 1
+fi
+
+result=$(cat "$result_output")
+rm -f "$result_output"
+
+if [ -z "$result" ]; then
+    echo "No matching email trigger found"
+    exit 0
+fi
+
+uid=$(echo "$result" | cut -d' ' -f1)
+commit_hash=$(echo "$result" | cut -d' ' -f2)
+debug_flag=$(echo "$result" | cut -d' ' -f3)
+debug_mode=0
+if [ "$debug_flag" = "--debug" ]; then
+    debug_mode=1
+fi
+
+echo "Email trigger found: commit ${commit_hash} (UID ${uid})${debug_mode:+ [DEBUG MODE]}"
+log "email received: commit ${commit_hash} (UID ${uid})$( (( debug_mode )) && echo ' [DEBUG MODE]' )"
+
+# Send ACK email (non-fatal)
+if ! python3 "$SCRIPT_DIR/send_ack_email.py" "$EMAIL_CONFIG" "$commit_hash"; then
+    log "ERROR: failed to send ACK email for commit ${commit_hash}"
+    echo "Warning: failed to send ACK email" >&2
+fi
+
+# Delete old job folder
+delete_job_folder "${commit_hash}"
+
+# Run CI job (or debug mode)
+if (( debug_mode )); then
+    log "debug mode: CI would have run for commit ${commit_hash}"
+
+    # Create the job folder for debug output
+    job_dir="${JOBS_PATH}/${commit_hash}"
+    mkdir -p "$job_dir"
+
+    docker_cmd="docker run --rm --shm-size=16g --runtime=nvidia --gpus all -v ${JOBS_PATH}:${JOBS_PATH} ${DOCKER_IMAGE} --base-dir ${JOBS_PATH} --checkout ${commit_hash} --email ${EMAIL_CONFIG}"
+
+    debug_msg="DEBUG MODE --- the CI would have run the command with these arguments:
+
+docker run --rm --shm-size=16g --runtime=nvidia --gpus all \\
+    -v ${JOBS_PATH}:${JOBS_PATH} \\
+    ${DOCKER_IMAGE} \\
+    --base-dir ${JOBS_PATH} \\
+    --checkout ${commit_hash} \\
+    --email ${EMAIL_CONFIG}"
+
+    echo "$debug_msg" > "${job_dir}/log.txt"
+    echo "$debug_msg" > "${job_dir}/error.txt"
+
+    # Copy email trigger logs as attachment (renamed to avoid clash)
+    if [ -f "$LOG_FILE" ]; then
+        cp "$LOG_FILE" "${job_dir}/email-trigger-logs.txt"
+    fi
+
+    echo "Debug mode: created ${job_dir} with debug info"
+else
+    log "job started: commit ${commit_hash}"
+    run_ci_for "${commit_hash}"
+fi
+
+exit 0
