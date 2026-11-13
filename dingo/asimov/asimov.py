@@ -219,14 +219,23 @@ class DingoPipeline(Pipeline):
                 )
         return messages
 
+    @staticmethod
+    def _frequency_settings(prod_meta):
+        """Read legacy frequency settings, preferring the newer likelihood keys."""
+        return {
+            **prod_meta.get("quality", {}),
+            **prod_meta.get("likelihood", {}),
+        }
+
     def _fmin_max_are_compatible(self, prod_meta, net_meta, reasons):
         """
         Check if the network min/max frequencies are compatible with the data.
 
         Take possible domain updates and random frequency masking into account.
         """
-        f_min = prod_meta["likelihood"]["minimum frequency"].values()
-        f_max = prod_meta["likelihood"]["maximum frequency"].values()
+        frequencies = self._frequency_settings(prod_meta)
+        f_min = frequencies["minimum frequency"].values()
+        f_max = frequencies["maximum frequency"].values()
 
         # Get network values
         domain = net_meta["dataset_settings"]["domain"]["base_domain"]
@@ -267,13 +276,13 @@ class DingoPipeline(Pipeline):
         if not f_min_match:
             upper = net_f_min if net_f_min_upper is None else net_f_min_upper
             reasons.append(
-                f"minimum frequencies {prod_meta['likelihood']['minimum frequency']} "
+                f"minimum frequencies {frequencies['minimum frequency']} "
                 f"outside allowed range [{net_f_min}, {upper}] Hz"
             )
         if not f_max_match:
             lower = net_f_max if net_f_max_lower is None else net_f_max_lower
             reasons.append(
-                f"maximum frequencies {prod_meta['likelihood']['maximum frequency']} "
+                f"maximum frequencies {frequencies['maximum frequency']} "
                 f"outside allowed range [{lower}, {net_f_max}] Hz"
             )
         return f_min_match and f_max_match
@@ -317,9 +326,10 @@ class DingoPipeline(Pipeline):
                     f"duration {domain.duration} s does not match requested {duration} s"
                 )
 
+            frequencies = self._frequency_settings(prod_meta)
             bounds = []
             for key in ("minimum frequency", "maximum frequency"):
-                bound = prod_meta.get("likelihood", {}).get(key)
+                bound = frequencies.get(key)
                 if isinstance(bound, dict):
                     bound = {ifo: bound[ifo] for ifo in ifos if ifo in bound}
                 bounds.append(bound)
@@ -591,6 +601,12 @@ class DingoLegacy(DingoPipeline):
         Legacy implementation using PESummaryPipeline for post-processing.
         """
         from asimov.pipeline import PESummaryPipeline
+
+        # Legacy PESummary still reads quality, even for newer blueprints.
+        meta = self.production.meta
+        for key in ("minimum frequency", "maximum frequency"):
+            if key in meta.get("likelihood", {}):
+                meta.setdefault("quality", {})[key] = meta["likelihood"][key]
 
         post_pipeline = PESummaryPipeline(production=self.production)
         self.logger.info("Job has completed. Running PE Summary.")
