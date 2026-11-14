@@ -358,3 +358,37 @@ def test_chirp_prior_conditioning_training_transforms(tmp_path):
     assert [V.shape for V in V_rb_list] == [
         (len(wfd.domain) - wfd.domain.min_idx, 2)
     ] * len(DETECTORS)
+
+
+def test_svd_for_embedding_network_gram_with_scoped_threads(tmp_path):
+    """method='gram' with num_threads gives the default method's basis (as a subspace),
+    and the process's BLAS thread limits are restored afterwards."""
+    from threadpoolctl import threadpool_info
+
+    from dingo.gw.training.train_builders import build_svd_for_embedding_network
+
+    data_settings = {k: v for k, v in DATA_SETTINGS.items() if k != "tokenization"}
+    asd_file = _toy_asd_file(tmp_path / "asds.hdf5")
+    blas_threads = lambda: [
+        i["num_threads"] for i in threadpool_info() if i["user_api"] == "blas"
+    ]
+    before = blas_threads()
+    V = {
+        method: build_svd_for_embedding_network(
+            _toy_waveform_dataset(),
+            copy.deepcopy(data_settings),
+            asd_file,
+            size=3,
+            num_training_samples=6,
+            num_validation_samples=2,
+            batch_size=4,
+            method=method,
+            num_threads=2,
+        )
+        for method in ("scipy", "gram")
+    }
+    assert blas_threads() == before
+    for V_scipy, V_gram in zip(V["scipy"], V["gram"]):
+        np.testing.assert_allclose(
+            V_scipy @ V_scipy.conj().T, V_gram @ V_gram.conj().T, atol=1e-6
+        )

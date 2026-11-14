@@ -277,6 +277,8 @@ def build_svd_for_embedding_network(
     num_workers: int = 0,
     batch_size: int = 1000,
     out_dir: Optional[str] = None,
+    method: str = "scipy",
+    num_threads: Optional[int] = None,
 ) -> List[np.ndarray]:
     """
     Construct SVD matrices V based on clean waveforms in each interferometer. These
@@ -300,6 +302,12 @@ def build_svd_for_embedding_network(
     batch_size : int
     out_dir : str
         SVD performance diagnostics are saved here.
+    method : str
+        SVDBasis.generate_basis method ('scipy' default, or 'gram').
+    num_threads : int
+        BLAS threads for the decomposition and its test mismatches (data loading stays
+        at one thread).
+        None leaves the process's BLAS thread settings unchanged.
 
     Returns
     -------
@@ -386,7 +394,8 @@ def build_svd_for_embedding_network(
     basis_dict = {}
     for ifo in ifos:
         basis = SVDBasis()
-        basis.generate_basis(waveforms[ifo][:num_training_samples], size)
+        with threadpool_limits(limits=num_threads, user_api="blas"):
+            basis.generate_basis(waveforms[ifo][:num_training_samples], size, method)
         basis_dict[ifo] = basis
         print(f"...{ifo} done.")
     print(f"...this took {time.time() - time_start:.0f} s.")
@@ -395,13 +404,14 @@ def build_svd_for_embedding_network(
         print(f"Testing SVD basis matrices.")
         for ifo, basis in basis_dict.items():
             print(f"...{ifo}:")
-            basis.compute_test_mismatches(
-                waveforms[ifo][num_training_samples:],
-                parameters=parameters.iloc[num_training_samples:].reset_index(
-                    drop=True
-                ),
-                verbose=True,
-            )
+            with threadpool_limits(limits=num_threads, user_api="blas"):
+                basis.compute_test_mismatches(
+                    waveforms[ifo][num_training_samples:],
+                    parameters=parameters.iloc[num_training_samples:].reset_index(
+                        drop=True
+                    ),
+                    verbose=True,
+                )
             basis.to_file(os.path.join(out_dir, f"svd_{ifo}.hdf5"))
     print("Done")
 

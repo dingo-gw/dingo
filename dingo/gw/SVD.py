@@ -41,7 +41,12 @@ class SVDBasis(DingoDataset):
             Number of basis elements to keep.
             n=0 keeps all basis elements.
         method: str
-            Select SVD method, 'random' or 'scipy'
+            Select SVD method, 'random', 'scipy' or 'gram'. 'gram' takes the leading
+            eigenvectors of the Hermitian matrix training_data^H @ training_data (the
+            right singular vectors, with eigenvalues s**2). Forming that matrix is one
+            threaded matrix product, so for many rows it is much faster than 'scipy',
+            but it squares the condition number: it raises if a retained eigenvalue is
+            not resolved above rounding error.
         """
         if method == "random":
             if n == 0:
@@ -95,6 +100,32 @@ class SVDBasis(DingoDataset):
 
             self.n = len(self.Vh)
             self.s = s
+        elif method == "gram":
+            # Promote before the product: precision lost in a complex64 Gram matrix
+            # cannot be recovered afterwards.
+            data = training_data.astype(
+                np.result_type(training_data.dtype, np.float64), copy=False
+            )
+            gram = data.conj().T @ data
+            m = gram.shape[0]
+            if (n == 0) or (n > m):
+                n = m
+            w, V = scipy.linalg.eigh(gram, subset_by_index=[m - n, m - 1])
+            # Descending order. Copy: torch.from_numpy rejects negative strides.
+            w, V = w[::-1], np.ascontiguousarray(V[:, ::-1])
+            # Rounding error in the Gram matrix and in eigh is of order m * eps * w_max;
+            # eigenvectors with eigenvalues below that are not determined by the data.
+            tol = m * np.finfo(gram.dtype).eps * w[0]
+            if w[-1] <= tol:
+                raise ValueError(
+                    f"Gram SVD: eigenvalue {n} ({w[-1]:.3e}) is not resolved above "
+                    f"rounding error ({tol:.3e}, largest {w[0]:.3e}). Use "
+                    f"method='scipy' or a smaller basis."
+                )
+            self.V = V
+            self.Vh = V.T.conj()
+            self.n = n
+            self.s = np.sqrt(w)
         else:
             raise ValueError(f"Unsupported SVD method: {method}.")
 
@@ -132,16 +163,21 @@ class SVDBasis(DingoDataset):
         else:
             self.mismatches = pd.DataFrame()
 
-        for n in np.append(np.arange(increment, self.n, increment), self.n):
-            mismatches = np.empty(len(data))
-            for i, d in enumerate(data):
-                compressed = d @ self.V[:, :n]
-                reconstructed = compressed @ self.Vh[:n]
-                norm1 = np.sqrt(np.sum(np.abs(d) ** 2))
-                norm2 = np.sqrt(np.sum(np.abs(reconstructed) ** 2))
-                inner = np.sum(d.conj() * reconstructed).real
-                mismatches[i] = 1 - inner / (norm1 * norm2)
-            self.mismatches[f"mismatch n={n}"] = mismatches
+        truncations = np.append(np.arange(increment, self.n, increment), self.n)
+        mismatches = {n: np.empty(len(data)) for n in truncations}
+        # Blocks of rows: matrix-matrix products (which use the BLAS threads) instead
+        # of one matrix-vector product per row, with bounded memory.
+        block = 512
+        for lo in range(0, len(data), block):
+            d = data[lo : lo + block]
+            norm1 = np.sqrt(np.sum(np.abs(d) ** 2, axis=1))
+            for n in truncations:
+                reconstructed = (d @ self.V[:, :n]) @ self.Vh[:n]
+                norm2 = np.sqrt(np.sum(np.abs(reconstructed) ** 2, axis=1))
+                inner = np.sum(d.conj() * reconstructed, axis=1).real
+                mismatches[n][lo : lo + block] = 1 - inner / (norm1 * norm2)
+        for n in truncations:
+            self.mismatches[f"mismatch n={n}"] = mismatches[n]
 
         if verbose:
             self.print_validation_summary()

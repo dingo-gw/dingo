@@ -890,6 +890,7 @@ def _prepare_wfd_and_initial_weights(
             asd_dataset_path=train_settings["training"]["stage_0"]["asd_dataset_path"],
             batch_size=batch_size,
             out_dir=train_dir,
+            num_threads=local_settings.get("svd_num_threads"),
             **model_kwargs["embedding_kwargs"]["svd"],
         )
     else:
