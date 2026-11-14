@@ -376,6 +376,11 @@ class GibbsBlock:
 
     Batching is handled by the enclosing `ChainComposer`, which runs the whole loop
     for each chunk of walkers.
+
+    Columns that a factor conditions on but no factor in the block produces (pins
+    from an earlier step, such as a prior-conditioning bound) are the block's own
+    `conditioning`: the block then runs `num_samples` walkers per conditioning row,
+    and every factor sees its row's values in every sweep.
     """
 
     draws = True
@@ -404,7 +409,16 @@ class GibbsBlock:
         # The blocks this step produces (proxies + inference parameters), dropping
         # side-channel columns such as the recomputed detector times.
         self.parameters = [p for factor in self.factors for p in factor.parameters]
+        # The columns read from the chain: conditioning produced by no factor in the
+        # block (including side channels, e.g. the recomputed detector times).
+        internal = set(self.init_factor.produces).union(
+            *(factor.produces for factor in self.factors)
+        )
         self.conditioning: list[str] = []
+        for factor in [self.init_factor, *self.factors]:
+            for c in factor.conditioning:
+                if c not in internal and c not in self.conditioning:
+                    self.conditioning.append(c)
 
     def sample_and_log_prob(
         self,
@@ -417,23 +431,34 @@ class GibbsBlock:
         Parameters
         ----------
         num_samples : int
-            The number of walkers, one row each (the block's count in the chain).
+            The number of walkers, one row each (the block's count in the chain), per
+            row of `given` if the block is conditioned.
         context : SamplerContext
             The per-event shared state.
         given : dict, optional
-            Ignored; the block is unconditioned.
+            The block's `conditioning` columns; ignored if it has none.
 
         Returns
         -------
         samples : dict[str, torch.Tensor]
-            The swept parameter blocks, one row per walker.
+            The swept parameter blocks, one row per walker (the walkers of a
+            conditioning row are adjacent).
         log_prob : None
         """
-        # Seed the state (the walkers are the rows), then sweep the factors: each
-        # conditions on the current state and overwrites its own block, one sample
-        # per walker.
-        seed, _ = self.init_factor.sample_and_log_prob(num_samples, context)
-        state = dict(seed)
+        # The walkers are the rows: num_samples per conditioning row, carrying that
+        # row's values through every sweep.
+        state = {
+            c: given[c].repeat_interleave(num_samples, 0) for c in self.conditioning
+        }
+        num_walkers = _n_rows(state) if state else num_samples
+        # Seed the state, then sweep the factors: each conditions on the current state
+        # and overwrites its own block, one sample per walker.
+        if self.init_factor.conditioning:
+            init_given = {k: state[k] for k in self.init_factor.conditioning}
+            seed, _ = self.init_factor.sample_and_log_prob(1, context, init_given)
+        else:
+            seed, _ = self.init_factor.sample_and_log_prob(num_walkers, context)
+        state.update(seed)
         for _ in range(self.num_iterations):
             for factor in self.factors:
                 given = {k: state[k] for k in factor.conditioning}

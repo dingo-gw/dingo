@@ -73,7 +73,7 @@ def test_autocomplete_model_kwargs_without_gnpe_proxies():
 
     assert model_kwargs["embedding_kwargs"]["input_dims"] == [2, 3, 20]
     assert model_kwargs["posterior_kwargs"]["input_dim"] == 4
-    assert model_kwargs["embedding_kwargs"]["added_context"] is False
+    assert "num_context_parameters" not in model_kwargs
     # context_dim == embedding output_dim.
     assert model_kwargs["posterior_kwargs"]["context_dim"] == 8
 
@@ -85,7 +85,7 @@ def test_autocomplete_model_kwargs_with_gnpe_proxies():
         model_kwargs, data_sample=[np.zeros(4), np.zeros((2, 3, 20)), np.zeros(2)]
     )
 
-    assert model_kwargs["embedding_kwargs"]["added_context"] is True
+    assert model_kwargs["num_context_parameters"] == 2
     # context_dim == output_dim + gnpe_proxy_dim == 8 + 2.
     assert model_kwargs["posterior_kwargs"]["context_dim"] == 10
 
@@ -221,10 +221,20 @@ def test_autocomplete_transformer_two_categorical_columns():
     assert tokenizer_kwargs["position_continuous_dim"] == 1
 
 
-def test_autocomplete_transformer_does_not_set_added_context():
-    """added_context is a resnet-only concept; it must not appear in transformer kwargs."""
+def test_autocomplete_transformer_with_context_parameters():
+    """Context parameters follow the three transformer data inputs (waveform, position,
+    token_mask); the posterior network concatenates them to the embedding."""
     model_kwargs = _make_transformer_model_kwargs()
-    autocomplete_model_kwargs(model_kwargs, _make_data_sample())
+    position = torch.zeros(_NUM_TOKENS, 3)
+    token_mask = torch.zeros(_NUM_TOKENS, dtype=torch.bool)
+    autocomplete_model_kwargs(
+        model_kwargs, _make_data_sample() + [position, token_mask, torch.zeros(2)]
+    )
+    assert model_kwargs["num_context_parameters"] == 2
+    assert (
+        model_kwargs["posterior_kwargs"]["context_dim"]
+        == model_kwargs["embedding_kwargs"]["final_net_kwargs"]["output_dim"] + 2
+    )
     assert "added_context" not in model_kwargs["embedding_kwargs"]
 
 
@@ -249,19 +259,20 @@ def test_autocomplete_resnet_sets_context_dim():
     assert model_kwargs["posterior_kwargs"]["context_dim"] == 10
 
 
-def test_autocomplete_resnet_sets_added_context_false_without_gnpe():
+def test_autocomplete_resnet_without_gnpe_has_no_context_parameters():
     model_kwargs = _make_resnet_model_kwargs()
     data_sample = _make_data_sample()  # only 2 elements, no GNPE proxies
     autocomplete_model_kwargs(model_kwargs, data_sample)
-    assert model_kwargs["embedding_kwargs"]["added_context"] is False
+    assert "num_context_parameters" not in model_kwargs
 
 
-def test_autocomplete_resnet_sets_added_context_true_with_gnpe():
+def test_autocomplete_resnet_with_gnpe_sets_context_parameters():
     model_kwargs = _make_resnet_model_kwargs(output_dim=8)
     gnpe_proxies = torch.zeros(3)
     data_sample = _make_data_sample() + [gnpe_proxies]
     autocomplete_model_kwargs(model_kwargs, data_sample)
-    assert model_kwargs["embedding_kwargs"]["added_context"] is True
+    assert model_kwargs["num_context_parameters"] == 3
+    assert "added_context" not in model_kwargs["embedding_kwargs"]
     assert model_kwargs["posterior_kwargs"]["context_dim"] == 8 + 3
 
 

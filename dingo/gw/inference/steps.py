@@ -667,6 +667,12 @@ class SyntheticPhasePsiFactor(Factor):
         )
 
 
+# Context parameters a time-GNPE network may condition on besides its proxies: pins
+# that leave the data untouched, so the GNPE per-row data view is unchanged. (The
+# chirp-mass prior conditioning is excluded: it heterodynes the data.)
+GNPE_PINNABLE_CONTEXT_PARAMETERS = ("log_luminosity_distance_max",)
+
+
 def _build_gnpe_transforms(model: BasePosteriorModel):
     """Build the time-shift GNPE per-step transforms from a model's metadata: the
     proxy blur, the per-row time-shift alignment applied before the network, and the
@@ -795,6 +801,10 @@ class GNPEFlowFactor(Factor):
     detector times are emitted as extra columns (`produces`): the next Gibbs iteration
     blurs them into fresh proxies, and single-step GNPE evaluates the kernel correction at
     them. Draws `num_samples` per proxy row (one in the Gibbs loop).
+
+    A network with distance prior conditioning also conditions on the pinned
+    `log_luminosity_distance_max` (`pinned_parameters`), read from the chain like the
+    proxies and passed to the network unchanged (it does not alter the data).
     """
 
     def __init__(
@@ -820,11 +830,26 @@ class GNPEFlowFactor(Factor):
         self.gnpe_parameters = list(gnpe_transform.input_parameter_names)
         self.proxy_parameters = [p + "_proxy" for p in self.gnpe_parameters]
         self.aliases = aliases or {}
-        self._net_parameters = model.base_metadata["train_settings"]["data"][
-            "inference_parameters"
-        ]
+        data_settings = model.base_metadata["train_settings"]["data"]
+        self._net_parameters = data_settings["inference_parameters"]
         self.parameters = [self.aliases.get(p, p) for p in self._net_parameters]
-        self.conditioning = list(self.proxy_parameters)
+        # Context parameters other than the GNPE proxies (and the relative proxies
+        # derived from them in transform_pre) are pins.
+        self.pinned_parameters = [
+            p
+            for p in data_settings["context_parameters"]
+            if p not in gnpe_transform.context_parameters
+        ]
+        unsupported = set(self.pinned_parameters) - set(
+            GNPE_PINNABLE_CONTEXT_PARAMETERS
+        )
+        if unsupported:
+            raise NotImplementedError(
+                f"Time GNPE with the context parameters {sorted(unsupported)} is not "
+                f"supported; besides the proxies, a GNPE network may condition only on "
+                f"{list(GNPE_PINNABLE_CONTEXT_PARAMETERS)}."
+            )
+        self.conditioning = list(self.proxy_parameters) + self.pinned_parameters
         # For log_prob: the sampling path de-standardizes (and corrects the
         # log-prob) inside transform_post, but evaluating at a point needs the
         # forward map too. The model's own standardization (network-bound, like
@@ -837,18 +862,29 @@ class GNPEFlowFactor(Factor):
         """Emitted columns: the inference block plus the recomputed detector times."""
         return super().produces + self.gnpe_parameters
 
+    def _network_input(self, context, given):
+        """The per-row network input: the shared data time-shifted by each row's
+        proxies, and the standardized context (the relative proxies and the pins).
+        The pins enter as `parameters`, which `transform_post` replaces by the
+        network's draws, so they do not reach the post-network corrections."""
+        proxies = {p: given[p] for p in self.proxy_parameters}
+        n_rows = _n_rows(proxies)
+        x = {
+            "extrinsic_parameters": dict(proxies),
+            "parameters": {p: given[p] for p in self.pinned_parameters},
+        }
+        d = context.prepared_data().clone()
+        x["data"] = d.expand(n_rows, *d.shape)
+        return self.transform_pre(x)
+
     def sample_and_log_prob(self, num_samples, context, given=None):
         """Draw `num_samples` parameter sets per proxy row (the draws for a row are
         adjacent). Returns theta plus the recomputed detector times, and the network
         log-prob. In the Gibbs loop and with a drawing proxy source this is called
         with `num_samples=1`; a value greater than 1 arises only when the proxy
         source is pinned. See `Factor.sample_and_log_prob`."""
-        proxies = {p: given[p] for p in self.proxy_parameters}
-        n_rows = _n_rows(proxies)
-        x = {"extrinsic_parameters": dict(proxies), "parameters": {}}
-        d = context.prepared_data().clone()
-        x["data"] = d.expand(n_rows, *d.shape)
-        x = self.transform_pre(x)
+        n_rows = _n_rows({p: given[p] for p in self.proxy_parameters})
+        x = self._network_input(context, given)
         self.model.network.eval()
         with torch.no_grad():
             if "context_parameters" in x:
@@ -886,12 +922,7 @@ class GNPEFlowFactor(Factor):
         Applies the same per-row view of the data as sampling (the shared
         representation time-shifted by the proxies, the conditioning standardized),
         then scores the standardized parameters under the network."""
-        proxies = {p: given[p] for p in self.proxy_parameters}
-        n_rows = _n_rows(proxies)
-        x = {"extrinsic_parameters": dict(proxies), "parameters": {}}
-        d = context.prepared_data().clone()
-        x["data"] = d.expand(n_rows, *d.shape)
-        x = self.transform_pre(x)
+        x = self._network_input(context, given)
         theta_net = {
             net: theta_i[self.aliases.get(net, net)] for net in self._net_parameters
         }

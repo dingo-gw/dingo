@@ -75,8 +75,10 @@ def autocomplete_model_kwargs(model_kwargs: dict, data_sample: list):
 
     * set input dimension of embedding net to shape of data_sample[1]
     * set dimension of parameter space to len(data_sample[0])
-    * set added_context flag of embedding net if required for gnpe proxies (resnet only)
-    * set context dim of posterior model to output dim of embedding net + gnpe proxy dim
+    * set the number of context parameters (e.g., GNPE proxies), which the posterior
+      network concatenates to the embedded data
+    * set context dim of posterior model to output dim of embedding net + number of
+      context parameters
 
     Parameters
     ----------
@@ -84,12 +86,20 @@ def autocomplete_model_kwargs(model_kwargs: dict, data_sample: list):
         Model settings, which are modified in-place.
     data_sample: list
         Sample from dataloader (e.g., wfd[0]) used for autocomplection.
-        Should be of format [parameters, GW data, gnpe_proxies], where the
-        last element is only there is GNPE proxies are required.
+        Should be of format [parameters, *data, context_parameters], where data is
+        [GW data] (resnet) or [GW data, position, token_mask] (transformer), and the
+        last element is only there if the model has context parameters.
     """
     model_kwargs["posterior_kwargs"]["input_dim"] = len(data_sample[0])
 
     embedding_type = (model_kwargs.get("embedding_type") or "resnet").lower()
+    num_data_inputs = 3 if embedding_type == "transformer" else 1
+    context_parameters = data_sample[1 + num_data_inputs :]
+    num_context_parameters = len(context_parameters[0]) if context_parameters else 0
+    # Only recorded when nonzero, so that networks without context parameters stay
+    # loadable by earlier Dingo versions.
+    if num_context_parameters:
+        model_kwargs["num_context_parameters"] = num_context_parameters
 
     if embedding_type == "transformer":
         tokenizer_kwargs = model_kwargs["embedding_kwargs"]["tokenizer_kwargs"]
@@ -117,21 +127,12 @@ def autocomplete_model_kwargs(model_kwargs: dict, data_sample: list):
             )
         embedding_kwargs = model_kwargs["embedding_kwargs"]
         if embedding_kwargs.get("final_net_kwargs"):
-            context_dim = embedding_kwargs["final_net_kwargs"]["output_dim"]
+            embedding_dim = embedding_kwargs["final_net_kwargs"]["output_dim"]
         else:
-            context_dim = embedding_kwargs["transformer_kwargs"]["d_model"]
-        model_kwargs["posterior_kwargs"]["context_dim"] = context_dim
+            embedding_dim = embedding_kwargs["transformer_kwargs"]["d_model"]
     else:
-        # resnet: set input dims and handle optional GNPE proxies
         model_kwargs["embedding_kwargs"]["input_dims"] = list(data_sample[1].shape)
-        try:
-            gnpe_proxy_dim = len(data_sample[2])
-            model_kwargs["embedding_kwargs"]["added_context"] = True
-            model_kwargs["posterior_kwargs"]["context_dim"] = (
-                model_kwargs["embedding_kwargs"]["output_dim"] + gnpe_proxy_dim
-            )
-        except IndexError:
-            model_kwargs["embedding_kwargs"]["added_context"] = False
-            model_kwargs["posterior_kwargs"]["context_dim"] = model_kwargs[
-                "embedding_kwargs"
-            ]["output_dim"]
+        embedding_dim = model_kwargs["embedding_kwargs"]["output_dim"]
+    model_kwargs["posterior_kwargs"]["context_dim"] = (
+        embedding_dim + num_context_parameters
+    )

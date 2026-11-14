@@ -17,6 +17,7 @@ from dingo.gw.SVD import SVDBasis
 from dingo.gw.transforms import (
     AddWhiteNoiseComplex,
     CropMaskStrainRandom,
+    DistancePriorConditioning,
     GetDetectorTimes,
     ChirpPriorConditioning,
     chirp_prior_conditioning_settings,
@@ -83,8 +84,9 @@ def set_train_transforms(
     The transform takes waveform polarizations, samples random extrinsic parameters,
     projects to detectors, adds noise, and formats the data for input to the neural
     network. It also implements optional GNPE detector time shifts
-    (`gnpe_time_shifts`) and prior conditioning on the chirp mass
-    (`chirp_prior_conditioning`, DINGO-BNS).
+    (`gnpe_time_shifts`), prior conditioning on the chirp mass
+    (`chirp_prior_conditioning`, DINGO-BNS), and prior conditioning on the upper bound
+    of the luminosity-distance prior (`distance_prior_conditioning`).
 
     Note that the WaveformDataset is modified in-place, so this function returns nothing.
 
@@ -155,6 +157,28 @@ def set_train_transforms(
             ChirpPriorConditioning(d["kernel"], domain, d.get("order", 0))
         )
         extra_context_parameters += transforms[-1].context_parameters
+    distance_conditioning = data_settings.get("distance_prior_conditioning")
+    if distance_conditioning is not None:
+        unknown = set(distance_conditioning) - {
+            "luminosity_distance_max",
+            "log_uniform_fraction",
+        }
+        if unknown:
+            raise ValueError(
+                f"Unknown distance_prior_conditioning settings: {sorted(unknown)}."
+            )
+        # Truncate the luminosity_distance prior at a sampled upper bound, on whose
+        # logarithm the network conditions. With gnpe_time_shifts, the bound follows
+        # the time proxies in context_parameters; the two are independent (the bound
+        # redraws only luminosity_distance, the proxies blur only detector times).
+        transforms.append(
+            DistancePriorConditioning(
+                extrinsic_prior_dict["luminosity_distance"],
+                distance_conditioning["luminosity_distance_max"],
+                distance_conditioning.get("log_uniform_fraction", 0.0),
+            )
+        )
+        extra_context_parameters += transforms[-1].context_parameters
 
     # Add the GNPE context to context_parameters the first time the transforms are
     # constructed. We do not want to overwrite the ordering of the parameters in
@@ -164,11 +188,10 @@ def set_train_transforms(
     for p in extra_context_parameters:
         if p not in data_settings["context_parameters"]:
             data_settings["context_parameters"].append(p)
-    if "tokenization" in data_settings and data_settings["context_parameters"]:
+    if "tokenization" in data_settings and "gnpe_time_shifts" in data_settings:
         raise NotImplementedError(
-            "Tokenization with context parameters (GNPE proxies or other "
-            f"context_parameters {data_settings['context_parameters']}) is not yet "
-            "supported: the transformer embedding network does not take them."
+            "Tokenization with gnpe_time_shifts is not supported: GNPE inference does "
+            "not support tokenized (transformer) networks."
         )
     if "tokenization" in data_settings and "random_strain_cropping" in data_settings:
         raise ValueError(
@@ -195,6 +218,10 @@ def set_train_transforms(
             wfd,
             data_settings["inference_parameters"] + data_settings["context_parameters"],
             torchvision.transforms.Compose(transforms),
+            # The distance prior conditioning redraws luminosity_distance.
+            estimate_from_transform=(
+                ["luminosity_distance"] if distance_conditioning is not None else []
+            ),
         )
         data_settings["standardization"] = standardization_dict
 
@@ -319,6 +346,7 @@ def build_svd_for_embedding_network(
 
     # Fix the luminosity distance to a standard value, just in order to generate the SVD.
     data_settings["extrinsic_prior"]["luminosity_distance"] = "100.0"
+    data_settings.pop("distance_prior_conditioning", None)
 
     # Build the dataset, but with certain transforms omitted. In particular, we want to
     # build the SVD based on zero-noise waveforms. They should still be whitened, and

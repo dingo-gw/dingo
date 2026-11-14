@@ -64,7 +64,6 @@ def data_setup_nsf_large():
         "activation": "elu",
         "dropout": 0.0,
         "norm": "BatchNorm",
-        "added_context": True,
     }
     d.embedding_net_builder = create_enet_with_projection_layer_and_dense_resnet
     d.nde_builder = create_nsf_model
@@ -101,7 +100,6 @@ def data_setup_nsf_small():
         "activation": "elu",
         "dropout": 0.0,
         "norm": "BatchNorm",
-        "added_context": True,
         "svd": {"size": 10},
     }
     d.embedding_net_builder = create_enet_with_projection_layer_and_dense_resnet
@@ -113,11 +111,10 @@ def data_setup_nsf_small():
         "base_transform_kwargs": d.base_transform_kwargs,
     }
 
+    d.num_context_parameters = d.context_dim - d.embedding_net_kwargs["output_dim"]
     d.batch_size = 20
     d.x = torch.rand((d.batch_size, *d.embedding_net_kwargs["input_dims"]))
-    d.z = torch.ones(
-        (d.batch_size, d.context_dim - d.embedding_net_kwargs["output_dim"])
-    )
+    d.z = torch.ones((d.batch_size, d.num_context_parameters))
     d.y = torch.ones((d.batch_size, d.input_dim))
 
     # build d.yy, which depends on input d.zz
@@ -154,7 +151,7 @@ def test_sample_method_of_nsf(data_setup_nsf_small):
 
     embedding_net = d.embedding_net_builder(**d.embedding_net_kwargs)
     flow = d.nde_builder(**d.nde_kwargs)
-    model = FlowWrapper(flow, embedding_net)
+    model = FlowWrapper(flow, embedding_net, d.num_context_parameters)
 
     samples = model.sample(d.x, d.z)
     # model.sample(num_samples=1) adds an extra dimension that needs to be squeezed.
@@ -168,7 +165,7 @@ def test_sample_method_of_nsf(data_setup_nsf_small):
 
     with pytest.raises(ValueError):
         model.sample(d.z, d.x)
-    with pytest.raises(ValueError):
+    with pytest.raises(TypeError):
         model.sample(d.x, d.z, d.z)
     with pytest.raises(RuntimeError):
         model.sample(d.x, d.x)
@@ -183,7 +180,7 @@ def test_forward_pass_for_log_prob_of_nsf(data_setup_nsf_small):
 
     embedding_net = d.embedding_net_builder(**d.embedding_net_kwargs)
     flow = d.nde_builder(**d.nde_kwargs)
-    model = FlowWrapper(flow, embedding_net)
+    model = FlowWrapper(flow, embedding_net, d.num_context_parameters)
 
     loss = -model(d.y, d.x, d.z)
     assert list(loss.shape) == [d.batch_size], "Unexpected output shape."
@@ -194,7 +191,7 @@ def test_forward_pass_for_log_prob_of_nsf(data_setup_nsf_small):
 
     with pytest.raises(ValueError):
         model(d.y, d.z, d.x)
-    with pytest.raises(ValueError):
+    with pytest.raises(TypeError):
         model(d.y, d.x, d.z, d.z)
     with pytest.raises(RuntimeError):
         model(d.y, d.x, d.x)
@@ -210,7 +207,7 @@ def test_backward_pass_for_log_prob_of_nsf(data_setup_nsf_small):
 
     embedding_net = d.embedding_net_builder(**d.embedding_net_kwargs)
     flow = d.nde_builder(**d.nde_kwargs)
-    model = FlowWrapper(flow, embedding_net)
+    model = FlowWrapper(flow, embedding_net, d.num_context_parameters)
     optimizer = optim.Adam(model.parameters(), lr=0.003)
 
     # Simple train loop. The learned parameters yy are strongly correlated
@@ -241,7 +238,9 @@ def test_model_builder_for_nsf_with_rb_embedding_net(data_setup_nsf_small):
     d = data_setup_nsf_small
 
     model = create_nsf_with_rb_projection_embedding_net(
-        d.nde_kwargs, d.embedding_net_kwargs
+        d.nde_kwargs,
+        d.embedding_net_kwargs,
+        num_context_parameters=d.num_context_parameters,
     )
 
     loss = -model(d.y, d.x, d.z)
@@ -253,7 +252,7 @@ def test_model_builder_for_nsf_with_rb_embedding_net(data_setup_nsf_small):
 
     with pytest.raises(ValueError):
         model(d.y, d.z, d.x)
-    with pytest.raises(ValueError):
+    with pytest.raises(TypeError):
         model(d.y, d.x, d.z, d.z)
     with pytest.raises(RuntimeError):
         model(d.y, d.x, d.x)
