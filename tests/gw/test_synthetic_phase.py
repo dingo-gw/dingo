@@ -154,15 +154,31 @@ def test_phase_22_draws_match_the_psi_factor():
     np.testing.assert_allclose(log_prob.numpy(), replug.numpy())
 
 
-def test_profile_exact_mode_runs():
-    n, n_grid = 4, 129
-    factor = SyntheticPhaseFactor(
-        conditioning=["chirp_mass"], n_grid_phase=n_grid, approximation_22_mode=False
+def test_profile_exact_mode_matches_formula():
+    # q(phase) is exp(log L) at each row's own psi on the phase grid, plus the floor,
+    # the same with a pool (70 rows: more than one 32-row chunk, so that the pool is
+    # used).
+    n, n_grid, weight = 70, 129, 0.01
+    given = {**_given(n), "psi": torch.linspace(0.0, 1.0, n, dtype=torch.float64)}
+    profiles = []
+    for num_processes in (1, 2):
+        factor = SyntheticPhaseFactor(
+            conditioning=["chirp_mass", "psi"],
+            n_grid_phase=n_grid,
+            approximation_22_mode=False,
+            uniform_weight=weight,
+            num_processes=num_processes,
+        )
+        phases, profile, _ = factor._phase_profile(given, _MockContext())
+        profiles.append(profile)
+    assert np.array_equal(*profiles)
+    log_l = _MockLikelihood.log_l_phase_psi(
+        given["chirp_mass"].numpy()[:, None], phases, given["psi"].numpy()[:, None]
     )
-    phases, profile, _ = factor._phase_profile(_given(n), _MockContext())
-    assert phases.shape == (n_grid,)
+    expected = np.exp(log_l - log_l.max(axis=1, keepdims=True))
+    expected += expected.mean(axis=1, keepdims=True) * weight
     assert profile.shape == (n, n_grid)
-    assert (profile > 0).all()
+    assert np.allclose(profile, expected)
 
 
 def test_sample_shapes_and_range():
@@ -326,16 +342,22 @@ def test_phase_psi_factor_produces_both_angles():
         factor.sample_and_log_prob(2, _MockContext(), _given(n))
 
 
-def test_phase_psi_profile_marginal_matches_formula():
+@pytest.mark.parametrize("n_grid_psi", [33, 4097])
+def test_phase_psi_profile_marginal_matches_formula(n_grid_psi):
     # q(phase) is the psi-marginal of exp(log L) over the psi grid without its
-    # duplicated endpoint psi = pi (plus the floor), computed here in chunks of samples.
-    n, weight = 5, 0.01
-    factor = _psi_factor(uniform_weight=weight)
-    factor.max_grid_elements = (
-        2 * factor.n_grid_phase * factor.n_grid_psi
-    )  # 2 rows/chunk
+    # duplicated endpoint psi = pi (plus the floor), the same with a pool (70 rows:
+    # more than one 32-row chunk, so that the pool is used). With 4097 psi points the
+    # phase grid is evaluated in blocks of 16 phases.
+    n, weight = 70, 0.01
     given = _given(n)
-    _, _, phases, profile = factor._phase_profile(given, _MockContext())
+    profiles = []
+    for num_processes in (1, 2):
+        factor = _psi_factor(
+            n_grid_psi=n_grid_psi, uniform_weight=weight, num_processes=num_processes
+        )
+        _, _, phases, profile = factor._phase_profile(given, _MockContext())
+        profiles.append(profile)
+    assert np.array_equal(*profiles)
     psis = np.linspace(0, np.pi, factor.n_grid_psi)
     cm = given["chirp_mass"].numpy()
     log_l = _MockLikelihood.log_l_phase_psi(

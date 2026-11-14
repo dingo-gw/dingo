@@ -453,12 +453,12 @@ class Result(CoreResult):
 
             n_grid_phase : int, optional
                 Number of phase grid points on [0, 2pi], endpoints included.
-                Defaults to the factor's default (5001 for the phase alone, 512
+                Defaults to the factor's default (5001 for the phase alone, 4096
                 together with psi). Not used in approximation_22_mode, where the
                 phase is drawn exactly.
             n_grid_psi : int, optional
                 Number of psi grid points on [0, pi], endpoints included, default
-                128. Only used if the samples lack psi as well as the phase: then
+                1024. Only used if the samples lack psi as well as the phase: then
                 both are drawn from the likelihood, see `SyntheticPhasePsiFactor`.
             approximation_22_mode : bool, optional
                 Assume a (2, 2)-dominated waveform. Otherwise the exact mode sum is
@@ -539,7 +539,16 @@ class Result(CoreResult):
         if calibration_sampling_kwargs is not None:
             self.calibration_sampling_kwargs = calibration_sampling_kwargs
         if synthetic_parameters_kwargs is not None:
-            self.synthetic_parameters_kwargs = synthetic_parameters_kwargs
+            # Record the grids and the path the factor used, defaults included.
+            used = steps[-1].describe()
+            self.synthetic_parameters_kwargs = {
+                **synthetic_parameters_kwargs,
+                **{
+                    k: used[k]
+                    for k in ("n_grid_phase", "n_grid_psi", "approximation_22_mode")
+                    if k in used
+                },
+            }
 
         # Rebuild the prior: it now includes the calibration priors (from
         # prior_update), and the phase prior rejoins it once phase is in the samples.
