@@ -60,7 +60,6 @@ EMBEDDING_KWARGS = {
     "activation": "elu",
     "dropout": 0.0,
     "norm": None,
-    "added_context": False,
 }
 
 

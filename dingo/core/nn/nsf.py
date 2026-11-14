@@ -235,42 +235,56 @@ class FlowWrapper(nn.Module):
     reasons. (i) some embedding networks take tuples as input, which is not
     supported by the nflows package. (ii) paralellization across multiple
     GPUs requires a forward method, but the relevant flow method for training
-    is log_prob.
+    is log_prob. (iii) context parameters (e.g., GNPE proxies), passed as the last
+    input, are concatenated to the embedded data.
     """
 
-    def __init__(self, flow: flows.base.Flow, embedding_net: nn.Module = None):
+    def __init__(
+        self,
+        flow: flows.base.Flow,
+        embedding_net: nn.Module = None,
+        num_context_parameters: int = 0,
+    ):
         """
 
         :param flow: flows.base.Flow
         :param embedding_net: nn.Module
+        :param num_context_parameters: int
+            number of context parameters; if nonzero, the last input is a tensor of
+            context parameters, which bypasses the embedding net and is
+            concatenated to its output
         """
         super(FlowWrapper, self).__init__()
         self.embedding_net = embedding_net
         self.flow = flow
+        self.num_context_parameters = num_context_parameters
+
+    def _embed(self, *x):
+        """Embed the data inputs with the embedding net (if any), and append the
+        context parameters (if any)."""
+        if self.embedding_net is None:
+            return x
+        if self.num_context_parameters:
+            return torch.cat((self.embedding_net(*x[:-1]), x[-1]), dim=1)
+        return self.embedding_net(*x)
 
     def log_prob(self, y, *x):
         if len(x) > 0:
-            if self.embedding_net is not None:
-                x = self.embedding_net(*x)
-            return self.flow.log_prob(y, x)
+            return self.flow.log_prob(y, self._embed(*x))
         else:
             # if there is no context
             return self.flow.log_prob(y)
 
     def sample(self, *x, num_samples=1):
         if len(x) > 0:
-            if self.embedding_net is not None:
-                x = self.embedding_net(*x)
-            return self.flow.sample(num_samples, x)
+            return self.flow.sample(num_samples, self._embed(*x))
         else:
             # if there is no context, omit the context argument
             return self.flow.sample(num_samples)
 
     def sample_and_log_prob(self, *x, num_samples=1):
         if len(x) > 0:
-            if self.embedding_net is not None:
-                x = self.embedding_net(*x)
-            return self.flow.sample_and_log_prob(num_samples, x)
+            return self.flow.sample_and_log_prob(num_samples, self._embed(*x))
         else:
             # if there is no context, omit the context argument
             return self.flow.sample_and_log_prob(num_samples)
@@ -343,6 +357,7 @@ def create_nsf_with_transformer_embedding_net(
     posterior_kwargs: dict,
     embedding_kwargs: dict,
     initial_weights: dict = None,
+    num_context_parameters: int = 0,
 ):
     """Builds a neural spline flow with a transformer embedding network.
 
@@ -357,6 +372,8 @@ def create_nsf_with_transformer_embedding_net(
         accepted for interface parity with the resnet builder (the posterior model
         always passes it); the transformer embedding has no SVD initialization, so
         it is ignored.
+    num_context_parameters : int
+        number of context parameters, concatenated to the embedded data
     """
     from dingo.core.nn.transformer import create_transformer_enet
 
@@ -364,13 +381,14 @@ def create_nsf_with_transformer_embedding_net(
     embedding_kwargs.pop("allow_tf32", None)
     embedding_net = create_transformer_enet(**embedding_kwargs)
     flow = create_nsf_model(**posterior_kwargs)
-    return FlowWrapper(flow, embedding_net)
+    return FlowWrapper(flow, embedding_net, num_context_parameters)
 
 
 def create_nsf_with_rb_projection_embedding_net(
     posterior_kwargs: dict,
     embedding_kwargs: dict,
     initial_weights: dict = None,
+    num_context_parameters: int = 0,
 ):
     """Builds a neural spline flow with an embedding network that consists of a
     reduced basis projection followed by a residual network. Optionally initializes the
@@ -386,6 +404,8 @@ def create_nsf_with_rb_projection_embedding_net(
         Dictionary containing the initial weights for the SVD projection. This should
         have one key 'V_rb_list', with value a list of SVD V matrices (one for each
         detector).
+    num_context_parameters : int
+        number of context parameters, concatenated to the embedded data
 
     Returns
     -------
@@ -407,7 +427,7 @@ def create_nsf_with_rb_projection_embedding_net(
         **embedding_kwargs
     )
     flow = create_nsf_model(**posterior_kwargs)
-    model = FlowWrapper(flow, embedding_net)
+    model = FlowWrapper(flow, embedding_net, num_context_parameters)
     return model
 
 

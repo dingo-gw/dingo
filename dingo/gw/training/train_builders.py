@@ -164,11 +164,10 @@ def set_train_transforms(
     for p in extra_context_parameters:
         if p not in data_settings["context_parameters"]:
             data_settings["context_parameters"].append(p)
-    if "tokenization" in data_settings and data_settings["context_parameters"]:
+    if "tokenization" in data_settings and "gnpe_time_shifts" in data_settings:
         raise NotImplementedError(
-            "Tokenization with context parameters (GNPE proxies or other "
-            f"context_parameters {data_settings['context_parameters']}) is not yet "
-            "supported: the transformer embedding network does not take them."
+            "Tokenization with gnpe_time_shifts is not supported: GNPE inference does "
+            "not support tokenized (transformer) networks."
         )
     if "tokenization" in data_settings and "random_strain_cropping" in data_settings:
         raise ValueError(
