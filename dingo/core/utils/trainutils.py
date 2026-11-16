@@ -97,6 +97,20 @@ class EarlyStopping:
             self.counter = 0
             return True
 
+    def state_dict(self) -> dict:
+        """Return the progress of early stopping, for storing in a checkpoint."""
+        return {
+            "counter": self.counter,
+            "best_score": self.best_score,
+            "early_stop": self.early_stop,
+        }
+
+    def load_state_dict(self, state: dict):
+        """Restore the progress of early stopping saved by `state_dict`."""
+        self.counter = state["counter"]
+        self.best_score = state["best_score"]
+        self.early_stop = state["early_stop"]
+
 
 class LossInfo:
     def __init__(

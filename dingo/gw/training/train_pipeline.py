@@ -299,11 +299,14 @@ def initialize_stage(
 
     # Freeze/unfreeze RB layer if necessary
     if "freeze_rb_layer" in stage:
-        if reset_graphs_if_requires_grad_changes(
-            pm.network,
-            name_contains="layers_rb",
-            requires_grad=not stage["freeze_rb_layer"],
-        ) and print_output:
+        if (
+            reset_graphs_if_requires_grad_changes(
+                pm.network,
+                name_contains="layers_rb",
+                requires_grad=not stage["freeze_rb_layer"],
+            )
+            and print_output
+        ):
             print(
                 "freeze_rb_layer changes the trainable parameters: compiled graphs "
                 "(if any) discarded, the next training step (re)compiles."
@@ -377,6 +380,7 @@ def train_stages(
     end_epochs = list(np.cumsum([stage["epochs"] for stage in stages]))
 
     resume_training = False
+    stopped_early = False
     num_starting_stage = np.searchsorted(end_epochs, pm.epoch + 1)
     for n in range(num_starting_stage, num_stages):
         stage = stages[n]
@@ -419,6 +423,15 @@ def train_stages(
                     "Early stopping settings invalid. Please pass 'patience', 'delta', 'metric'"
                 )
                 raise
+            # Continue the patience count of this stage after a resume. A state
+            # from another stage, or a checkpoint without one, starts afresh.
+            state = pm.early_stopping_state
+            if state is not None and state.get("stage") == n:
+                early_stopping.load_state_dict(state)
+            else:
+                pm.early_stopping_state = {"stage": n}
+        else:
+            pm.early_stopping_state = None
 
         runtime_limits.max_epochs_total = end_epochs[n]
         pm.train(
@@ -447,13 +460,20 @@ def train_stages(
             print(f"Training stage complete. Saving to {save_file}.")
             pm.save_model(save_file, save_training_info=True)
 
+        # An early stop in the final stage completes training, so that the exit
+        # command runs and a resubmitting job does not resume it again.
+        if n == num_stages - 1 and early_stopping is not None:
+            stopped_early = early_stopping.early_stop
+            if stopped_early:
+                break
+
         if runtime_limits.local_limits_exceeded(pm.epoch):
             if print_primary:
                 print("Local runtime limits reached. Ending program.")
             resume_training = True
             break
 
-    training_finished = pm.epoch == end_epochs[-1]
+    training_finished = pm.epoch == end_epochs[-1] or stopped_early
     return training_finished, resume_training
 
 

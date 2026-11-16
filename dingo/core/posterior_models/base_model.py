@@ -105,6 +105,9 @@ class BasePosteriorModel(ABC):
         self.scheduler = None
         self.context = None
         self.event_metadata = None
+        # Progress of early stopping (see `train`), kept in the checkpoint so that
+        # a resumed run continues the patience count and best score.
+        self.early_stopping_state = None
 
         # build model
         if model_filename is not None:
@@ -291,6 +294,8 @@ class BasePosteriorModel(ABC):
                 model_dict["optimizer_state_dict"] = self.optimizer.state_dict()
             if self.scheduler is not None:
                 model_dict["scheduler_state_dict"] = self.scheduler.state_dict()
+            if self.early_stopping_state is not None:
+                model_dict["early_stopping_state"] = self.early_stopping_state
 
         torch.save(model_dict, model_filename)
 
@@ -384,6 +389,8 @@ class BasePosteriorModel(ABC):
             self.network_to_device(device)
 
             if load_training_info:
+                # Absent in checkpoints written before it was stored.
+                self.early_stopping_state = d.get("early_stopping_state")
                 if "optimizer_kwargs" in d:
                     self.optimizer_kwargs = d["optimizer_kwargs"]
                 if "scheduler_kwargs" in d:
@@ -432,6 +439,9 @@ class BasePosteriorModel(ABC):
         test_only : bool
             If True, skip training and only evaluate on the test set.
         early_stopping : EarlyStopping, optional
+            Its state is written to ``self.early_stopping_state`` (together with
+            the best epoch) before each checkpoint, so that it survives a resume.
+            If it has already stopped, no further epochs are trained.
         gradient_updates_per_optimizer_step : int
             Accumulate gradients over this many batches before calling
             ``optimizer.step()``.  Use >1 to simulate a larger effective batch
@@ -457,6 +467,9 @@ class BasePosteriorModel(ABC):
         # The GradScaler keeps a calibrated loss scale, so create it once per
         # training run rather than once per epoch.
         scaler = _build_grad_scaler(self.device) if automatic_mixed_precision else None
+
+        if early_stopping is not None and early_stopping.early_stop:
+            return
 
         while not runtime_limits.limits_exceeded(self.epoch):
             self.epoch += 1
@@ -518,7 +531,30 @@ class BasePosteriorModel(ABC):
 
             utils.perform_scheduler_step(self.scheduler, test_loss)
 
+            # Update early stopping before checkpointing, so that model_latest.pt
+            # holds the state after this epoch. Losses are all-reduced, so every
+            # DDP rank reaches the same decision.
+            is_best_model = False
+            if early_stopping is not None:
+                is_best_model = early_stopping(
+                    test_loss if early_stopping.metric == "validation" else train_loss
+                )
+                best_epoch = (
+                    self.epoch
+                    if is_best_model
+                    else (self.early_stopping_state or {}).get("best_epoch")
+                )
+                self.early_stopping_state = {
+                    **(self.early_stopping_state or {}),
+                    **early_stopping.state_dict(),
+                    "best_epoch": best_epoch,
+                }
+
             if is_primary:
+                if is_best_model:
+                    self.save_model(
+                        join(train_dir, "best_model.pt"), save_training_info=False
+                    )
                 utils.write_history(train_dir, self.epoch, train_loss, test_loss, lr)
                 utils.save_model(self, train_dir, checkpoint_epochs=checkpoint_epochs)
                 if use_wandb:
@@ -540,19 +576,13 @@ class BasePosteriorModel(ABC):
                     except ImportError:
                         print("wandb not installed. Skipping logging to wandb.")
 
-            if early_stopping is not None:
-                early_stopping_loss = (
-                    test_loss if early_stopping.metric == "validation" else train_loss
-                )
-                is_best_model = early_stopping(early_stopping_loss)
-                if is_best_model and is_primary:
-                    self.save_model(
-                        join(train_dir, "best_model.pt"), save_training_info=False
+            if early_stopping is not None and early_stopping.early_stop:
+                if is_primary:
+                    print(
+                        f"Early stopping. Best epoch: "
+                        f"{self.early_stopping_state['best_epoch']}."
                     )
-                if early_stopping.early_stop:
-                    if is_primary:
-                        print("Early stopping")
-                    break
+                break
 
             if is_primary:
                 print(f"Finished training epoch {self.epoch}.\n")
