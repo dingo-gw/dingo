@@ -218,6 +218,11 @@ class SamplingInput(Input):
             )
         else:
             self.gnpe = False
+            if self.num_gnpe_iterations is not None:
+                logger.info(
+                    f"num-gnpe-iterations = {self.num_gnpe_iterations} is ignored: "
+                    "no model-init is set, so sampling uses a single network."
+                )
             self.dingo_sampler = GWComposedSampler.from_model(
                 model,
                 self.context,
