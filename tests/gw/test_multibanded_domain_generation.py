@@ -414,7 +414,7 @@ class TestEvaluateMultibandingMain:
                 "h_plus": np.ones((num_samples, n), dtype=complex),
                 "h_cross": np.ones((num_samples, n), dtype=complex),
             }
-            return pd.DataFrame({"dummy": range(num_samples)}), pols
+            return pd.DataFrame({"geocent_time": [0.12] * num_samples}), pols
 
         def mock_parallel(waveform_generator, parameters):
             ufd = waveform_generator.domain
@@ -446,6 +446,40 @@ class TestEvaluateMultibandingMain:
         assert prior["chirp_mass"].maximum == pytest.approx(nominal_minimum, rel=1e-8)
         assert isinstance(prior["geocent_time"], DeltaFunction)
         assert prior["geocent_time"].peak == 0.12
+
+
+def test_waveforms_carry_the_extreme_time_shift():
+    """The boundary geocent_time of the extreme prior reaches the waveforms used to
+    choose the bands: they equal the generator's polarizations (merger at t = 0) at the
+    same parameters, time-shifted by 0.12 s on the uniform grid."""
+    from dingo.gw.dataset import generate_multibanded_domain as gmd
+    from dingo.gw.waveform_generator import (
+        WaveformGenerator,
+        generate_waveforms_parallel,
+    )
+
+    settings = {
+        "domain": {
+            "type": "UniformFrequencyDomain",
+            "f_min": 20.0,
+            "f_max": 256.0,
+            "delta_f": 0.25,
+        },
+        "waveform_generator": {"approximant": "IMRPhenomPv2", "f_ref": 20.0},
+        # A BBH approximant: no tidal parameters.
+        "intrinsic_prior": {
+            k: v for k, v in INTRINSIC_PRIOR.items() if not k.startswith("lambda")
+        },
+    }
+    ufd, parameters, polarizations, _, _, _ = gmd._generate_whitened_waveforms(
+        settings, build_extreme_prior(settings), "aLIGO_ZERO_DET_high_P_asd.txt", 2
+    )
+    # The tool generates at twice the resolution and subsamples; do the same here.
+    ufd_2x = UniformFrequencyDomain(f_min=20.0, f_max=256.0, delta_f=0.125)
+    generator = WaveformGenerator(domain=ufd_2x, **settings["waveform_generator"])
+    h = generate_waveforms_parallel(generator, parameters)["h_plus"][:, ::2]
+    expected = ufd.time_translate_data(h, np.full(len(h), 0.12))
+    assert np.allclose(polarizations["h_plus"], expected, rtol=1e-6, atol=0)
 
 
 # ---------------------------------------------------------------------------

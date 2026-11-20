@@ -154,9 +154,8 @@ class ProjectOntoDetectors(object):
             psi = extrinsic_parameters.pop("psi")
             tc_ref = parameters["geocent_time"]
             assert np.allclose(tc_ref, 0.0), (
-                "This should always be 0. If for some reason "
-                "you want to save time shifted polarizations,"
-                " then remove this assert statement."
+                "The polarizations' geocent_time should always be 0: the waveform "
+                "generator returns them at t = 0, whatever geocent_time it is given."
             )
             tc_new = extrinsic_parameters.pop("geocent_time")
         except:
@@ -202,10 +201,13 @@ class ProjectOntoDetectors(object):
                 fc = fc[..., np.newaxis]
             strain = fp * hp + fc * hc
 
-            # (3) time shift the strain. If polarizations are timeshifted by
-            #     tc_ref != 0, undo this here by subtracting it from dt.
+            # (3) time shift the strain (tc_ref is 0, see above).
             dt = extrinsic_parameters[f"{ifo.name}_time"] - tc_ref
-            strains[ifo.name] = self.domain.time_translate_data(strain, dt)
+            strain = self.domain.time_translate_data(strain, dt)
+            # Real data are shifted before decimation; match that within each bin.
+            if getattr(self.domain, "bin_averaged_time_shifts", False):
+                strain = strain * self.domain.time_shift_bin_average(dt)
+            strains[ifo.name] = strain
 
         # Add extrinsic parameters corresponding to the transformations
         # applied in the loop above to parameters. These have all been popped off of

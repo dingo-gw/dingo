@@ -42,6 +42,7 @@ class MultibandedFrequencyDomain(BaseFrequencyDomain):
         nodes: Iterable[float],
         delta_f_initial: float,
         base_domain: Union[UniformFrequencyDomain, dict],
+        bin_averaged_time_shifts: bool = True,
     ):
         """
         Parameters
@@ -57,6 +58,11 @@ class MultibandedFrequencyDomain(BaseFrequencyDomain):
             Original (uniform frequency) domain of data, which is the starting point
             for the decimation. This determines the decimation details and the noise_std.
             Either provided as dict for build_domain, or as domain_object.
+        bin_averaged_time_shifts: bool
+            Whether ProjectOntoDetectors multiplies the time-shifted strain by
+            time_shift_bin_average(dt), to match data shifted on the base domain and
+            then decimated. Not applied by TimeShiftStrain (GNPE), which shifts data
+            that are already decimated. Default: True.
         """
         super().__init__()
         if isinstance(base_domain, dict):
@@ -66,6 +72,7 @@ class MultibandedFrequencyDomain(BaseFrequencyDomain):
 
         self.nodes = np.array(nodes, dtype=np.float32)
         self.base_domain = base_domain
+        self.bin_averaged_time_shifts = bin_averaged_time_shifts
         self._initialize_bands(delta_f_initial)
         if not isinstance(self.base_domain, UniformFrequencyDomain):
             raise ValueError(
@@ -181,6 +188,26 @@ class MultibandedFrequencyDomain(BaseFrequencyDomain):
         assert lower_out == len(self)
 
         return data_decimated
+
+    def time_shift_bin_average(self, dt: float | np.ndarray) -> np.ndarray:
+        r"""
+        Real factor that turns the band-centre time shift of time_translate_data()
+        into the decimation of data shifted on the base domain, for data constant
+        across each bin: a bin averages $N$ base bins of width $\delta f$ centred on
+        $\bar f$, so the bin average of $\exp(-2\pi i f\,dt)$ is
+        $$
+        \exp(-2\pi i \bar f\,dt)\,\frac{\sin(\pi N \delta f\,dt)}{N \sin(\pi
+        \delta f\,dt)}.
+        $$
+        The fraction is $\mathrm{sinc}(\Delta f\,dt)/\mathrm{sinc}(\delta f\,dt)$ with
+        $\Delta f = N\delta f$ and numpy's $\mathrm{sinc}(x) = \sin(\pi x)/(\pi x)$.
+
+        Returns
+        -------
+        Factor of shape (*np.shape(dt), len(self)).
+        """
+        dt = np.asarray(dt, dtype=float)[..., None]
+        return np.sinc(dt * self.delta_f) / np.sinc(dt * self.base_domain.delta_f)
 
     def update(self, new_settings: dict):
         """
@@ -381,6 +408,12 @@ class MultibandedFrequencyDomain(BaseFrequencyDomain):
             "nodes": self.nodes.tolist(),
             "delta_f_initial": self._delta_f_bands[0].item(),
             "base_domain": self.base_domain.domain_dict,
+            # Written only when False, so that default domains serialize as before.
+            **(
+                {}
+                if self.bin_averaged_time_shifts
+                else {"bin_averaged_time_shifts": False}
+            ),
         }
 
 
