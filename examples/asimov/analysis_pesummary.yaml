@@ -1,0 +1,9 @@
+kind: analysis
+name: Exp0-summary
+pipeline: pesummary
+status: ready
+needs:
+  - Exp0
+waveform:
+  approximant: IMRPhenomD
+  reference frequency: 20

@@ -423,6 +423,7 @@ class MainInput(BilbyMainInput):
         self.request_memory_importance_sampling = (
             args.request_memory_importance_sampling
         )
+        self.htcondor_strict_cpu_request = True  # Required by bilby_pipe
         self.request_cpus = args.request_cpus
         self.request_cpus_importance_sampling = args.request_cpus_importance_sampling
         # self.sampler_kwargs = args.sampler_kwargs

@@ -2,7 +2,10 @@ import os
 
 from bilby_pipe.job_creation.nodes import AnalysisNode
 
-from dingo.pipe.utils import _strip_unwanted_submission_keys
+from dingo.pipe.utils import (
+    configure_file_transfer,
+    _strip_unwanted_submission_keys,
+)
 
 
 class ImportanceSamplingNode(AnalysisNode):
@@ -50,18 +53,12 @@ class ImportanceSamplingNode(AnalysisNode):
                     self.extra_lines.append(f'MY.DESIRED_Sites = "{sites}"')
                 self.requirements.append("IS_GLIDEIN=?=True")
 
-                if self.transfer_container:
-                    input_files_to_transfer.append(self.inputs.container)
-
-            # Credentials are needed to access any OSDF files
-            if any(["osdf" in s for s in input_files_to_transfer]):
-                self.extra_lines.extend(self.scitoken_lines)
-
-            self.extra_lines.extend(
-                self._condor_file_transfer_lines(
-                    input_files_to_transfer,
-                    [self._relative_topdir(self.inputs.outdir, self.inputs.initialdir)],
-                )
+            configure_file_transfer(
+                self,
+                input_files_to_transfer,
+                include_container=self.inputs.osg,
+                authenticate=False,
+                require_osdf_auth=True,
             )
             self.arguments.add("outdir", os.path.relpath(self.inputs.outdir))
 

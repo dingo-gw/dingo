@@ -26,7 +26,7 @@ class DummyProduction:
             "available networks": available_networks,
             "data": {"segment length" : 4},
             "interferometers": ["H1", "L1"],
-            "quality": {
+            "likelihood": {
                 "minimum frequency": {"H1": 20, "L1": 20},
                 "maximum frequency": {"H1": 1024, "L1": 1024},
             },

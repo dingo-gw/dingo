@@ -22,17 +22,18 @@ pipelines:
     scheduler:
       accounting group: ligo.dev.o4.cbc.pe.dingo
       accounting user: nihar.gupte
-      request cpus: 4
+      request cpus sampling: 4
       request disk: 8 #GB
-      request memory: 32 #GB
+      request memory sampling: 32 #GB
       n parallel: 10
       request cpus importance sampling: 32 
-      global CUDA memory: 40 # GB
+      CUDA Global Memory Mb: 40000
     sampler:
       num gnpe iterations: 30
       num samples: 50000 
       batch size: 50000
 
+postprocessing:
   pesummary:
     accounting group: ligo.dev.o4.cbc.pe.dingo
     cosmology: Planck15
@@ -43,7 +44,7 @@ pipelines:
     - redshift
     - radiated_energy
     skymap samples: 2000
-quality:
+likelihood:
   minimum frequency:
     H1: 20
     L1: 20

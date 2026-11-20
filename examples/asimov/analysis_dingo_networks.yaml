@@ -1,0 +1,37 @@
+# Ways to tell Asimov which DINGO network(s) to use.
+# Apply with: asimov apply -f analysis_dingo_networks.yaml -e <event name>
+#
+# The settings are read from the production metadata, so `networks` or
+# `available networks` can be set here (one analysis) or in the event or
+# project blueprint (shared by every analysis below it).
+
+# 1. Explicit network. `networks` bypasses automatic network selection.
+kind: analysis
+name: Exp0-transformer
+pipeline: dingo
+networks:
+  model: /path/to/transformer_model.pt
+---
+# 2. Explicit GNPE networks: the main model plus its initialization model.
+kind: analysis
+name: Exp0-gnpe
+pipeline: dingo
+networks:
+  model: /path/to/gnpe_main_model.pt
+  model init: /path/to/gnpe_init_model.pt
+sampler:
+  num gnpe iterations: 30
+---
+# 3. Automatic selection from a list of networks (used only when `networks`
+#    is not set). The code will loop over networks and choose a compatible one, if available.
+#    Of the networks that pass, it picks the network with the smallest
+#    luminosity-distance prior maximum that still covers the production's prior.
+kind: analysis
+name: Exp0-auto
+pipeline: dingo
+available networks:
+  - model: /path/to/gnpe_HL_8s_dl3000_main_model.pt
+    model init: /path/to/gnpe_HL_8s_dl3000_init_model.pt
+  - model: /path/to/gnpe_HLV_8s_dl6000_main_model.pt
+    model init: /path/to/gnpe_HLV_8s_dl6000_init_model.pt
+  - model: /path/to/transformer_4s_model.pt
