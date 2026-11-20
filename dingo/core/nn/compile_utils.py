@@ -36,7 +36,10 @@ def is_compiled(network: torch.nn.Module) -> bool:
 
 
 def compile_network(
-    network: torch.nn.Module, rank: int = None, cache_dir: str = None
+    network: torch.nn.Module,
+    rank: int = None,
+    cache_dir: str = None,
+    mode: str = None,
 ) -> torch.nn.Module:
     """Return ``torch.compile(network)``, set up for (optionally) DDP training.
 
@@ -54,6 +57,11 @@ def compile_network(
         temp dir). It must be **node-local**: Triton shared objects written to a
         network filesystem can be unloadable from another process, which hangs
         the run.
+    mode : str, optional
+        ``torch.compile`` mode. ``"reduce-overhead"`` replays the compiled step as
+        CUDA graphs, which removes the kernel-launch overhead left after fusion.
+        CUDA graphs need static shapes, so the batch dimension is then never made
+        dynamic (a stage with a different batch size recompiles instead).
     """
     if rank is not None or cache_dir is not None:
         base = cache_dir or tempfile.gettempdir()
@@ -61,7 +69,8 @@ def compile_network(
         cache = os.path.join(base, name)
         os.environ["TORCHINDUCTOR_CACHE_DIR"] = cache
         os.environ["TRITON_CACHE_DIR"] = os.path.join(cache, "triton")
-    return torch.compile(network)
+    dynamic = False if mode == "reduce-overhead" else None
+    return torch.compile(network, mode=mode, dynamic=dynamic)
 
 
 def reset_graphs_if_requires_grad_changes(

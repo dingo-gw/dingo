@@ -7,6 +7,7 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
 
+from dingo.core.posterior_models import base_model
 from dingo.core.posterior_models.base_model import train_epoch
 
 
@@ -76,6 +77,25 @@ class TestTrainEpochWithoutAmp:
             not torch.equal(b, a) for b, a in zip(params_before, params_after)
         ), "Parameters should be updated after training."
 
+    @pytest.mark.parametrize("log_grad_norm", [False, True])
+    def test_grad_norm_logged_only_when_requested(self, log_grad_norm, capsys):
+        pm = _make_mock_pm()
+        train_epoch(pm, _make_dataloader(), log_interval=1, log_grad_norm=log_grad_norm)
+        assert ("Grad norm" in capsys.readouterr().out) == log_grad_norm
+
+    def test_amp_unscales_explicitly_on_every_step(self):
+        # Without the explicit unscale, a fused optimizer unscales in float64 (slow);
+        # independent of the gradient-norm logging.
+        pm = _make_mock_pm()
+        scaler = torch.amp.GradScaler("cpu")
+        calls = []
+        unscale = scaler.unscale_
+        scaler.unscale_ = lambda opt: (calls.append(1), unscale(opt))[1]
+        _, n_iter = train_epoch(
+            pm, _make_dataloader(), automatic_mixed_precision=True, scaler=scaler
+        )
+        assert len(calls) == n_iter > 0
+
     def test_gradient_accumulation(self):
         """With 16 samples, batch=8, accum=2 → 2 batches → 1 optimizer step."""
         pm = _make_mock_pm()
@@ -118,6 +138,39 @@ class TestTrainEpochWithoutAmp:
             automatic_mixed_precision=False,
         )
         assert n_iter == 1
+
+
+class TestLogInterval:
+    def test_epoch_average_independent_of_log_interval(self, capsys):
+        """The epoch-average loss and the trained weights do not depend on how often
+        the loss is read from the device; the partial last window is printed too."""
+        torch.manual_seed(0)
+        theta = torch.randn(40, 4)  # 5 batches of 8; accumulate 2 -> 2 steps + tail
+        results = {}
+        for log_interval in (1, 3):
+            torch.manual_seed(1)
+            pm = _make_mock_pm()
+            avg, n_iter = train_epoch(
+                pm,
+                DataLoader(TensorDataset(theta), batch_size=8),
+                gradient_updates_per_optimizer_step=2,
+                log_interval=log_interval,
+            )
+            # base_model.test_epoch: importing the name would make pytest collect it.
+            test_avg = base_model.test_epoch(
+                pm,
+                DataLoader(TensorDataset(theta), batch_size=8),
+                log_interval=log_interval,
+            )
+            lines = [
+                l for l in capsys.readouterr().out.splitlines() if l.startswith("Train")
+            ]
+            assert n_iter == 2 and len(lines) == {1: 2, 3: 1}[log_interval]
+            results[log_interval] = (avg, test_avg, list(pm.network.parameters()))
+        assert results[1][0] == results[3][0]  # same float64 sums -> identical
+        assert results[1][1] == results[3][1]
+        assert all(torch.equal(a, b) for a, b in zip(results[1][2], results[3][2]))
+        assert "Time per step" in lines[-1] and "mean over 2 steps" in lines[-1]
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")

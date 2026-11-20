@@ -83,6 +83,7 @@ training:
     batch_size: 512          # Total effective batch size across all GPUs.
 #   gradient_updates_per_optimizer_step: 1
 #   automatic_mixed_precision: False
+#   float32_matmul_precision: highest  # 'high' enables TensorFloat-32 matmuls (A100+); see the multi-GPU guide.
 
   stage_1:
     epochs: 150
@@ -97,6 +98,7 @@ training:
     batch_size: 512
 #   gradient_updates_per_optimizer_step: 1
 #   automatic_mixed_precision: False
+#   float32_matmul_precision: highest  # 'high' enables TensorFloat-32 matmuls (A100+); see the multi-GPU guide.
 
 # Local settings that have no impact on the final trained network.
 local:
@@ -107,7 +109,9 @@ local:
                 # dingo_train_condor, request_gpus is set automatically.
 # ddp_port: 12355  # Rendezvous port for DDP; change when running several jobs on one node.
 # torch_compile: False  # Fuse the network kernels with torch.compile; see the multi-GPU guide.
-# float32_matmul_precision: highest  # 'high' enables TensorFloat-32 matmuls (A100+); see the multi-GPU guide.
+# torch_compile_mode: reduce-overhead  # Replay the compiled step as CUDA graphs; see the multi-GPU guide.
+# log_interval: 10  # Print a progress line (and read the loss from the GPU) every this many steps.
+# log_grad_norm: False  # Also log each optimizer step's gradient norm (costs ~1 % per step).
 #  wandb:
 #    project: dingo
 #    group: my_project
@@ -190,6 +194,12 @@ runtime_limits
 
 checkpoint_epochs
 : Dingo saves a temporary checkpoint in `model_latest.py` after every epoch, but this is later overwritten by the next checkpoint. This setting saves a permanent checkpoint after the specified number of epochs. Having these checkpoints can help in recovering from training failures that do not result in program termination.
+
+log_interval
+: (Optional, default 10) Print a progress line every this many optimizer steps, and once more for any steps left over at the end of the epoch. The loss is read from the GPU only at these points; see [](training_multi_gpu.md#reading-the-training-log) for the line format and for why reading it every step costs time.
+
+log_grad_norm
+: (Optional, default `False`) Also log the total gradient norm of every optimizer step, as the mean and maximum over each `log_interval` window. This is a diagnostic for loss spikes, telling whether they start with outlying gradients. It costs one extra pass over the gradients each step, about 1 % of the step time.
 
 leave_waveforms_on_disk
 : To improve memory efficiency during training, the waveforms are not loaded into memory at the beginning of training, but separately for each batch during training. When training on a cluster, it is highly recommended to include a local path where the dataset is cached at the beginning of training (see `local_cache_path`). If RAM is not an issue, the default `leave_waveforms_on_disk=True` can be set to `False`. 
