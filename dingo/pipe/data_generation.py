@@ -124,9 +124,13 @@ class DataGenerationInput(BilbyDataGenerationInput):
         self.waveform_generator_class = (
             "bilby.gw.waveform_generator.LALCBCWaveformGenerator"
         )
-        # self.waveform_generator_class_ctor_args = (
-        #     args.waveform_generator_constructor_dict
-        # )
+        # dingo does not use bilby's analysis waveform generator, but bilby_pipe >= 1.10
+        # falls back to its constructor arguments when building an injection, if no
+        # injection_waveform_generator_class_ctor_args are set (see
+        # Input.get_default_injection_waveform_generator_class_ctor_arguments). This
+        # __init__ replaces the bilby_pipe one that would set them, so set them here.
+        # None means "no args".
+        self.waveform_generator_class_ctor_args = None
         self.waveform_approximant = args.waveform_approximant
         self.catch_waveform_errors = args.catch_waveform_errors
         # TODO: These are set to parser defaults. Fix to set from model.

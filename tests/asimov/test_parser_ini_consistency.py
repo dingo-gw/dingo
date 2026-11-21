@@ -65,6 +65,7 @@ EXCLUDED_FROM_INI = {
     "injection_numbers",
     "injection_waveform_approximant",
     "injection_waveform_arguments",
+    "injection_waveform_generator",
     "injection_waveform_generator_constructor_dict",
     "local_generation",
     "local_plot",
