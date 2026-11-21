@@ -195,8 +195,8 @@ def test_log_prob_replug_matches_sample():
 
 def test_factor_builds_likelihood_from_context():
     # The factor takes the likelihood from the context, passing its base-domain
-    # choice (the same one importance sampling evaluates with) and any waveform
-    # generator overrides.
+    # choice (the same one importance sampling evaluates with), any waveform
+    # generator overrides, and the heterodyne reference of the multibanded likelihood.
     recorded = []
 
     class _RecordingContext(_MockContext):
@@ -210,12 +210,14 @@ def test_factor_builds_likelihood_from_context():
             n_grid_phase=11,
             approximation_22_mode=True,
             use_base_domain=use_base_domain,
+            heterodyning_parameters={"chirp_mass": 1.2},
         )
         _seed()
         factor.sample_and_log_prob(1, _RecordingContext(), _given())
         assert recorded[-1] == {
             "use_base_domain": use_base_domain,
             "wfg_updates": None,
+            "heterodyning_parameters": {"chirp_mass": 1.2},
         }
 
     factor = SyntheticPhaseFactor(
@@ -229,6 +231,7 @@ def test_factor_builds_likelihood_from_context():
     assert recorded[-1] == {
         "use_base_domain": False,
         "wfg_updates": {"use_dft_phase_decomposition": False},
+        "heterodyning_parameters": None,
     }
 
 

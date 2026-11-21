@@ -198,6 +198,7 @@ class SyntheticPhaseFactor(Factor):
         use_base_domain: bool = False,
         wfg_updates: Optional[dict] = None,
         cache_log_likelihood: bool = False,
+        heterodyning_parameters: Optional[dict] = None,
     ):
         """
         Parameters
@@ -221,6 +222,10 @@ class SyntheticPhaseFactor(Factor):
             Overrides for the waveform generator settings stored with the network,
             e.g. `use_dft_phase_decomposition` (passed on to
             `SamplerContext.likelihood`).
+        heterodyning_parameters : dict, optional
+            The fixed heterodyne reference of a chirp-prior-conditioned model, e.g.
+            `{"chirp_mass": 1.1975}` (passed on to `SamplerContext.likelihood`;
+            required there on the multibanded domain).
         cache_log_likelihood : bool, default False
             Also emit the log likelihood at the drawn phase as the column
             `log_likelihood_cache`, for reuse by importance sampling. Requires a path
@@ -237,6 +242,7 @@ class SyntheticPhaseFactor(Factor):
         self.num_processes = num_processes
         self.use_base_domain = use_base_domain
         self.wfg_updates = wfg_updates
+        self.heterodyning_parameters = heterodyning_parameters
         self.cache_log_likelihood = cache_log_likelihood
         self.annotations = ["log_likelihood_cache"] if cache_log_likelihood else []
 
@@ -255,7 +261,9 @@ class SyntheticPhaseFactor(Factor):
         if self.cache_log_likelihood:
             _check_cached_log_likelihood_is_exact(
                 context.likelihood(
-                    use_base_domain=self.use_base_domain, wfg_updates=self.wfg_updates
+                    use_base_domain=self.use_base_domain,
+                    wfg_updates=self.wfg_updates,
+                    heterodyning_parameters=self.heterodyning_parameters,
                 ).waveform_generator,
                 self.approximation_22_mode,
             )
@@ -274,7 +282,9 @@ class SyntheticPhaseFactor(Factor):
         if self.cache_log_likelihood:
             # Exact log likelihood at the drawn (off-grid) phase, see class docstring.
             likelihood = context.likelihood(
-                use_base_domain=self.use_base_domain, wfg_updates=self.wfg_updates
+                use_base_domain=self.use_base_domain,
+                wfg_updates=self.wfg_updates,
+                heterodyning_parameters=self.heterodyning_parameters,
             )
             if self.approximation_22_mode:
                 log_likelihood = likelihood.log_likelihood_22_from_terms(
@@ -321,6 +331,7 @@ class SyntheticPhaseFactor(Factor):
             "approximation_22_mode": self.approximation_22_mode,
             "uniform_weight": self.uniform_weight,
             "use_base_domain": self.use_base_domain,
+            "heterodyning_parameters": self.heterodyning_parameters,
             "cache_log_likelihood": self.cache_log_likelihood,
         }
 
@@ -334,7 +345,9 @@ class SyntheticPhaseFactor(Factor):
         at once."""
         theta = pd.DataFrame({k: _to_numpy(v) for k, v in given.items()})
         likelihood = context.likelihood(
-            use_base_domain=self.use_base_domain, wfg_updates=self.wfg_updates
+            use_base_domain=self.use_base_domain,
+            wfg_updates=self.wfg_updates,
+            heterodyning_parameters=self.heterodyning_parameters,
         )
         phases = np.linspace(0, 2 * np.pi, self.n_grid_phase)
         terms = _stacked_phase_grid_terms(likelihood, theta, self.num_processes)
@@ -350,7 +363,9 @@ class SyntheticPhaseFactor(Factor):
         `WaveformGenerator.phase_is_global_factor` lists."""
         theta = pd.DataFrame({k: _to_numpy(v) for k, v in given.items()})
         likelihood = context.likelihood(
-            use_base_domain=self.use_base_domain, wfg_updates=self.wfg_updates
+            use_base_domain=self.use_base_domain,
+            wfg_updates=self.wfg_updates,
+            heterodyning_parameters=self.heterodyning_parameters,
         )
         terms_per_sample = apply_func_with_multiprocessing(
             likelihood.phase_grid_terms_22, theta, self.num_processes
@@ -422,6 +437,7 @@ class SyntheticPhasePsiFactor(Factor):
         use_base_domain: bool = False,
         wfg_updates: Optional[dict] = None,
         cache_log_likelihood: bool = False,
+        heterodyning_parameters: Optional[dict] = None,
     ):
         """
         Parameters
@@ -448,6 +464,10 @@ class SyntheticPhasePsiFactor(Factor):
             Overrides for the waveform generator settings stored with the network,
             e.g. `use_dft_phase_decomposition` (passed on to
             `SamplerContext.likelihood`).
+        heterodyning_parameters : dict, optional
+            The fixed heterodyne reference of a chirp-prior-conditioned model, e.g.
+            `{"chirp_mass": 1.1975}` (passed on to `SamplerContext.likelihood`;
+            required there on the multibanded domain).
         cache_log_likelihood : bool, default False
             Also emit the log likelihood at the drawn (phase, psi) as the column
             `log_likelihood_cache`, for reuse by importance sampling. Requires an
@@ -462,6 +482,7 @@ class SyntheticPhasePsiFactor(Factor):
         self.num_processes = num_processes
         self.use_base_domain = use_base_domain
         self.wfg_updates = wfg_updates
+        self.heterodyning_parameters = heterodyning_parameters
         self.cache_log_likelihood = cache_log_likelihood
         self.annotations = ["log_likelihood_cache"] if cache_log_likelihood else []
 
@@ -483,7 +504,9 @@ class SyntheticPhasePsiFactor(Factor):
         if self.cache_log_likelihood:
             _check_cached_log_likelihood_is_exact(
                 context.likelihood(
-                    use_base_domain=self.use_base_domain, wfg_updates=self.wfg_updates
+                    use_base_domain=self.use_base_domain,
+                    wfg_updates=self.wfg_updates,
+                    heterodyning_parameters=self.heterodyning_parameters,
                 ).waveform_generator,
                 self.approximation_22_mode,
             )
@@ -582,6 +605,7 @@ class SyntheticPhasePsiFactor(Factor):
             "approximation_22_mode": self.approximation_22_mode,
             "uniform_weight": self.uniform_weight,
             "use_base_domain": self.use_base_domain,
+            "heterodyning_parameters": self.heterodyning_parameters,
             "cache_log_likelihood": self.cache_log_likelihood,
         }
 
@@ -591,7 +615,9 @@ class SyntheticPhasePsiFactor(Factor):
         summed over psi, then floored; unnormalized, shape (N, n_grid_phase)."""
         theta = pd.DataFrame({k: _to_numpy(v) for k, v in given.items()})
         likelihood = context.likelihood(
-            use_base_domain=self.use_base_domain, wfg_updates=self.wfg_updates
+            use_base_domain=self.use_base_domain,
+            wfg_updates=self.wfg_updates,
+            heterodyning_parameters=self.heterodyning_parameters,
         )
         terms = _stacked_phase_grid_terms(likelihood, theta, self.num_processes)
         phases = np.linspace(0, 2 * np.pi, self.n_grid_phase)
@@ -645,7 +671,9 @@ class SyntheticPhasePsiFactor(Factor):
         unnormalized, shape (N, n_grid_psi)."""
         theta = pd.DataFrame({k: _to_numpy(v) for k, v in given.items()})
         likelihood = context.likelihood(
-            use_base_domain=self.use_base_domain, wfg_updates=self.wfg_updates
+            use_base_domain=self.use_base_domain,
+            wfg_updates=self.wfg_updates,
+            heterodyning_parameters=self.heterodyning_parameters,
         )
         terms_per_sample = apply_func_with_multiprocessing(
             likelihood.phase_psi_terms_22, theta, self.num_processes

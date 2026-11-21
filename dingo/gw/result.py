@@ -295,6 +295,30 @@ class Result(CoreResult):
             # Recalculate the importance-sampling weights and log evidence.
             self._calculate_evidence()
 
+    def _heterodyning_parameters(self) -> Optional[dict]:
+        """The fixed heterodyne reference of a chirp-prior-conditioned network (the
+        multibanded likelihood needs it): the pinned proxy of the samples, keyed by
+        physical name, e.g. {"chirp_mass": 1.1975}. None for other networks, on the
+        base domain, or without proxy samples (the context then says what is
+        missing)."""
+        names = self.sampler_context.data_prep_conditioning
+        if (
+            not names
+            or self.use_base_domain
+            or not all(name in self.samples for name in names)
+        ):
+            return None
+        parameters = {}
+        for name in names:
+            values = np.unique(self.samples[name])
+            if len(values) != 1:
+                raise ValueError(
+                    f"The samples carry {len(values)} values of {name}; the "
+                    f"multibanded likelihood heterodynes by one fixed value."
+                )
+            parameters[name[: -len("_proxy")]] = float(values[0])
+        return parameters
+
     def _build_likelihood(
         self,
         time_marginalization_kwargs: Optional[dict] = None,
@@ -372,6 +396,7 @@ class Result(CoreResult):
             phase_marginalization_kwargs=phase_marginalization_kwargs,
             calibration_marginalization_kwargs=calibration_marginalization_kwargs,
             use_base_domain=self.use_base_domain,
+            heterodyning_parameters=self._heterodyning_parameters(),
         )
 
         # The likelihood places its own calibration nodes, log-spaced across each
@@ -692,7 +717,9 @@ class Result(CoreResult):
                 "synthetic_parameters_kwargs: n_grid has been renamed to n_grid_phase."
             )
         waveform_generator = self.sampler_context.likelihood(
-            use_base_domain=self.use_base_domain, wfg_updates=wfg_updates
+            use_base_domain=self.use_base_domain,
+            wfg_updates=wfg_updates,
+            heterodyning_parameters=self._heterodyning_parameters(),
         ).waveform_generator
         # Both factors default to the (2, 2) path where it is exact, and to the mode
         # sum otherwise.
@@ -765,6 +792,7 @@ class Result(CoreResult):
             ),
             use_base_domain=self.use_base_domain,
             wfg_updates=wfg_updates,
+            heterodyning_parameters=self._heterodyning_parameters(),
             cache_log_likelihood=cache_log_likelihood,
         )
         if "n_grid_phase" in synthetic_parameters_kwargs:
