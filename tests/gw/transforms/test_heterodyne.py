@@ -340,3 +340,22 @@ def test_factor_fiducial_waveform_phase_in_float64(domain):
         torch.tensor(data), domain, torch.tensor(mc, dtype=torch.float32)
     )
     np.testing.assert_allclose(out.numpy(), reference, rtol=2e-6, atol=0)
+
+
+def test_factor_fiducial_waveform_tensor_phase_precision(domain):
+    """Single-precision tensor data: the float64 chirp phase (~3e4 rad at 20 Hz for
+    Mc = 5) is reduced to [-pi, pi) before cos/sin at the data's precision, so the
+    result matches the float64 reference to float32 rounding (~1e-7 rad); the dtype is
+    kept."""
+    mc = 5.0
+    reference = factor_fiducial_waveform(
+        np.ones(len(domain), dtype=complex), domain, mc
+    )
+    data = torch.zeros((1, 3, len(domain)), dtype=torch.float32)
+    data[:, 0] = 1.0  # real part 1, imaginary part 0, third channel 0
+    out = factor_fiducial_waveform(data, domain, torch.tensor([mc]))
+    assert out.dtype == torch.float32
+    angle = torch.atan2(out[0, 1], out[0, 0]).double().numpy()
+    band = domain() >= domain.f_min
+    error = np.angle(np.exp(1j * angle) * np.conj(reference))[band]
+    assert np.max(np.abs(error)) < 1e-6

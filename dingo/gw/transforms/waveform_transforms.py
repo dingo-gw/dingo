@@ -672,7 +672,15 @@ def factor_fiducial_waveform(
 
     def apply(v):
         # Keep the dtype of single-precision data (the phase is float64).
-        out = domain.add_phase(v, -fiducial_phase)
+        phase = -fiducial_phase
+        if isinstance(v, torch.Tensor):
+            # As in time_translate_data: reduce the float64 phase to [-pi, pi), then
+            # take cos/sin at the data's precision (error <= pi x 6e-8 rad), ~3x
+            # cheaper on the GPU than float64 trigonometry.
+            phase = (torch.remainder(phase + np.pi, 2 * np.pi) - np.pi).to(
+                v.real.dtype if torch.is_complex(v) else v.dtype
+            )
+        out = domain.add_phase(v, phase)
         if isinstance(v, np.ndarray):
             out = out.astype(v.dtype, copy=False)
         elif torch.is_complex(v):

@@ -149,6 +149,34 @@ def test_FD_time_translation_torch(uniform_FD_params):
     assert torch.allclose(result[..., 2, :], torch.tensor(constant_value))
 
 
+def test_FD_time_translation_phase_in_double_precision(uniform_FD_params):
+    """Single-precision data and shift: the phase 2 pi f dt (up to 3e3 rad here) is
+    computed in float64, so the shifted data match the float64 reference to float32
+    rounding of the data (~1e-7 rad), not of the phase (~1e-4 rad); dtypes are kept."""
+    domain = UniformFrequencyDomain(**uniform_FD_params)
+    dt = np.float32(0.13)
+    f = domain().astype(np.float64)
+    phase = -2 * np.pi * f * np.float64(dt)  # reference for the float32-rounded dt
+
+    out = domain.time_translate_data(np.ones(len(domain), dtype=np.complex64), dt)
+    assert out.dtype == np.complex64
+    assert np.max(np.abs(np.angle(out * np.exp(-1j * phase)))) < 1e-6
+
+    data = torch.zeros((1, 3, len(domain)), dtype=torch.float32)
+    data[:, 0] = 1.0  # real part 1, imaginary part 0, third channel (ASD) 0
+    out = domain.time_translate_data(data, torch.tensor([dt]))
+    assert out.dtype == torch.float32
+    angle = torch.atan2(out[0, 1], out[0, 0]).double().numpy()
+    assert np.max(np.abs(np.angle(np.exp(1j * (angle - phase))))) < 1e-6
+
+    out = domain.time_translate_data(
+        torch.ones((1, len(domain)), dtype=torch.complex64), torch.tensor([dt])
+    )
+    assert out.dtype == torch.complex64
+    angle = torch.angle(out[0]).double().numpy()
+    assert np.max(np.abs(np.angle(np.exp(1j * (angle - phase))))) < 1e-6
+
+
 def test_FD_caching(uniform_FD_params):
     p = uniform_FD_params
     domain = UniformFrequencyDomain(**p)
