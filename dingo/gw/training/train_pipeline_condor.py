@@ -131,7 +131,7 @@ def train_condor():
                     try:
                         import wandb
 
-                        local_settings["wandb"]["id"] = wandb.util.generate_id()
+                        local_settings["wandb"]["id"] = wandb.sdk.lib.runid.generate_id()
                     except ImportError:
                         print("wandb not installed, cannot generate run id.")
                 yaml.dump(local_settings, f, default_flow_style=False, sort_keys=False)
