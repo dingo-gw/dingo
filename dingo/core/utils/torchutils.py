@@ -9,7 +9,7 @@ import torch.distributed as dist
 import torch.nn as nn
 from torch.nn import functional as F
 from torch.nn.parallel import DistributedDataParallel as DDP
-from torch.utils.data import DataLoader, DistributedSampler
+from torch.utils.data import DataLoader, Sampler, Subset
 
 
 def fix_random_seeds(_):
@@ -362,11 +362,69 @@ def get_lr(optimizer):
     return [param_group["lr"] for param_group in optimizer.state_dict()["param_groups"]]
 
 
-def split_dataset_into_train_and_test(dataset, train_fraction):
+class BlockSampler(Sampler):
+    """
+    Indices 0..n-1 in blocks of block_size consecutive indices, so that a batch of a
+    dataset read from disk takes a few contiguous reads (of order batch_size /
+    block_size) instead of one per row. Each epoch (set_epoch) permutes the blocks and
+    shifts the block grid by a random offset, wrapping around n, from a generator
+    seeded with seed + epoch (as DistributedSampler): every index once per epoch.
+    Without shuffle the order is 0..n-1. Rank r of num_replicas takes the r-th of
+    num_replicas equal contiguous parts of the order (n mod num_replicas indices are
+    left out).
+
+    With block_size 1 the order is torch.randperm(n) of that generator, as
+    DistributedSampler's and random_split's. The order at seed 42, epoch 0 is the
+    train/test split of saved models (split_dataset_into_train_and_test): it must not
+    change. The rows of a dataset read in blocks must be in random order (i.i.d.
+    draws), so that a block is as random a sample as scattered rows.
+    """
+
+    def __init__(
+        self,
+        n: int,
+        block_size: int = 1,
+        shuffle: bool = True,
+        seed: int = 0,
+        num_replicas: int = 1,
+        rank: int = 0,
+    ):
+        if type(block_size) is not int or block_size < 1:
+            raise ValueError(
+                f"block_size must be a positive integer, got {block_size}."
+            )
+        if not 0 <= rank < num_replicas:
+            raise ValueError(f"rank {rank} is not in [0, {num_replicas}).")
+        self.n, self.block_size, self.shuffle, self.seed = n, block_size, shuffle, seed
+        self.num_replicas, self.rank, self.epoch = num_replicas, rank, 0
+
+    def set_epoch(self, epoch: int):
+        """Set the epoch, which seeds the order."""
+        self.epoch = epoch
+
+    def __iter__(self):
+        n, b = self.n, self.block_size
+        if self.shuffle:
+            g = torch.Generator().manual_seed(self.seed + self.epoch)
+            blocks = torch.randperm(-(-n // b), generator=g)
+            grid = (blocks[:, None] * b + torch.arange(b)).flatten()
+            order = (grid[grid < n] + torch.randint(b, (), generator=g)) % n
+        else:
+            order = torch.arange(n)
+        m = len(self)
+        return iter(order[self.rank * m : (self.rank + 1) * m].tolist())
+
+    def __len__(self):
+        return self.n // self.num_replicas
+
+
+def split_dataset_into_train_and_test(dataset, train_fraction, *, block_size):
     """
     Splits dataset into a trainset of size int(train_fraction * len(dataset)),
-    and a testset with the remainder. Uses fixed random seed for
-    reproducibility.
+    and a testset with the remainder, in blocks of block_size consecutive indices at
+    random places (the order of BlockSampler at seed 42, epoch 0). Uses fixed random
+    seed for reproducibility; with block_size 1 the split is that of
+    torch.utils.data.random_split with seed 42.
 
     Parameters
     ----------
@@ -374,16 +432,17 @@ def split_dataset_into_train_and_test(dataset, train_fraction):
         dataset to be split
     train_fraction: float
         fraction of the dataset to be used for trainset
+    block_size: int
+        rows per block (see BlockSampler); required, since it sets the split: to
+        rebuild a model's split, pass its data.block_size
 
     Returns
     -------
     trainset, testset
     """
     train_size = int(train_fraction * len(dataset))
-    test_size = len(dataset) - train_size
-    return torch.utils.data.random_split(
-        dataset, [train_size, test_size], generator=torch.Generator().manual_seed(42)
-    )
+    order = list(BlockSampler(len(dataset), block_size, seed=42))
+    return Subset(dataset, order[:train_size]), Subset(dataset, order[train_size:])
 
 
 def build_train_and_test_loaders(
@@ -394,13 +453,17 @@ def build_train_and_test_loaders(
     world_size: Optional[int] = None,
     rank: Optional[int] = None,
     drop_last: bool = False,
-) -> Tuple[DataLoader, DataLoader, Optional[DistributedSampler]]:
+    *,
+    block_size: int,
+) -> Tuple[DataLoader, DataLoader]:
     """
     Split the dataset into train and test sets, and build corresponding DataLoaders.
     The random split uses a fixed seed for reproducibility.
 
-    When *world_size* and *rank* are given, ``DistributedSampler`` instances are
-    created so that each GPU processes a non-overlapping shard of the data.
+    Both loaders draw their indices from a BlockSampler, in blocks of *block_size*
+    consecutive rows (1: scattered rows); the training loop calls its sampler's
+    set_epoch at every epoch. When *world_size* and *rank* are given, each GPU takes
+    a contiguous, non-overlapping share of each epoch's order.
 
     Parameters
     ----------
@@ -420,72 +483,44 @@ def build_train_and_test_loaders(
         network (specialized to the batch shape) is not recompiled for it. The test
         loader always keeps its last batch: the test epoch runs eagerly, and dropping
         it could leave a small per-rank test split with no batches at all.
+    block_size : int
+        Rows per block of the split and of the samplers (see BlockSampler); required,
+        since it sets the split.
 
     Returns
     -------
-    (train_loader, test_loader, train_sampler)
-        *train_sampler* is ``None`` for single-GPU training.
+    (train_loader, test_loader)
     """
 
     # Split the dataset. This function uses a fixed seed for reproducibility.
     train_dataset, test_dataset = split_dataset_into_train_and_test(
-        dataset, train_fraction
+        dataset, train_fraction, block_size=block_size
     )
 
-    persistent_workers = num_workers > 0
-
+    shards = {}
     if rank is not None and world_size is not None:
-        # DDP path: shuffle is handled by the sampler.
-        train_sampler = DistributedSampler(
-            train_dataset, shuffle=True, num_replicas=world_size, rank=rank
-        )
-        test_sampler = DistributedSampler(
-            test_dataset, shuffle=False, num_replicas=world_size, rank=rank
-        )
-        train_loader = DataLoader(
-            train_dataset,
-            batch_size=batch_size,
-            sampler=train_sampler,
-            pin_memory=True,
-            num_workers=num_workers,
-            worker_init_fn=fix_random_seeds,
-            persistent_workers=persistent_workers,
-            drop_last=drop_last,
-        )
-        test_loader = DataLoader(
-            test_dataset,
-            batch_size=batch_size,
-            sampler=test_sampler,
-            pin_memory=True,
-            num_workers=num_workers,
-            worker_init_fn=fix_random_seeds,
-            persistent_workers=persistent_workers,
-            drop_last=False,
-        )
-    else:
-        train_sampler = None
-        train_loader = DataLoader(
-            train_dataset,
-            batch_size=batch_size,
-            shuffle=True,
-            pin_memory=True,
-            num_workers=num_workers,
-            worker_init_fn=fix_random_seeds,
-            persistent_workers=persistent_workers,
-            drop_last=drop_last,
-        )
-        test_loader = DataLoader(
-            test_dataset,
-            batch_size=batch_size,
-            shuffle=False,
-            pin_memory=True,
-            num_workers=num_workers,
-            worker_init_fn=fix_random_seeds,
-            persistent_workers=persistent_workers,
-            drop_last=False,
-        )
+        shards = {"num_replicas": world_size, "rank": rank}
+        if 0 < len(test_dataset) < world_size:
+            raise ValueError(
+                f"{len(test_dataset)} test rows leave some of {world_size} GPUs none."
+            )
+    train_sampler = BlockSampler(len(train_dataset), block_size, **shards)
+    test_sampler = BlockSampler(len(test_dataset), block_size, shuffle=False, **shards)
+    loader_kwargs = dict(
+        batch_size=batch_size,
+        pin_memory=True,
+        num_workers=num_workers,
+        worker_init_fn=fix_random_seeds,
+        persistent_workers=num_workers > 0,
+    )
+    train_loader = DataLoader(
+        train_dataset, sampler=train_sampler, drop_last=drop_last, **loader_kwargs
+    )
+    test_loader = DataLoader(
+        test_dataset, sampler=test_sampler, drop_last=False, **loader_kwargs
+    )
 
-    return train_loader, test_loader, train_sampler
+    return train_loader, test_loader
 
 
 def set_requires_grad_flag(

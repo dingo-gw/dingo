@@ -88,11 +88,12 @@ def train_unconditional_density_estimator(
     model.event_metadata = result.event_metadata
 
     # set up dataloaders
-    train_loader, test_loader, _ = build_train_and_test_loaders(
+    train_loader, test_loader = build_train_and_test_loaders(
         SampleDataset(samples_torch),
         settings["training"]["train_fraction"],
         settings["training"]["batch_size"],
         settings["training"]["num_workers"],
+        block_size=1,
     )
 
     # train model
